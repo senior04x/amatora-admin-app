@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   TextInput,
+  Linking,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -374,17 +375,27 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
 
         {/* 3. Ro'yxatdan o'tkazish sayti (Registration Website Link) */}
         <View style={styles.toggleRow}>
-          <View style={styles.toggleLabelGroup}>
+          <TouchableOpacity
+            style={styles.toggleLabelGroup}
+            activeOpacity={0.7}
+            onPress={() => {
+              const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
+              Linking.openURL(url).catch(() => {
+                Alert.alert('Xatolik', 'Brauzerni ochib bo\'lmadi');
+              });
+            }}
+          >
             <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(0, 255, 135, 0.15)' }]}>
               <Ionicons name="globe-outline" size={18} color="#00FF87" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.toggleTitle}>{"Ro'yxatdan o'tkazish sayti"}</Text>
-              <Text style={[styles.toggleSub, { color: '#00FF87' }]}>
-                {`https://amatora.vercel.app/${currentOrg?.slug || 'tashkilot-slug'}`}
+              <Text style={[styles.toggleSub, { color: '#00FF87', textDecorationLine: 'underline' }]} numberOfLines={1}>
+                {`https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`}
               </Text>
             </View>
-          </View>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={{
               paddingHorizontal: 12,
@@ -394,11 +405,12 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
               borderWidth: 1,
               borderColor: 'rgba(0, 255, 135, 0.3)',
             }}
+            activeOpacity={0.7}
             onPress={() => {
-              const url = `https://amatora.vercel.app/${currentOrg?.slug || 'tashkilot-slug'}`;
+              const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
               Alert.alert(
-                "Ro'yxatdan o'tkazish sayti",
-                `Tashkilotingizning rasmiy ro'yxatdan o'tish veb-sayti:\n\n${url}\n\nUshbu havolani ishtirokchilar va jamoalarga yuboring.`
+                "Nusxalandi!",
+                `Sayt havolasi:\n\n${url}\n\nUshbu havolani ishtirokchilar va jamoalarga yuboring.`
               );
             }}
           >
