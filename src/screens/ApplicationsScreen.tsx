@@ -11,6 +11,8 @@ import {
   Animated,
   Modal,
   ScrollView,
+  PanResponder,
+  Alert,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -52,6 +54,95 @@ const SkeletonCard = () => {
         <View style={styles.skeletonSubLine} />
       </View>
     </Animated.View>
+  );
+};
+
+// Swipeable Card Wrapper for Swipe-to-Delete Action
+const SwipeableCard: React.FC<{
+  children: React.ReactNode;
+  onDelete: () => void;
+}> = ({ children, onDelete }) => {
+  const pan = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dy) < 12;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dx < 0) {
+          pan.setValue(Math.max(gestureState.dx, -90));
+        } else if (gestureState.dx > 0) {
+          pan.setValue(Math.min(gestureState.dx, 0));
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -35) {
+          Animated.spring(pan, {
+            toValue: -80,
+            useNativeDriver: true,
+            friction: 7,
+          }).start();
+        } else {
+          Animated.spring(pan, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 7,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const resetSwipe = () => {
+    Animated.spring(pan, {
+      toValue: 0,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <View style={{ position: 'relative', marginBottom: 10, overflow: 'hidden', borderRadius: 16 }}>
+      {/* Background Red Delete Action Button Exposed On Swipe Left */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 80,
+          backgroundColor: '#EF4444',
+          justifyContent: 'center',
+          alignItems: 'center',
+          borderTopRightRadius: 16,
+          borderBottomRightRadius: 16,
+        }}
+      >
+        <TouchableOpacity
+          style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', gap: 2 }}
+          onPress={() => {
+            resetSwipe();
+            onDelete();
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '800' }}>O'chirish</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Sliding Card Content */}
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={{
+          transform: [{ translateX: pan }],
+          backgroundColor: '#121212',
+          borderRadius: 16,
+        }}
+      >
+        {children}
+      </Animated.View>
+    </View>
   );
 };
 
@@ -573,6 +664,46 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     })();
   };
 
+  const handleDeleteApplication = (item: any, isPlayer: boolean) => {
+    const title = isPlayer ? "O'yinchi arizasini o'chirish" : "Jamoa arizasini o'chirish";
+    const name = isPlayer
+      ? item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.name || "O'yinchi"
+      : item.name || 'Jamoa';
+
+    Alert.alert(
+      title,
+      `Haqiqatan ham "${name}" arizasini o'chirmoqchimisiz? Ushbu amalni ortga qaytarib bo'lmaydi.`,
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: "O'chirish",
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const dbClient = supabaseAdmin || supabase;
+              if (isPlayer) {
+                setPlayerApps((prev) => prev.filter((p) => p.id !== item.id));
+                await dbClient.from('applications').delete().eq('id', item.id);
+                showToast("O'yinchi arizasi o'chirildi");
+              } else {
+                setTeamApps((prev) => prev.filter((t) => t.id !== item.id));
+                await dbClient.from('teams').delete().eq('id', item.id);
+                showToast("Jamoa arizasi o'chirildi");
+              }
+              if (selectedDetailItem?.id === item.id) {
+                setSelectedDetailItem(null);
+              }
+              fetchDbCounts();
+            } catch (err) {
+              console.error('Delete error:', err);
+              showToast("O'chirishda xatolik yuz berdi");
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return 'Kiritilmagan';
     try {
@@ -984,69 +1115,81 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
             const displayTeam = item.resolvedTeamName || item.team_name;
 
             return (
-              <View style={styles.applicationCard}>
-                {/* Left Photo */}
-                <TouchableOpacity onPress={() => setZoomImageUrl(avatar)} activeOpacity={0.8}>
-                  <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={styles.avatarImage} />
-                </TouchableOpacity>
+              <SwipeableCard onDelete={() => handleDeleteApplication(item, isPlayer)}>
+                <View style={styles.applicationCard}>
+                  {/* Left Photo */}
+                  <TouchableOpacity onPress={() => setZoomImageUrl(avatar)} activeOpacity={0.8}>
+                    <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={styles.avatarImage} />
+                  </TouchableOpacity>
 
-                {/* Center Details */}
-                <TouchableOpacity
-                  style={styles.cardInfoCol}
-                  onPress={() => setSelectedDetailItem({ ...item, isPlayer })}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.applicantName} numberOfLines={1}>
-                    {fullName}
-                  </Text>
-
-                  {isPlayer ? (
-                    <Text style={[styles.metaSubText, { color: displayTeam === 'Yakkaxon' ? 'rgba(255,255,255,0.4)' : '#00FF66', fontWeight: '800' }]} numberOfLines={1}>
-                      {`Jamoa: ${displayTeam || 'Yakkaxon'}`}
+                  {/* Center Details */}
+                  <TouchableOpacity
+                    style={styles.cardInfoCol}
+                    onPress={() => setSelectedDetailItem({ ...item, isPlayer })}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.applicantName} numberOfLines={1}>
+                      {fullName}
                     </Text>
-                  ) : null}
 
-                  {displayLeague ? (
-                    <Text style={styles.metaSubText} numberOfLines={1}>
-                      {`Liga: ${displayLeague}`}
-                    </Text>
-                  ) : null}
+                    {isPlayer ? (
+                      <Text style={[styles.metaSubText, { color: displayTeam === 'Yakkaxon' ? 'rgba(255,255,255,0.4)' : '#00FF66', fontWeight: '800' }]} numberOfLines={1}>
+                        {`Jamoa: ${displayTeam || 'Yakkaxon'}`}
+                      </Text>
+                    ) : null}
 
-                  {(item.phone || item.contact_phone) ? (
-                    <Text style={styles.metaSubText} numberOfLines={1}>
-                      {`Tel: ${item.phone || item.contact_phone}`}
-                    </Text>
-                  ) : null}
+                    {displayLeague ? (
+                      <Text style={styles.metaSubText} numberOfLines={1}>
+                        {`Liga: ${displayLeague}`}
+                      </Text>
+                    ) : null}
 
-                  <View style={styles.metaBottomRow}>
-                    {renderStatusBadge(item.status)}
-                    <Text style={styles.timeCreatedText}>
-                      {formatDate(item.created_at)}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                    {(item.phone || item.contact_phone) ? (
+                      <Text style={styles.metaSubText} numberOfLines={1}>
+                        {`Tel: ${item.phone || item.contact_phone}`}
+                      </Text>
+                    ) : null}
 
-                {/* Right Action Icons (PROMINENT ICON BUTTONS ONLY IF PENDING!) */}
-                {isPending && (
+                    <View style={styles.metaBottomRow}>
+                      {renderStatusBadge(item.status)}
+                      <Text style={styles.timeCreatedText}>
+                        {formatDate(item.created_at)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Right Action Icons */}
                   <View style={styles.actionIconCol}>
-                    <TouchableOpacity
-                      style={styles.iconApproveBtn}
-                      onPress={() => (isPlayer ? handleApprovePlayerApp(item) : handleApproveTeamApp(item))}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="checkmark-circle" size={26} color="#00FF66" />
-                    </TouchableOpacity>
+                    {isPending && (
+                      <>
+                        <TouchableOpacity
+                          style={styles.iconApproveBtn}
+                          onPress={() => (isPlayer ? handleApprovePlayerApp(item) : handleApproveTeamApp(item))}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="checkmark-circle" size={26} color="#00FF66" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.iconRejectBtn}
+                          onPress={() => (isPlayer ? handleRejectPlayerApp(item) : handleRejectTeamApp(item))}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="close-circle" size={26} color="#FF4D4D" />
+                        </TouchableOpacity>
+                      </>
+                    )}
 
                     <TouchableOpacity
-                      style={styles.iconRejectBtn}
-                      onPress={() => (isPlayer ? handleRejectPlayerApp(item) : handleRejectTeamApp(item))}
+                      style={{ padding: 4 }}
+                      onPress={() => handleDeleteApplication(item, isPlayer)}
                       activeOpacity={0.7}
                     >
-                      <Ionicons name="close-circle" size={26} color="#FF4D4D" />
+                      <Ionicons name="trash-outline" size={22} color="#EF4444" />
                     </TouchableOpacity>
                   </View>
-                )}
-              </View>
+                </View>
+              </SwipeableCard>
             );
           }}
         />
