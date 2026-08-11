@@ -371,6 +371,40 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
             thumbColor={transferWindowOpen ? '#F59E0B' : '#94A3B8'}
           />
         </View>
+
+        {/* 3. Ro'yxatdan o'tkazish sayti (Registration Website Link) */}
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleLabelGroup}>
+            <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(0, 255, 135, 0.15)' }]}>
+              <Ionicons name="globe-outline" size={18} color="#00FF87" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleTitle}>{"Ro'yxatdan o'tkazish sayti"}</Text>
+              <Text style={[styles.toggleSub, { color: '#00FF87' }]}>
+                {`https://amatora.vercel.app/${currentOrg?.slug || 'tashkilot-slug'}`}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 10,
+              backgroundColor: 'rgba(0, 255, 135, 0.15)',
+              borderWidth: 1,
+              borderColor: 'rgba(0, 255, 135, 0.3)',
+            }}
+            onPress={() => {
+              const url = `https://amatora.vercel.app/${currentOrg?.slug || 'tashkilot-slug'}`;
+              Alert.alert(
+                "Ro'yxatdan o'tkazish sayti",
+                `Tashkilotingizning rasmiy ro'yxatdan o'tish veb-sayti:\n\n${url}\n\nUshbu havolani ishtirokchilar va jamoalarga yuboring.`
+              );
+            }}
+          >
+            <Ionicons name="copy-outline" size={16} color="#00FF87" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Account & Organization Details with 1-to-1 SuperAdmin Inline Editing */}
