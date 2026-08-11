@@ -71,7 +71,7 @@ const SwipeableCard: React.FC<{
       },
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dx < 0) {
-          pan.setValue(Math.max(gestureState.dx, -90));
+          pan.setValue(Math.max(gestureState.dx, -100));
         } else if (gestureState.dx > 0) {
           pan.setValue(Math.min(gestureState.dx, 0));
         }
@@ -79,7 +79,7 @@ const SwipeableCard: React.FC<{
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dx < -35) {
           Animated.spring(pan, {
-            toValue: -80,
+            toValue: -90,
             useNativeDriver: true,
             friction: 7,
           }).start();
@@ -102,36 +102,42 @@ const SwipeableCard: React.FC<{
   };
 
   return (
-    <View style={{ position: 'relative', marginBottom: 10, overflow: 'hidden', borderRadius: 16 }}>
-      {/* Background Red Delete Action Button Exposed On Swipe Left */}
+    <View style={{ position: 'relative', marginBottom: 10, borderRadius: 16, overflow: 'hidden' }}>
+      {/* Full Behind Background Red Action Card */}
       <View
         style={{
           position: 'absolute',
-          right: 0,
           top: 0,
           bottom: 0,
-          width: 80,
+          left: 0,
+          right: 0,
           backgroundColor: '#EF4444',
-          justifyContent: 'center',
+          borderRadius: 16,
+          flexDirection: 'row',
+          justifyContent: 'flex-end',
           alignItems: 'center',
-          borderTopRightRadius: 16,
-          borderBottomRightRadius: 16,
         }}
       >
         <TouchableOpacity
-          style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', gap: 2 }}
+          style={{
+            width: 90,
+            height: '100%',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 3,
+          }}
           onPress={() => {
             resetSwipe();
             onDelete();
           }}
-          activeOpacity={0.7}
+          activeOpacity={0.8}
         >
-          <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
-          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '800' }}>O'chirish</Text>
+          <Ionicons name="trash" size={24} color="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>O'chirish</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Sliding Card Content */}
+      {/* Sliding Foreground Main Card */}
       <Animated.View
         {...panResponder.panHandlers}
         style={{
@@ -1159,35 +1165,25 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   </TouchableOpacity>
 
                   {/* Right Action Icons */}
-                  <View style={styles.actionIconCol}>
-                    {isPending && (
-                      <>
-                        <TouchableOpacity
-                          style={styles.iconApproveBtn}
-                          onPress={() => (isPlayer ? handleApprovePlayerApp(item) : handleApproveTeamApp(item))}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="checkmark-circle" size={26} color="#00FF66" />
-                        </TouchableOpacity>
+                  {isPending && (
+                    <View style={styles.actionIconCol}>
+                      <TouchableOpacity
+                        style={styles.iconApproveBtn}
+                        onPress={() => (isPlayer ? handleApprovePlayerApp(item) : handleApproveTeamApp(item))}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="checkmark-circle" size={26} color="#00FF66" />
+                      </TouchableOpacity>
 
-                        <TouchableOpacity
-                          style={styles.iconRejectBtn}
-                          onPress={() => (isPlayer ? handleRejectPlayerApp(item) : handleRejectTeamApp(item))}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="close-circle" size={26} color="#FF4D4D" />
-                        </TouchableOpacity>
-                      </>
-                    )}
-
-                    <TouchableOpacity
-                      style={{ padding: 4 }}
-                      onPress={() => handleDeleteApplication(item, isPlayer)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="trash-outline" size={22} color="#EF4444" />
-                    </TouchableOpacity>
-                  </View>
+                      <TouchableOpacity
+                        style={styles.iconRejectBtn}
+                        onPress={() => (isPlayer ? handleRejectPlayerApp(item) : handleRejectTeamApp(item))}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="close-circle" size={26} color="#FF4D4D" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               </SwipeableCard>
             );
