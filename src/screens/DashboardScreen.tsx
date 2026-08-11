@@ -48,7 +48,7 @@ const SkeletonLoader: React.FC<{ width?: number; height?: number }> = ({ width =
 
 export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
   const { orgId } = useOrg();
-  const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0 });
+  const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -78,7 +78,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         } catch (e) {}
       }
 
-      // 2. Build filtered queries
+      // 2. Build filtered queries for APPROVED teams & players
       let leaguesQuery = supabase.from('leagues').select('id', { count: 'exact', head: true });
       if (orgId) {
         if (collabIds.length > 0) {
@@ -88,38 +88,65 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         }
       }
 
-      let teamsQuery = supabase.from('teams').select('id', { count: 'exact', head: true });
+      let teamsQuery = supabase
+        .from('teams')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['approved', 'tasdiqlangan']);
       if (orgId) {
         teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
       }
 
-      let playersQuery = supabase.from('players').select('id', { count: 'exact', head: true });
+      let playersQuery = supabase
+        .from('players')
+        .select('id', { count: 'exact', head: true });
       if (orgId) {
         playersQuery = playersQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
       }
 
-      let appsQuery = supabase.from('applications').select('id', { count: 'exact', head: true });
+      let approvedAppsQuery = supabase
+        .from('applications')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['approved', 'tasdiqlangan']);
       if (orgId) {
-        appsQuery = appsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        approvedAppsQuery = approvedAppsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
       }
 
-      const [playersRes, leaguesRes, teamsRes, appsRes] = await Promise.all([
+      let pendingAppsQuery = supabase
+        .from('applications')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['pending', 'kutilmoqda']);
+      if (orgId) {
+        pendingAppsQuery = pendingAppsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      let pendingTeamsQuery = supabase
+        .from('teams')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['pending', 'kutilmoqda']);
+      if (orgId) {
+        pendingTeamsQuery = pendingTeamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      const [playersRes, leaguesRes, teamsRes, approvedAppsRes, pendingAppsRes, pendingTeamsRes] = await Promise.all([
         playersQuery,
         leaguesQuery,
         teamsQuery,
-        appsQuery,
+        approvedAppsQuery,
+        pendingAppsQuery,
+        pendingTeamsQuery,
       ]);
 
       let pCount = playersRes.count || 0;
       if (pCount === 0) {
-        pCount = appsRes.count || 0;
+        pCount = approvedAppsRes.count || 0;
       }
 
       setCounts({
         players: pCount,
         leagues: leaguesRes.count || 0,
         teams: teamsRes.count || 0,
-        applications: appsRes.count || 0,
+        applications: pendingAppsRes.count || 0,
+        pendingTeams: pendingTeamsRes.count || 0,
       });
     } catch (e) {
       console.error('Fetch dashboard counts error:', e);
@@ -202,10 +229,10 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />}
       >
-      {/* Main Stats Cards (Jami Zayavkalar, Jami O'yinchilar, Jami Ligalar, Jami Jamoalar) */}
+      {/* Main Stats Cards (Kutilayotgan Arizalar, Qabul Qilingan O'yinchilar, Jami Ligalar, Qabul Qilingan Jamoalar) */}
       <Text style={styles.sectionTitle}>{"Umumiy Statistika"}</Text>
       <View style={styles.statsColumn}>
-        {/* Card 1: Jami Zayavkalar (Moved to Main Stats Row) */}
+        {/* Card 1: Kutilayotgan Arizalar */}
         <TouchableOpacity
           style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
@@ -214,19 +241,19 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Arizalar"}</Text>
+            <Text style={styles.statLabel}>{"Kutilayotgan Arizalar"}</Text>
             {loading ? (
               <SkeletonLoader width={160} height={24} />
             ) : (
               <Text style={[styles.statValue, { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' }]}>
-                {`${counts.applications}ta o'yinchi / ${counts.teams}ta jamoa arizasi`}
+                {`${counts.applications}ta o'yinchi / ${counts.pendingTeams}ta jamoa`}
               </Text>
             )}
           </View>
           <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
         </TouchableOpacity>
 
-        {/* Card 2: Jami O'yinchilar */}
+        {/* Card 2: Qabul Qilingan O'yinchilar */}
         <TouchableOpacity
           style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
@@ -235,7 +262,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <Ionicons name="people-outline" size={28} color="#2DD4BF" />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Jami O'yinchilar"}</Text>
+            <Text style={styles.statLabel}>{"Qabul Qilingan O'yinchilar"}</Text>
             {loading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
@@ -264,7 +291,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
         </TouchableOpacity>
 
-        {/* Card 4: Jami Jamoalar */}
+        {/* Card 4: Qabul Qilingan Jamoalar */}
         <TouchableOpacity
           style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
@@ -273,7 +300,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <Ionicons name="shirt-outline" size={28} color="#4ADE80" />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Jami Jamoalar"}</Text>
+            <Text style={styles.statLabel}>{"Qabul Qilingan Jamoalar"}</Text>
             {loading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
