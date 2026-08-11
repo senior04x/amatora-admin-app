@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Amatora Admin Mobile",
+    "slug": "amatora-admin-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.amatora.adminapp"
+    },
+    "android": {
+      "package": "com.amatora.adminapp"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/YOUR-PROJECT-ID"
+    }
+  }
+}

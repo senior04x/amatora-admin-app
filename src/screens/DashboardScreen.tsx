@@ -1,0 +1,382 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
+import { useOrg } from '../context/OrgContext';
+import { supabase } from '../supabaseClient';
+
+interface Props {
+  onNavigate: (
+    tab: 'dashboard' | 'players' | 'matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news',
+    subTab?: 'players' | 'teams'
+  ) => void;
+}
+
+const SkeletonLoader: React.FC<{ width?: number; height?: number }> = ({ width = 60, height = 24 }) => {
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.8,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0.3,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={{
+        width,
+        height,
+        borderRadius: 8,
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        opacity,
+        marginTop: 4,
+      }}
+    />
+  );
+};
+
+export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
+  const { orgId } = useOrg();
+  const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchDashboardCounts();
+  }, [orgId]);
+
+  const fetchDashboardCounts = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch collab league IDs for active orgId
+      let collabIds: any[] = [];
+      if (orgId) {
+        try {
+          const { data: myCollabs } = await supabase
+            .from('league_collabs')
+            .select('league_id')
+            .eq('status', 'accepted')
+            .or(`sender_org_id.eq.${orgId},receiver_org_id.eq.${orgId}`);
+          collabIds = (myCollabs || []).map((c: any) => c.league_id).filter(Boolean);
+        } catch (e) {}
+      }
+
+      // 2. Build filtered queries
+      let leaguesQuery = supabase.from('leagues').select('id', { count: 'exact', head: true });
+      if (orgId) {
+        if (collabIds.length > 0) {
+          leaguesQuery = leaguesQuery.or(`organization_id.eq.${orgId},organization_id.is.null,id.in.(${collabIds.join(',')})`);
+        } else {
+          leaguesQuery = leaguesQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        }
+      }
+
+      let teamsQuery = supabase.from('teams').select('id', { count: 'exact', head: true });
+      if (orgId) {
+        teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      let playersQuery = supabase.from('players').select('id', { count: 'exact', head: true });
+      if (orgId) {
+        playersQuery = playersQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      let appsQuery = supabase.from('applications').select('id', { count: 'exact', head: true });
+      if (orgId) {
+        appsQuery = appsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      const [playersRes, leaguesRes, teamsRes, appsRes] = await Promise.all([
+        playersQuery,
+        leaguesQuery,
+        teamsQuery,
+        appsQuery,
+      ]);
+
+      let pCount = playersRes.count || 0;
+      if (pCount === 0) {
+        pCount = appsRes.count || 0;
+      }
+
+      setCounts({
+        players: pCount,
+        leagues: leaguesRes.count || 0,
+        teams: teamsRes.count || 0,
+        applications: appsRes.count || 0,
+      });
+    } catch (e) {
+      console.error('Fetch dashboard counts error:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const menuNavItems = [
+    {
+      id: 'export',
+      title: 'Export',
+      icon: 'image-outline',
+      color: '#475569',
+      action: () => onNavigate && onNavigate('export'),
+    },
+    {
+      id: 'jamoalar',
+      title: 'Jamoalar',
+      icon: 'shirt-outline',
+      color: '#166534',
+      action: () => onNavigate && onNavigate('players', 'teams'),
+    },
+    {
+      id: 'ligalar',
+      title: 'Ligalar',
+      icon: 'trophy-outline',
+      color: '#B45309',
+      action: () => onNavigate && onNavigate('leagues'),
+    },
+    {
+      id: 'transferlar',
+      title: 'Transferlar',
+      icon: 'swap-horizontal-outline',
+      color: '#0F766E',
+      action: () => onNavigate && onNavigate('transfers'),
+    },
+    {
+      id: 'updates',
+      title: "Ma'lumotlar",
+      icon: 'refresh-outline',
+      color: '#3730A3',
+      action: () => onNavigate && onNavigate('updates'),
+    },
+    {
+      id: 'schedule',
+      title: "O'yinlar",
+      icon: 'calendar-outline',
+      color: '#9F1239',
+      action: () => onNavigate('matches'),
+    },
+    {
+      id: 'standings',
+      title: 'Turnirlar',
+      icon: 'grid-outline',
+      color: '#075985',
+      action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
+    },
+    {
+      id: 'sponsors',
+      title: 'Homiylar',
+      icon: 'business-outline',
+      color: '#9A3412',
+      action: () => onNavigate && onNavigate('sponsors'),
+    },
+    {
+      id: 'news',
+      title: 'Yangiliklar',
+      icon: 'newspaper-outline',
+      color: '#7F1D1D',
+      action: () => onNavigate && onNavigate('news'),
+    },
+  ];
+
+  return (
+    <View style={styles.root}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        showsVerticalScrollIndicator={false}
+      >
+      {/* Main Stats Cards (Jami Zayavkalar, Jami O'yinchilar, Jami Ligalar, Jami Jamoalar) */}
+      <Text style={styles.sectionTitle}>{"Umumiy Statistika"}</Text>
+      <View style={styles.statsColumn}>
+        {/* Card 1: Jami Zayavkalar (Moved to Main Stats Row) */}
+        <TouchableOpacity
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          activeOpacity={0.8}
+          onPress={() => onNavigate && onNavigate('applications', 'players')}
+        >
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <Ionicons name="document-text-outline" size={28} color="#1E40AF" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statLabel}>{"Arizalar"}</Text>
+            {loading ? (
+              <SkeletonLoader width={160} height={24} />
+            ) : (
+              <Text style={[styles.statValue, { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' }]}>
+                {`${counts.applications}ta o'yinchi / ${counts.teams}ta jamoa arizasi`}
+              </Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+        </TouchableOpacity>
+
+        {/* Card 2: Jami O'yinchilar */}
+        <TouchableOpacity
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          activeOpacity={0.8}
+          onPress={() => onNavigate && onNavigate('players', 'players')}
+        >
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <Ionicons name="people-outline" size={28} color="#0F766E" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statLabel}>{"Jami O'yinchilar"}</Text>
+            {loading ? (
+              <SkeletonLoader width={70} height={24} />
+            ) : (
+              <Text style={styles.statValue}>{counts.players} {"ta"}</Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+        </TouchableOpacity>
+
+        {/* Card 3: Jami Ligalar */}
+        <TouchableOpacity
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          activeOpacity={0.8}
+          onPress={() => onNavigate && onNavigate('leagues')}
+        >
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <Ionicons name="trophy-outline" size={28} color="#B45309" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statLabel}>{"Jami Ligalar"}</Text>
+            {loading ? (
+              <SkeletonLoader width={70} height={24} />
+            ) : (
+              <Text style={styles.statValue}>{counts.leagues} {"ta"}</Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+        </TouchableOpacity>
+
+        {/* Card 4: Jami Jamoalar */}
+        <TouchableOpacity
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          activeOpacity={0.8}
+          onPress={() => onNavigate && onNavigate('players', 'teams')}
+        >
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <Ionicons name="shirt-outline" size={28} color="#166534" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statLabel}>{"Jami Jamoalar"}</Text>
+            {loading ? (
+              <SkeletonLoader width={70} height={24} />
+            ) : (
+              <Text style={styles.statValue}>{counts.teams} {"ta"}</Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Admin Menu Grid (3 Columns) */}
+      <Text style={styles.sectionTitle}>{"Admin Menyusi Sahifalari"}</Text>
+      <View style={styles.menuGrid}>
+        {menuNavItems.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={styles.gridCard}
+            activeOpacity={0.7}
+            onPress={item.action}
+          >
+            <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+            <Ionicons name={item.icon as any} size={28} color={item.color} style={{ marginBottom: 8 }} />
+            <Text style={styles.gridCardTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      </ScrollView>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  sectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 14,
+    letterSpacing: -0.3,
+  },
+  statsColumn: {
+    gap: 12,
+    marginBottom: 24,
+  },
+  mainStatCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    gap: 14,
+    overflow: 'hidden',
+  },
+  statIconBox: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statLabel: {
+    color: 'rgba(255, 255, 255, 0.65)',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  statValue: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  menuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  gridCard: {
+    width: '31%',
+    backgroundColor: 'transparent',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+  },
+  gridIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  gridCardTitle: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+});
