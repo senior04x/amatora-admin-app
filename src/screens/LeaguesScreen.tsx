@@ -959,7 +959,7 @@ export const LeaguesScreen: React.FC = () => {
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity onPress={() => handleUploadLogo(item)} activeOpacity={0.8} style={s.freeLogoWrap}>
-                  <Ionicons name="trophy" size={38} color="#00FF66" />
+                  <Ionicons name="trophy" size={38} color="#FFFFFF" />
                 </TouchableOpacity>
               )}
               <Text style={s.cardTitle} numberOfLines={2}>{item.name}</Text>
@@ -1038,7 +1038,7 @@ export const LeaguesScreen: React.FC = () => {
       {/* Page Header */}
       <View style={s.pageHeader}>
         <View style={s.pageHeaderLeft}>
-          <Ionicons name="settings-outline" size={22} color="#00FF66" />
+          <Ionicons name="trophy-outline" size={22} color="#FFFFFF" />
           <Text style={s.pageTitle}>{"Tashkilot Ligalari Boshqaruvi"}</Text>
         </View>
       </View>
@@ -1723,24 +1723,31 @@ const s = StyleSheet.create({
     fontWeight: '800',
   },
 
-  /* Add Button */
+  /* Add Button (Dark Colorless Glassmorphism) */
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(18, 18, 18, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
     paddingVertical: 14,
-    borderRadius: 14,
-    marginTop: 10,
-    marginBottom: 20,
-    marginHorizontal: 40,
+    borderRadius: 16,
+    marginTop: 14,
+    marginBottom: 24,
+    marginHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 8,
   },
   addBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
 
   /* Skeleton Loader Styles */
