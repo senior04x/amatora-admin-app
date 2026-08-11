@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Amatora Admin Mobile",
-    "slug": "amatora-admin-app",
+    "slug": "amatora-admin",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -16,7 +16,17 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/YOUR-PROJECT-ID"
-    }
+      "url": "https://u.expo.dev/64a552bf-be37-4da8-80c1-8473e71ad8b2"
+    },
+    "owner": "seniorxo",
+    "extra": {
+      "eas": {
+        "projectId": "64a552bf-be37-4da8-80c1-8473e71ad8b2"
+      }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "@sentry/react-native"
+    ]
   }
 }

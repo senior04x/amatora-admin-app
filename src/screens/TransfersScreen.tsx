@@ -14,6 +14,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -557,6 +558,7 @@ export const TransfersScreen: React.FC = () => {
 
             return (
               <View key={item.id} style={[styles.transferCard, { borderColor: `${statusColor}33` }]}>
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                 {/* Card Top Action Bar */}
                 <View style={styles.cardHeader}>
                   <View style={[styles.statusPill, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}>
@@ -701,6 +703,7 @@ export const TransfersScreen: React.FC = () => {
       <Modal visible={!!editingTransfer} transparent animationType="slide" onRequestClose={() => setEditingTransfer(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={[StyleSheet.absoluteFill, { borderRadius: 24 }]} />
             {/* Modal Header */}
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -1158,11 +1161,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   transferCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 18,
     padding: 16,
-    borderWidth: 1,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     gap: 12,
+    overflow: 'hidden',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1228,11 +1233,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   teamSide: {
     flex: 1,
@@ -1264,7 +1269,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 8,
@@ -1289,8 +1294,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   btnApprove: {
-    backgroundColor: '#00FF66',
-    borderColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   btnRevert: {
     backgroundColor: 'rgba(245, 158, 11, 0.12)',
@@ -1302,7 +1307,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -1310,10 +1315,10 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     overflow: 'hidden',
   },
   modalHeader: {
@@ -1341,7 +1346,7 @@ const styles = StyleSheet.create({
   readOnlyPlayerBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -1375,10 +1380,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   textInput: {
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     color: '#FFFFFF',
@@ -1388,10 +1393,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
@@ -1425,12 +1430,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     borderRadius: 12,
     paddingVertical: 12,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   modalSaveText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 13.5,
     fontWeight: '900',
   },
@@ -1458,7 +1465,7 @@ const styles = StyleSheet.create({
   },
   inlinePickerOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
     borderRadius: 20,
     zIndex: 999,
   },

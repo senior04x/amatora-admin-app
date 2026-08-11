@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
@@ -50,13 +50,20 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
   const { orgId } = useOrg();
   const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0 });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     fetchDashboardCounts();
   }, [orgId]);
 
-  const fetchDashboardCounts = async () => {
-    setLoading(true);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchDashboardCounts(true);
+    setRefreshing(false);
+  }, [orgId]);
+
+  const fetchDashboardCounts = async (isRefreshing = false) => {
+    if (!isRefreshing) setLoading(true);
     try {
       // 1. Fetch collab league IDs for active orgId
       let collabIds: any[] = [];
@@ -126,63 +133,63 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       id: 'export',
       title: 'Export',
       icon: 'image-outline',
-      color: '#475569',
+      color: '#38BDF8',
       action: () => onNavigate && onNavigate('export'),
     },
     {
       id: 'jamoalar',
       title: 'Jamoalar',
       icon: 'shirt-outline',
-      color: '#166534',
+      color: '#4ADE80',
       action: () => onNavigate && onNavigate('players', 'teams'),
     },
     {
       id: 'ligalar',
       title: 'Ligalar',
       icon: 'trophy-outline',
-      color: '#B45309',
+      color: '#FBBF24',
       action: () => onNavigate && onNavigate('leagues'),
     },
     {
       id: 'transferlar',
       title: 'Transferlar',
       icon: 'swap-horizontal-outline',
-      color: '#0F766E',
+      color: '#2DD4BF',
       action: () => onNavigate && onNavigate('transfers'),
     },
     {
       id: 'updates',
       title: "Ma'lumotlar",
       icon: 'refresh-outline',
-      color: '#3730A3',
+      color: '#A78BFA',
       action: () => onNavigate && onNavigate('updates'),
     },
     {
       id: 'schedule',
       title: "O'yinlar",
       icon: 'calendar-outline',
-      color: '#9F1239',
+      color: '#FB7185',
       action: () => onNavigate('matches'),
     },
     {
       id: 'standings',
       title: 'Turnirlar',
       icon: 'grid-outline',
-      color: '#075985',
+      color: '#38BDF8',
       action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
     },
     {
       id: 'sponsors',
       title: 'Homiylar',
       icon: 'business-outline',
-      color: '#9A3412',
+      color: '#FB923C',
       action: () => onNavigate && onNavigate('sponsors'),
     },
     {
       id: 'news',
       title: 'Yangiliklar',
       icon: 'newspaper-outline',
-      color: '#7F1D1D',
+      color: '#F87171',
       action: () => onNavigate && onNavigate('news'),
     },
   ];
@@ -193,18 +200,19 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         style={styles.container}
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />}
       >
       {/* Main Stats Cards (Jami Zayavkalar, Jami O'yinchilar, Jami Ligalar, Jami Jamoalar) */}
       <Text style={styles.sectionTitle}>{"Umumiy Statistika"}</Text>
       <View style={styles.statsColumn}>
         {/* Card 1: Jami Zayavkalar (Moved to Main Stats Row) */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('applications', 'players')}
         >
-          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-          <Ionicons name="document-text-outline" size={28} color="#1E40AF" />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Arizalar"}</Text>
             {loading ? (
@@ -220,12 +228,12 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
 
         {/* Card 2: Jami O'yinchilar */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('players', 'players')}
         >
-          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-          <Ionicons name="people-outline" size={28} color="#0F766E" />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons name="people-outline" size={28} color="#2DD4BF" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Jami O'yinchilar"}</Text>
             {loading ? (
@@ -239,12 +247,12 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
 
         {/* Card 3: Jami Ligalar */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('leagues')}
         >
-          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-          <Ionicons name="trophy-outline" size={28} color="#B45309" />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons name="trophy-outline" size={28} color="#FBBF24" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Jami Ligalar"}</Text>
             {loading ? (
@@ -258,12 +266,12 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
 
         {/* Card 4: Jami Jamoalar */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.1)' }]}
+          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('players', 'teams')}
         >
-          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-          <Ionicons name="shirt-outline" size={28} color="#166534" />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons name="shirt-outline" size={28} color="#4ADE80" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Jami Jamoalar"}</Text>
             {loading ? (

@@ -74,7 +74,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
       <View style={styles.headerRow}>
         {onGoBack && (
           <TouchableOpacity style={styles.backBtn} activeOpacity={0.8} onPress={onGoBack}>
-            <Ionicons name="chevron-back" size={20} color="#00FF87" />
+            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         )}
         <View style={{ flex: 1 }}>
@@ -87,9 +87,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
       <Text style={styles.sectionHeader}>Xavfsizlik & Kirish</Text>
 
       <View style={styles.settingItem}>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <View style={styles.settingLeft}>
-          <View style={[styles.settingIcon, { backgroundColor: 'rgba(0, 255, 102, 0.15)' }]}>
-            <Ionicons name="finger-print" size={20} color="#00FF66" />
+          <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
+            <Ionicons name="finger-print" size={20} color="#FFFFFF" />
           </View>
           <View>
             <Text style={styles.settingTitle}>Face ID / Barmoq Izi</Text>
@@ -99,15 +100,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         <Switch
           value={biometricsEnabled}
           onValueChange={setBiometricsEnabled}
-          trackColor={{ false: '#334155', true: '#059669' }}
-          thumbColor={biometricsEnabled ? '#00FF66' : '#94A3B8'}
+          trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+          thumbColor={biometricsEnabled ? '#FFFFFF' : '#94A3B8'}
         />
       </View>
 
       <View style={styles.settingItem}>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <View style={styles.settingLeft}>
-          <View style={[styles.settingIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-            <Ionicons name="notifications" size={20} color="#3B82F6" />
+          <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
+            <Ionicons name="notifications" size={20} color="#FFFFFF" />
           </View>
           <View>
             <Text style={styles.settingTitle}>Push Bildirishnomalar</Text>
@@ -117,27 +119,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         <Switch
           value={notificationsEnabled}
           onValueChange={setNotificationsEnabled}
-          trackColor={{ false: '#334155', true: '#059669' }}
-          thumbColor={notificationsEnabled ? '#00FF66' : '#94A3B8'}
+          trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+          thumbColor={notificationsEnabled ? '#FFFFFF' : '#94A3B8'}
         />
       </View>
 
       {hasPin ? (
         <>
-          <TouchableOpacity style={[styles.settingItem, { borderColor: 'rgba(59, 130, 246, 0.3)' }]} activeOpacity={0.7} onPress={handleSetOrEditPin}>
+          <TouchableOpacity style={styles.settingItem} activeOpacity={0.7} onPress={handleSetOrEditPin}>
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.settingLeft}>
-              <View style={[styles.settingIcon, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
-                <Ionicons name="keypad" size={20} color="#3B82F6" />
+              <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
+                <Ionicons name="keypad" size={20} color="#FFFFFF" />
               </View>
               <View>
-                <Text style={[styles.settingTitle, { color: '#3B82F6' }]}>PIN kodni tahrirlash</Text>
+                <Text style={styles.settingTitle}>PIN kodni tahrirlash</Text>
                 <Text style={styles.settingSub}>Yangi PIN kod o'rnatish</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.2)" />
+            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.settingItem, { borderColor: 'rgba(239, 68, 68, 0.3)' }]} activeOpacity={0.7} onPress={handleResetPin}>
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.settingLeft}>
               <View style={[styles.settingIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
                 <Ionicons name="trash" size={20} color="#EF4444" />
@@ -147,27 +151,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
                 <Text style={styles.settingSub}>Kirish kodini olib tashlash</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.2)" />
+            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
           </TouchableOpacity>
         </>
       ) : (
-        <TouchableOpacity style={[styles.settingItem, { borderColor: 'rgba(0, 255, 102, 0.3)' }]} activeOpacity={0.7} onPress={handleSetOrEditPin}>
+        <TouchableOpacity style={styles.settingItem} activeOpacity={0.7} onPress={handleSetOrEditPin}>
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <View style={styles.settingLeft}>
-            <View style={[styles.settingIcon, { backgroundColor: 'rgba(0, 255, 102, 0.15)' }]}>
-              <Ionicons name="keypad" size={20} color="#00FF66" />
+            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
+              <Ionicons name="keypad" size={20} color="#FFFFFF" />
             </View>
             <View>
-              <Text style={[styles.settingTitle, { color: '#00FF66' }]}>PIN kod o'rnatish</Text>
+              <Text style={styles.settingTitle}>PIN kod o'rnatish</Text>
               <Text style={styles.settingSub}>Xavfsizlik uchun kod o'rnating</Text>
             </View>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.2)" />
+          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
         </TouchableOpacity>
       )}
 
       {/* App Info */}
       <Text style={styles.sectionHeader}>Ilova haqida</Text>
       <View style={styles.infoBox}>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <Text style={styles.infoText}>{"Ilova: AMATORA Admin"}</Text>
         <Text style={styles.infoText}>{`Versiya: ${APP_VERSION}`}</Text>
       </View>
@@ -192,9 +198,9 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: 'rgba(0, 255, 135, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -219,12 +225,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 16,
     padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     marginBottom: 12,
+    overflow: 'hidden',
   },
   settingLeft: {
     flexDirection: 'row',
@@ -250,15 +257,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   infoBox: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 16,
     padding: 16,
     gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   infoText: {
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: 'rgba(255, 255, 255, 0.65)',
     fontSize: 12,
+    fontWeight: '600',
   },
 });

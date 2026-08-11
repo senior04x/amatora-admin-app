@@ -17,6 +17,7 @@ import {
   PanResponder,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useOrg } from '../context/OrgContext';
@@ -31,6 +32,7 @@ interface Props {
 const SkeletonCard = () => {
   return (
     <View style={styles.skeletonCard}>
+      <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
       <View style={styles.skeletonAvatar} />
       <View style={{ flex: 1, gap: 8 }}>
         <View style={styles.skeletonTitleLine} />
@@ -51,6 +53,7 @@ const SwipeablePlayerCard = ({
   onSwipeClose,
   onOpen,
   onDelete,
+  onImagePress,
 }: any) => {
   const panX = useRef(new Animated.Value(0)).current;
   const hapticTriggeredRef = useRef(false);
@@ -173,20 +176,28 @@ const SwipeablePlayerCard = ({
 
   const displayLeague = item.league || item.league_name || item.resolvedLeague || foundTeam?.league;
 
+  const deleteOpacity = panX.interpolate({
+    inputRange: [-85, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View style={styles.swipeContainer}>
-      {/* Hidden Red Delete Action Button behind Card */}
-      <TouchableOpacity
-        style={styles.deleteActionBack}
-        onPress={() => {
-          resetSwipe();
-          onDelete(item);
-        }}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="trash-bin" size={22} color="#FFFFFF" />
-        <Text style={styles.deleteActionText}>{"O'chirish"}</Text>
-      </TouchableOpacity>
+      {/* Hidden Red Delete Action Button behind Card (Fades in ONLY when swiped) */}
+      <Animated.View style={[styles.deleteActionBack, { opacity: deleteOpacity }]}>
+        <TouchableOpacity
+          style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+          onPress={() => {
+            resetSwipe();
+            onDelete(item);
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="trash-bin" size={22} color="#FFFFFF" />
+          <Text style={styles.deleteActionText}>{"O'chirish"}</Text>
+        </TouchableOpacity>
+      </Animated.View>
 
       {/* Foreground Card Item */}
       <Animated.View
@@ -196,34 +207,47 @@ const SwipeablePlayerCard = ({
         ]}
         {...panResponder.panHandlers}
       >
-        <TouchableOpacity
-          style={styles.cardInnerRow}
-          onPress={() => {
-            resetSwipe();
-            onOpen(item, isPlayer);
-          }}
-          activeOpacity={0.85}
-        >
-          <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={styles.avatarImage} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.titleText} numberOfLines={1}>
-              {name}
-            </Text>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <View style={styles.cardInnerRow}>
+          {/* Left Photo Touch */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => {
+              if (onImagePress) onImagePress(avatar);
+            }}
+          >
+            <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={styles.avatarImage} />
+          </TouchableOpacity>
 
-            {isPlayer ? (
-              <Text style={[styles.subText, { color: '#00FF66', fontWeight: '800' }]} numberOfLines={1}>
-                {`Jamoa: ${displayTeam}`}
+          {/* Right Details Touch */}
+          <TouchableOpacity
+            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+            onPress={() => {
+              resetSwipe();
+              onOpen(item, isPlayer);
+            }}
+            activeOpacity={0.85}
+          >
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.titleText} numberOfLines={1}>
+                {name}
               </Text>
-            ) : null}
 
-            {displayLeague ? (
-              <Text style={styles.subText} numberOfLines={1}>
-                {`Liga: ${displayLeague}`}
-              </Text>
-            ) : null}
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
-        </TouchableOpacity>
+              {isPlayer ? (
+                <Text style={[styles.subText, { color: 'rgba(255, 255, 255, 0.75)', fontWeight: '800' }]} numberOfLines={1}>
+                  {`Jamoa: ${displayTeam}`}
+                </Text>
+              ) : null}
+
+              {displayLeague ? (
+                <Text style={styles.subText} numberOfLines={1}>
+                  {`Liga: ${displayLeague}`}
+                </Text>
+              ) : null}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+          </TouchableOpacity>
+        </View>
       </Animated.View>
     </View>
   );
@@ -231,19 +255,30 @@ const SwipeablePlayerCard = ({
 
 export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }) => {
   const { orgId, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, refreshOrg } = useOrg();
+  const [fullImagePreview, setFullImagePreview] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialSegmentTab || 'players');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
   useEffect(() => {
     if (initialSegmentTab) {
       setActiveTab(initialSegmentTab);
     }
   }, [initialSegmentTab]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // Pagination Constants
-  const PLAYER_PAGE_SIZE = 50;
+  const PLAYER_PAGE_SIZE = 20;
   const TEAM_PAGE_SIZE = 10;
 
   const [playerPage, setPlayerPage] = useState(0);
@@ -330,7 +365,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
   useEffect(() => {
     loadInitialData();
-  }, [orgId, activeTab]);
+  }, [orgId, debouncedSearchQuery]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -376,12 +411,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       const dbClient = supabaseAdmin || supabase;
       let query = dbClient.from('teams').select('id, name, league').order('name');
       if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
+        query = query.eq('organization_id', orgId);
       }
       const { data } = await query;
       if (data) setAllTeamsList(data);
@@ -468,12 +498,14 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         .range(from, to);
 
       if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
+        query = query.eq('organization_id', orgId);
+      }
+
+      if (debouncedSearchQuery) {
+        const search = `%${debouncedSearchQuery}%`;
+        query = query.or(
+          `first_name.ilike.${search},last_name.ilike.${search},passport_series.ilike.${search},passport_number.ilike.${search},phone.ilike.${search}`
+        );
       }
 
       const { data: appData } = await query;
@@ -521,12 +553,11 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         .range(from, to);
 
       if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
+        query = query.eq('organization_id', orgId);
+      }
+
+      if (debouncedSearchQuery) {
+        query = query.ilike('name', `%${debouncedSearchQuery}%`);
       }
 
       const { data } = await query;
@@ -874,13 +905,14 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       {/* Toast Notification Banner */}
       {toastMsg && (
         <View style={styles.toastBanner}>
-          <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
+          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
           <Text style={styles.toastText}>{toastMsg}</Text>
         </View>
       )}
 
       {/* Registration Open/Close Switch Banner */}
       <View style={styles.regSwitchBanner}>
+        <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={styles.regSwitchTitle}>
             {isRegistrationOpen ? "Qabul Ochiq" : "Qabul Yopilgan"}
@@ -892,14 +924,35 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         <Switch
           value={isRegistrationOpen}
           onValueChange={handleToggleRegistration}
-          trackColor={{ false: '#334155', true: '#00FF66' }}
-          thumbColor={isRegistrationOpen ? '#000000' : '#94A3B8'}
+          trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+          thumbColor={isRegistrationOpen ? '#FFFFFF' : '#94A3B8'}
           disabled={togglingReg}
         />
       </View>
 
+      {/* Global Search Input */}
+      <View style={styles.searchContainer}>
+        <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <Ionicons name="search" size={20} color="rgba(255,255,255,0.5)" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder={activeTab === 'players' ? "O'yinchini qidirish (ism, tel, pasport)..." : "Jamoani qidirish..."}
+          placeholderTextColor="rgba(255,255,255,0.4)"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
+          </TouchableOpacity>
+        )}
+      </View>
+
       {/* Segment Sub-Tabs (O'yinchilar vs Jamoalar) */}
       <View style={styles.segmentContainer}>
+        <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <TouchableOpacity
           style={[styles.segmentBtn, activeTab === 'players' && styles.activeSegmentBtn]}
           onPress={() => setActiveTab('players')}
@@ -916,7 +969,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               activeTab === 'players' && styles.activeSegmentBtnText,
             ]}
           >
-            {`O'yinchilar (${totalPlayersCount || players.length})`}
+            {`O'yinchilar`}
           </Text>
         </TouchableOpacity>
 
@@ -936,7 +989,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               activeTab === 'teams' && styles.activeSegmentBtnText,
             ]}
           >
-            {`Jamoalar (${totalTeamsCount || teams.length})`}
+            {`Jamoalar`}
           </Text>
         </TouchableOpacity>
       </View>
@@ -971,7 +1024,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             }
           }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />
           }
           ListEmptyComponent={
             <View style={styles.emptyCard}>
@@ -1019,6 +1072,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               }}
               onOpen={handleOpenItem}
               onDelete={handlePromptDelete}
+              onImagePress={(imgUrl: string) => setFullImagePreview(imgUrl)}
             />
           )}
         />
@@ -1076,13 +1130,14 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       <Modal visible={!!selectedItem} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             {/* Modal Header */}
             <View style={styles.modalHeaderRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons
                   name={selectedItem?.isPlayer ? "person" : "shield"}
                   size={20}
-                  color="#00FF66"
+                  color="#FFFFFF"
                 />
                 <Text style={styles.modalTitle}>
                   {selectedItem?.isPlayer ? "O'yinchini Tahrirlash" : "Jamoani Tahrirlash"}
@@ -1097,16 +1152,24 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 14, paddingVertical: 12 }}>
                 {/* Avatar Banner */}
                 <View style={{ alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                  <Image
-                    source={{
-                      uri:
-                        selectedItem.avatar_url ||
-                        selectedItem.photo_url ||
-                        selectedItem.logo_url ||
-                        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop',
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      const img = selectedItem.avatar_url || selectedItem.photo_url || selectedItem.logo_url;
+                      if (img) setFullImagePreview(img);
                     }}
-                    style={styles.detailAvatar}
-                  />
+                  >
+                    <Image
+                      source={{
+                        uri:
+                          selectedItem.avatar_url ||
+                          selectedItem.photo_url ||
+                          selectedItem.logo_url ||
+                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop',
+                      }}
+                      style={styles.detailAvatar}
+                    />
+                  </TouchableOpacity>
                   <Text style={styles.detailNameHeader}>
                     {`${editForm.first_name} ${editForm.last_name}`.trim() || editForm.name || "Noma'lum"}
                   </Text>
@@ -1392,7 +1455,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 <Ionicons
                   name={isEditing ? "create" : "create-outline"}
                   size={18}
-                  color={isEditing ? "#000000" : "#00FF66"}
+                  color="#FFFFFF"
                 />
                 <Text style={[styles.pencilBtnText, isEditing && styles.pencilBtnTextActive]}>
                   {isEditing ? "Tahrirlash rejimida" : "Tahrirlash"}
@@ -1426,6 +1489,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 onPress={() => setSelectPickerConfig(null)}
               >
                 <View style={styles.pickerCard}>
+                  <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                   <View style={styles.pickerHeader}>
                     <Text style={styles.pickerTitle}>{selectPickerConfig?.title || "Tanlang"}</Text>
                     <TouchableOpacity onPress={() => setSelectPickerConfig(null)}>
@@ -1456,13 +1520,48 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                           {opt.label}
                         </Text>
                         {selectPickerConfig.selectedValue === opt.value && (
-                          <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
+                          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
                         )}
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
                 </View>
               </TouchableOpacity>
+            </Modal>
+
+            {/* FULLSCREEN PINCH-TO-ZOOM IMAGE LIGHTBOX MODAL WITH BLUR BACKDROP */}
+            <Modal
+              visible={!!fullImagePreview}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setFullImagePreview(null)}
+            >
+              <View style={styles.imagePreviewOverlay}>
+                <TouchableOpacity
+                  style={styles.imagePreviewCloseBtn}
+                  onPress={() => setFullImagePreview(null)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="close-circle" size={36} color="#FFFFFF" />
+                </TouchableOpacity>
+
+                {fullImagePreview && (
+                  <ScrollView
+                    contentContainerStyle={styles.zoomScrollViewContent}
+                    maximumZoomScale={4}
+                    minimumZoomScale={1}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    centerContent
+                  >
+                    <Image
+                      source={{ uri: fullImagePreview }}
+                      style={styles.fullScreenImage}
+                      resizeMode="contain"
+                    />
+                  </ScrollView>
+                )}
+              </View>
             </Modal>
 
           </View>
@@ -1485,15 +1584,15 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     zIndex: 999,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    borderWidth: 1,
-    borderColor: '#00FF66',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     elevation: 6,
   },
   toastText: {
@@ -1501,18 +1600,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-
   regSwitchBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   regSwitchTitle: {
     color: '#FFFFFF',
@@ -1525,12 +1624,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    height: 48,
+    marginBottom: 16,
+    gap: 12,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
+  },
+  searchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+
   segmentContainer: {
     flexDirection: 'row',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 14,
-    padding: 4,
+    padding: 3,
     marginBottom: 10,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   segmentBtn: {
     flex: 1,
@@ -1542,15 +1664,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   activeSegmentBtn: {
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   segmentBtnText: {
-    color: 'rgba(255, 255, 255, 0.6)',
+    color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12.5,
     fontWeight: '700',
   },
   activeSegmentBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
 
@@ -1575,7 +1699,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#FF3B30',
+    backgroundColor: 'transparent',
   },
   deleteActionBack: {
     position: 'absolute',
@@ -1587,6 +1711,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
+    borderRadius: 16,
     zIndex: 1,
   },
   deleteActionText: {
@@ -1595,11 +1720,37 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
-  cardItem: {
-    backgroundColor: '#151A24',
+  // Image Preview Modal Styles (Pinch-to-zoom matching ApplicationsScreen)
+  imagePreviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewCloseBtn: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 999,
+  },
+  zoomScrollViewContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+  },
+  fullScreenImage: {
+    width: 340,
+    height: 480,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#242C3D',
+  },
+
+  cardItem: {
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderRadius: 16,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
     zIndex: 2,
   },
   cardInnerRow: {
@@ -1631,18 +1782,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 14,
-    elevation: 4,
-    shadowColor: '#00FF66',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    overflow: 'hidden',
   },
   loadMoreBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -1651,12 +1800,13 @@ const styles = StyleSheet.create({
   skeletonCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#151A24',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 16,
     padding: 12,
     gap: 12,
-    borderWidth: 1,
-    borderColor: '#242C3D',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   skeletonAvatar: {
     width: 48,
@@ -1783,12 +1933,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   modalCard: {
-    backgroundColor: '#151A24',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 24,
     padding: 18,
-    borderWidth: 1,
-    borderColor: '#242C3D',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     maxHeight: '88%',
+    overflow: 'hidden',
   },
   modalHeaderRow: {
     flexDirection: 'row',
@@ -1809,7 +1960,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: '#1E293B',
     borderWidth: 2,
-    borderColor: '#00FF66',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   detailNameHeader: {
     color: '#FFFFFF',
@@ -1818,10 +1969,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   detailInputsBox: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 18,
     padding: 14,
     gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   inputGroup: {
     gap: 4,
@@ -1833,7 +1986,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   inputBox: {
-    backgroundColor: '#151A24',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
@@ -1841,27 +1994,27 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#242C3D',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   inputBoxActive: {
-    borderColor: '#00FF66',
-    backgroundColor: '#0D131F',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
   },
 
   selectBoxTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#151A24',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#242C3D',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   selectBoxTriggerActive: {
-    borderColor: '#00FF66',
-    backgroundColor: '#0D131F',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
   },
   selectBoxValue: {
     color: '#FFFFFF',
@@ -1879,13 +2032,14 @@ const styles = StyleSheet.create({
   },
   pickerCard: {
     width: '100%',
-    backgroundColor: '#151A24',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 20,
     padding: 16,
-    borderWidth: 1,
-    borderColor: '#00FF66',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     gap: 12,
     elevation: 10,
+    overflow: 'hidden',
   },
   pickerHeader: {
     flexDirection: 'row',
@@ -1911,7 +2065,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   pickerOptionActive: {
-    backgroundColor: 'rgba(0,255,102,0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
   },
   pickerOptionText: {
     color: 'rgba(255,255,255,0.7)',
@@ -1919,7 +2073,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   pickerOptionTextActive: {
-    color: '#00FF66',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
 
@@ -1941,34 +2095,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#00FF66',
-    backgroundColor: 'rgba(0, 255, 102, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   pencilBtnActive: {
-    backgroundColor: '#00FF66',
-    borderColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
   },
   pencilBtnText: {
-    color: '#00FF66',
+    color: '#FFFFFF',
     fontSize: 12.5,
     fontWeight: '800',
   },
   pencilBtnTextActive: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
   saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 12,
-    elevation: 4,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   saveBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
   },

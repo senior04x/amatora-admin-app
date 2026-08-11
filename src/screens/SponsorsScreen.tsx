@@ -13,6 +13,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
@@ -656,6 +657,7 @@ export const SponsorsScreen: React.FC = () => {
                         isSelected && !isMain && styles.sponsorCardSelected,
                       ]}
                     >
+                      <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                       {/* Top Status Badge */}
                       <View style={{ width: '100%', alignItems: 'center' }}>
                         {isMain ? (
@@ -744,6 +746,7 @@ export const SponsorsScreen: React.FC = () => {
       <Modal visible={showMainPicker} transparent animationType="fade" onRequestClose={() => setShowMainPicker(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowMainPicker(false)}>
           <View style={[styles.modalCard, { maxWidth: 420, maxHeight: '80%' }]}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="star" size={20} color="#F59E0B" />
@@ -796,6 +799,7 @@ export const SponsorsScreen: React.FC = () => {
       <Modal visible={!!sponsorToDelete} transparent animationType="fade" onRequestClose={() => setSponsorToDelete(null)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }]}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.deleteIconBg}>
               <Ionicons name="trash-outline" size={32} color="#EF4444" />
             </View>
@@ -1007,33 +1011,36 @@ const styles = StyleSheet.create({
   },
   sponsorCard: {
     width: '100%',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     padding: 16,
     alignItems: 'center',
     gap: 10,
+    overflow: 'hidden',
   },
   sponsorCardMain: {
-    borderColor: '#F59E0B',
-    backgroundColor: 'rgba(245, 158, 11, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   sponsorCardSelected: {
-    borderColor: 'rgba(0, 255, 102, 0.4)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   mainSponsorBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#F59E0B',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 6,
     alignSelf: 'center',
   },
   mainSponsorBadgeText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '900',
   },
@@ -1048,8 +1055,8 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   statusBadgeActive: {
-    backgroundColor: 'rgba(0, 255, 102, 0.1)',
-    borderColor: 'rgba(0, 255, 102, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   statusBadgeInactive: {
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -1064,7 +1071,7 @@ const styles = StyleSheet.create({
     height: 64,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: 14,
     padding: 6,
   },
@@ -1093,18 +1100,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: 8,
     paddingVertical: 6,
   },
   btnActionSmallMain: {
-    backgroundColor: '#F59E0B',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   btnActionSmallActive: {
-    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   btnActionTextSmall: {
-    color: '#F59E0B',
+    color: '#FFFFFF',
     fontSize: 10.5,
     fontWeight: '800',
   },
@@ -1118,7 +1127,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -1126,10 +1135,10 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     overflow: 'hidden',
   },
   modalHeader: {
@@ -1199,12 +1208,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     borderRadius: 12,
     paddingVertical: 12,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   modalSaveText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 13.5,
     fontWeight: '900',
   },

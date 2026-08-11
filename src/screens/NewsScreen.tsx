@@ -14,6 +14,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
@@ -446,6 +447,7 @@ export const NewsScreen: React.FC = () => {
                 activeOpacity={0.85}
                 onPress={() => setSelectedNewsForView(item)}
               >
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                 {/* News Image */}
                 {item.image_url ? (
                   <Image source={{ uri: item.image_url }} style={styles.newsCardImg} resizeMode="cover" />
@@ -507,9 +509,10 @@ export const NewsScreen: React.FC = () => {
       )}
 
       {/* FULL DETAIL VIEW MODAL */}
-      <Modal visible={!!selectedNewsForView} transparent animationType="slide">
+      <Modal visible={!!selectedNewsForView} transparent animationType="fade" onRequestClose={() => setSelectedNewsForView(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.viewModalContainer}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             {/* View Modal Header */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{"YANGILIK MANZARASI"}</Text>
@@ -589,9 +592,10 @@ export const NewsScreen: React.FC = () => {
       </Modal>
 
       {/* CREATE / EDIT NEWS MODAL */}
-      <Modal visible={isModalOpen} transparent animationType="slide">
+      <Modal visible={isModalOpen} transparent animationType="slide" onRequestClose={() => setIsModalOpen(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             {/* Modal Header */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
@@ -715,9 +719,10 @@ export const NewsScreen: React.FC = () => {
       </Modal>
 
       {/* DELETE CONFIRMATION MODAL */}
-      <Modal visible={!!newsToDelete} transparent animationType="fade">
+      <Modal visible={!!newsToDelete} transparent animationType="fade" onRequestClose={() => setNewsToDelete(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.deleteModalContainer}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <Ionicons name="alert-circle" size={44} color="#EF4444" style={{ alignSelf: 'center', marginBottom: 12 }} />
             <Text style={styles.deleteModalTitle}>{"Yangilikni o'chirish"}</Text>
             <Text style={styles.deleteModalSub}>
@@ -874,10 +879,10 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   newsCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     overflow: 'hidden',
   },
   newsCardImg: {
@@ -896,16 +901,18 @@ const styles = StyleSheet.create({
   },
   categoryBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0, 255, 135, 0.18)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 6,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   categoryBadgeText: {
     fontSize: 10,
     fontWeight: '900',
-    color: '#00FF87',
+    color: '#FFFFFF',
     letterSpacing: 0.5,
   },
   newsTitle: {
@@ -944,17 +951,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   editBtnText: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#38BDF8',
+    color: '#FFFFFF',
   },
   deleteBtn: {
     backgroundColor: 'rgba(239, 68, 68, 0.15)',
@@ -976,21 +983,23 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 500,
     maxHeight: '85%',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     padding: 20,
+    overflow: 'hidden',
   },
   viewModalContainer: {
     width: '100%',
     maxWidth: 520,
     maxHeight: '90%',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     padding: 20,
+    overflow: 'hidden',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1057,14 +1066,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#00FF87',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingVertical: 12,
     borderRadius: 12,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   viewEditBtnText: {
     fontSize: 13,
     fontWeight: '900',
-    color: '#000000',
+    color: '#FFFFFF',
   },
   viewDeleteBtn: {
     flex: 1,
@@ -1092,8 +1103,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   textInput: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     borderRadius: 12,
     paddingHorizontal: 14,
@@ -1121,8 +1132,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   categoryOptionBtnActive: {
-    backgroundColor: 'rgba(0, 255, 135, 0.2)',
-    borderColor: '#00FF87',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   categoryOptionText: {
     fontSize: 12,
@@ -1130,7 +1141,7 @@ const styles = StyleSheet.create({
     color: '#CBD5E1',
   },
   categoryOptionTextActive: {
-    color: '#00FF87',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
   uploadDropzone: {
@@ -1159,7 +1170,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: '#00FF87',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   previewImage: {
     width: '100%',
@@ -1197,22 +1208,25 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#00FF87',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     alignItems: 'center',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   submitBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontWeight: '900',
     fontSize: 13,
   },
   deleteModalContainer: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
     padding: 20,
+    overflow: 'hidden',
   },
   deleteModalTitle: {
     fontSize: 18,

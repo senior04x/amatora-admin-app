@@ -61,9 +61,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [dbCounts, setDbCounts] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
 
   // Pagination Constants
-  const PLAYER_PAGE_SIZE = 50;
+  const PLAYER_PAGE_SIZE = 20;
   const TEAM_PAGE_SIZE = 10;
 
   const [playerPage, setPlayerPage] = useState(0);
@@ -134,9 +135,51 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     }, 2800);
   };
 
+  const fetchDbCounts = async () => {
+    try {
+      const dbClient = supabaseAdmin || supabase;
+      const table = activeTab === 'players' ? 'applications' : 'teams';
+      
+      const baseQuery = dbClient.from(table).select('*', { count: 'exact', head: true });
+      if (orgId) {
+        baseQuery.eq('organization_id', orgId);
+      }
+      
+      const pendingQ = dbClient.from(table).select('*', { count: 'exact', head: true }).in('status', ['pending', 'kutilmoqda']);
+      if (orgId) pendingQ.eq('organization_id', orgId);
+
+      const approvedQ = dbClient.from(table).select('*', { count: 'exact', head: true }).in('status', ['approved', 'tasdiqlangan', 'partially_approved', 'qisman']);
+      if (orgId) approvedQ.eq('organization_id', orgId);
+
+      const rejectedQ = dbClient.from(table).select('*', { count: 'exact', head: true }).in('status', ['rejected', 'rad etilgan', 'rad_etilgan']);
+      if (orgId) rejectedQ.eq('organization_id', orgId);
+
+      const [totalRes, pendingRes, approvedRes, rejectedRes] = await Promise.all([
+        baseQuery,
+        pendingQ,
+        approvedQ,
+        rejectedQ
+      ]);
+
+      setDbCounts({
+        total: totalRes.count || 0,
+        pending: pendingRes.count || 0,
+        approved: approvedRes.count || 0,
+        rejected: rejectedRes.count || 0,
+      });
+    } catch (e) {
+      console.error('Error fetching db counts:', e);
+    }
+  };
+
   useEffect(() => {
     loadData();
-  }, [orgId, activeTab]);
+    fetchDbCounts();
+  }, [orgId]);
+
+  useEffect(() => {
+    fetchDbCounts();
+  }, [activeTab]);
 
   const loadData = async () => {
     setLoading(true);
@@ -191,12 +234,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
       const dbClient = supabaseAdmin || supabase;
       let query = dbClient.from('teams').select('*').order('name');
       if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
+        query = query.eq('organization_id', orgId);
       }
       const { data } = await query;
       const map = new Map();
@@ -228,12 +266,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         .range(from, to);
 
       if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
+        query = query.eq('organization_id', orgId);
       }
 
       const { data } = await query;
@@ -296,12 +329,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         .range(from, to);
 
       if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
+        query = query.eq('organization_id', orgId);
       }
 
       const { data } = await query;
@@ -619,23 +647,6 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
       return timeB - timeA;
     });
 
-  const pendingCount = currentRawList.filter((a) => {
-    const st = (a.status || 'pending').toLowerCase();
-    return st === 'pending' || st === 'kutilmoqda';
-  }).length;
-
-  const approvedCount = currentRawList.filter((a) => {
-    const st = (a.status || 'pending').toLowerCase();
-    return st === 'approved' || st === 'tasdiqlangan' || st === 'partially_approved' || st === 'qisman';
-  }).length;
-
-  const rejectedCount = currentRawList.filter((a) => {
-    const st = (a.status || 'pending').toLowerCase();
-    return st === 'rejected' || st === 'rad etilgan';
-  }).length;
-
-  const totalCount = currentRawList.length;
-
   const getTeamRosterPlayers = (teamItem: any) => {
     if (!teamItem) return [];
     return playerApps.filter((p) => {
@@ -746,7 +757,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
               activeTab === 'players' && styles.activeSegmentBtnText,
             ]}
           >
-            {`O'yinchilar (${playerApps.length})`}
+            {`O'yinchilar`}
           </Text>
         </TouchableOpacity>
 
@@ -770,7 +781,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
               activeTab === 'teams' && styles.activeSegmentBtnText,
             ]}
           >
-            {`Jamoalar (${teamApps.length})`}
+            {`Jamoalar`}
           </Text>
         </TouchableOpacity>
       </View>
@@ -778,22 +789,22 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
       {/* Stats Counter Bar */}
       <View style={styles.statsOverviewRow}>
         <View style={[styles.statTileCard, { borderColor: 'rgba(245, 158, 11, 0.3)' }]}>
-          <Text style={[styles.statNumberText, { color: '#F59E0B' }]}>{pendingCount}</Text>
+          <Text style={[styles.statNumberText, { color: '#F59E0B' }]}>{dbCounts.pending}</Text>
           <Text style={styles.statLabelText}>{"Kutilmoqda"}</Text>
         </View>
 
         <View style={[styles.statTileCard, { borderColor: 'rgba(34, 197, 94, 0.3)' }]}>
-          <Text style={[styles.statNumberText, { color: '#22C55E' }]}>{approvedCount}</Text>
+          <Text style={[styles.statNumberText, { color: '#22C55E' }]}>{dbCounts.approved}</Text>
           <Text style={styles.statLabelText}>{"Tasdiqlangan"}</Text>
         </View>
 
         <View style={[styles.statTileCard, { borderColor: 'rgba(239, 68, 68, 0.3)' }]}>
-          <Text style={[styles.statNumberText, { color: '#EF4444' }]}>{rejectedCount}</Text>
+          <Text style={[styles.statNumberText, { color: '#EF4444' }]}>{dbCounts.rejected}</Text>
           <Text style={styles.statLabelText}>{"Rad etilgan"}</Text>
         </View>
 
         <View style={[styles.statTileCard, { borderColor: 'rgba(56, 189, 248, 0.3)' }]}>
-          <Text style={[styles.statNumberText, { color: '#38BDF8' }]}>{totalCount}</Text>
+          <Text style={[styles.statNumberText, { color: '#38BDF8' }]}>{dbCounts.total}</Text>
           <Text style={styles.statLabelText}>{"Jami"}</Text>
         </View>
       </View>

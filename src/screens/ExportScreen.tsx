@@ -13,6 +13,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import ViewShot from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
@@ -1991,6 +1992,7 @@ export const ExportScreen: React.FC = () => {
       <Modal visible={showPDFModal} transparent animationType="slide">
         <View style={styles.pdfOverlay}>
           <View style={styles.pdfCard}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             {/* Modal Header */}
             <View style={styles.pdfHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2147,7 +2149,7 @@ export const ExportScreen: React.FC = () => {
                       <Text style={styles.pdfBackText}>{"Ortga"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.pdfSubmitBtn, { backgroundColor: '#10B981' }]}
+                      style={styles.pdfSubmitBtn}
                       onPress={() => handleExecutePDFExport('all')}
                       disabled={isPDFExporting}
                     >
@@ -2197,12 +2199,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomWidth: 1.2,
+    borderBottomColor: 'rgba(255, 255, 255, 0.18)',
     zIndex: 10,
+    overflow: 'hidden',
   },
   dropdownsRow: {
     flexDirection: 'row',
@@ -2222,8 +2225,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
-    borderWidth: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     borderRadius: 10,
     paddingHorizontal: 12,
@@ -2240,9 +2243,9 @@ const styles = StyleSheet.create({
     top: 66,
     left: 0,
     right: 0,
-    backgroundColor: '#1E293B',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     borderRadius: 10,
     zIndex: 100,
     elevation: 10,
@@ -2255,7 +2258,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   dropdownItemActive: {
-    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
   },
   dropdownItemText: {
     color: 'rgba(255, 255, 255, 0.8)',
@@ -2263,7 +2266,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   dropdownItemTextActive: {
-    color: '#00FF66',
+    color: '#FFFFFF',
     fontWeight: '800',
   },
   scrollContent: {
@@ -2272,12 +2275,13 @@ const styles = StyleSheet.create({
     paddingBottom: 140,
   },
   exportSectionCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     padding: 16,
     gap: 14,
+    overflow: 'hidden',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -2298,13 +2302,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 12,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   downloadBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
   },
@@ -2312,7 +2318,7 @@ const styles = StyleSheet.create({
   // PDF Export Modal Styles
   pdfOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -2320,11 +2326,12 @@ const styles = StyleSheet.create({
   pdfCard: {
     width: '100%',
     maxHeight: '85%',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     padding: 20,
+    overflow: 'hidden',
   },
   pdfHeader: {
     flexDirection: 'row',
@@ -2347,14 +2354,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
   },
   pdfModeBtnActive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    borderColor: '#10B981',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   pdfModeText: {
     color: '#94A3B8',
@@ -2362,14 +2369,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   pdfModeTextActive: {
-    color: '#10B981',
+    color: '#FFFFFF',
     fontWeight: '800',
   },
   pdfModeAllBtn: {
     flex: 1.2,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#10B981',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
   },
   pdfModeAllText: {
@@ -2378,12 +2387,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   pdfSectionBox: {
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 14,
     padding: 14,
     gap: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   pdfLabel: {
     color: '#94A3B8',
@@ -2401,7 +2410,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   pdfOptionRowActive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
   },
   pdfOptionText: {
     color: 'rgba(255, 255, 255, 0.8)',
@@ -2409,7 +2418,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   pdfOptionTextActive: {
-    color: '#10B981',
+    color: '#FFFFFF',
     fontWeight: '800',
   },
   pdfActionRow: {
@@ -2433,10 +2442,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#3B82F6',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   pdfSubmitText: {
     color: '#FFFFFF',
@@ -2447,12 +2458,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     padding: 12,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   pdfInfoText: {
-    color: '#10B981',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
     flex: 1,

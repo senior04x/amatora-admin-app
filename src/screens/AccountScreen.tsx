@@ -12,6 +12,9 @@ import {
   TextInput,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import { ColorPicker } from '@darthrapid/react-native-color-picker';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
@@ -29,6 +32,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
     toggleTransferWindow,
     toggleRegistrationStatus,
     refreshOrg,
+    updateOrgLocally,
   } = useOrg();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -43,7 +47,25 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
   const rawPhone = (v: string) => v.replace(/^\+998\s?/, '').replace(/^\+998/, '');
   const [editPhoneSuffix, setEditPhoneSuffix] = useState(rawPhone(currentOrg?.contact_phone || currentOrg?.phone || ''));
   const [showPassword, setShowPassword] = useState(false);
+  const [editBrandColors, setEditBrandColors] = useState<string[]>(
+    Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : ['#00FF87']
+  );
   const [isSavingInfo, setIsSavingInfo] = useState(false);
+
+  const handleAddBrandColor = () => {
+    setEditBrandColors((prev) => [...prev, '#38BDF8']);
+  };
+
+  const handleUpdateBrandColor = (index: number, val: string) => {
+    const updated = [...editBrandColors];
+    updated[index] = val;
+    setEditBrandColors(updated);
+  };
+
+  const handleRemoveBrandColor = (index: number) => {
+    if (editBrandColors.length <= 1) return;
+    setEditBrandColors((prev) => prev.filter((_, idx) => idx !== index));
+  };
 
   useEffect(() => {
     if (currentOrg) {
@@ -52,9 +74,9 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
       // Email priority: admin_users (merged) > organizations.admin_email > organizations.email
       setEditEmail(currentOrg.admin_email || currentOrg.email || '');
       setEditPassword(currentOrg.admin_password || currentOrg.password || '');
-      // Phone priority: contact_phone > phone
       const phoneVal = currentOrg.contact_phone || currentOrg.phone || '';
       setEditPhoneSuffix(rawPhone(phoneVal));
+      setEditBrandColors(Array.isArray(currentOrg.brand_colors) ? currentOrg.brand_colors : ['#00FF87']);
     }
   }, [currentOrg]);
 
@@ -113,83 +135,96 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
       return;
     }
 
-    setIsSavingInfo(true);
-    try {
-      const dbClient = supabaseAdmin || supabase;
-      const targetOrgId = orgId || currentOrg?.id || 1;
+    const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
 
-      const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
-      const mainUpdatePayload: any = {
-        name: editName.trim(),
-        slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
-      };
-      // Only update columns that exist in organizations table
-      if (editEmail.trim()) {
-        mainUpdatePayload.admin_email = editEmail.trim();
-        // Note: 'email' column does NOT exist in organizations - skip
-      }
-      if (fullPhone) {
-        mainUpdatePayload.contact_phone = fullPhone;
-        // Note: 'phone' column does NOT exist in organizations - skip
-      }
+    // 1. INSTANTLY update RAM state so gradient background changes immediately on device!
+    updateOrgLocally({
+      name: editName.trim(),
+      brand_colors: editBrandColors,
+      admin_email: editEmail.trim(),
+      contact_phone: fullPhone,
+    });
 
-      // 1. Update organizations table in Supabase
-      const { error: primaryErr } = await dbClient
-        .from('organizations')
-        .update(mainUpdatePayload)
-        .eq('id', targetOrgId);
+    // 2. INSTANTLY close edit mode — no waiting
+    setIsEditingInfo(false);
+    setIsSavingInfo(false);
 
-      if (primaryErr) {
-        console.warn('Primary org update warning, trying fallback payload:', primaryErr);
-        await dbClient
-          .from('organizations')
-          .update({
-            name: editName.trim(),
-            slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
-          })
-          .eq('id', targetOrgId);
-      }
-
-      // 2. Sync with admin_users table in Supabase (email + phone_number + password)
+    // 3. Save to database IN THE BACKGROUND (non-blocking)
+    const saveToDB = async () => {
       try {
-        const { data: adminUser } = await dbClient
-          .from('admin_users')
-          .select('id')
-          .eq('organization_id', targetOrgId)
-          .eq('role', 'org_admin')
-          .maybeSingle();
+        const dbClient = supabaseAdmin || supabase;
+        const targetOrgId = orgId || currentOrg?.id || 1;
 
-        if (adminUser) {
-          const uPayload: any = {};
-          if (editEmail.trim()) uPayload.email = editEmail.trim();
-          if (editPassword.trim()) uPayload.password = editPassword.trim();
-          if (fullPhone) uPayload.phone_number = fullPhone;  // ✅ to'g'ri ustun nomi
-          if (Object.keys(uPayload).length > 0) {
-            await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
-          }
-        } else {
-          await dbClient.from('admin_users').insert([{
-            organization_id: targetOrgId,
-            email: editEmail.trim() || 'admin@amatora.uz',
-            password: editPassword.trim() || '123456',
-            phone_number: fullPhone || '',  // ✅ to'g'ri ustun nomi
-            role: 'org_admin',
-          }]);
+        const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
+        const mainUpdatePayload: any = {
+          name: editName.trim(),
+          slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\\s+/g, '-'),
+          brand_colors: editBrandColors,
+        };
+        if (editEmail.trim()) {
+          mainUpdatePayload.admin_email = editEmail.trim();
         }
-      } catch (adminErr) {
-        console.warn('admin_users sync note:', adminErr);
-      }
+        if (fullPhone) {
+          mainUpdatePayload.contact_phone = fullPhone;
+        }
 
-      // 3. Refresh Org Context from Database
-      await refreshOrg();
-      setIsEditingInfo(false);
-      Alert.alert('Muvaffaqiyatli', "Bazasida ma'lumotlar muvaffaqiyatli saqlandi va yangilandi!");
-    } catch (err: any) {
-      console.error('Error saving organization:', err);
-      Alert.alert('Xatolik', err.message || "Ma'lumotlarni saqlashda xatolik yuz berdi");
-    } finally {
-      setIsSavingInfo(false);
-    }
+        // Update organizations table
+        const { error: primaryErr } = await dbClient
+          .from('organizations')
+          .update(mainUpdatePayload)
+          .eq('id', targetOrgId);
+
+        if (primaryErr) {
+          console.warn('Primary org update warning, trying fallback:', primaryErr);
+          await dbClient
+            .from('organizations')
+            .update({
+              name: editName.trim(),
+              slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\\s+/g, '-'),
+              brand_colors: editBrandColors,
+            })
+            .eq('id', targetOrgId);
+        }
+
+        // Sync admin_users
+        try {
+          const { data: adminUser } = await dbClient
+            .from('admin_users')
+            .select('id')
+            .eq('organization_id', targetOrgId)
+            .eq('role', 'org_admin')
+            .maybeSingle();
+
+          if (adminUser) {
+            const uPayload: any = {};
+            if (editEmail.trim()) uPayload.email = editEmail.trim();
+            if (editPassword.trim()) uPayload.password = editPassword.trim();
+            if (fullPhone) uPayload.phone_number = fullPhone;
+            if (Object.keys(uPayload).length > 0) {
+              await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
+            }
+          } else {
+            await dbClient.from('admin_users').insert([{
+              organization_id: targetOrgId,
+              email: editEmail.trim() || 'admin@amatora.uz',
+              password: editPassword.trim() || '123456',
+              phone_number: fullPhone || '',
+              role: 'org_admin',
+            }]);
+          }
+        } catch (adminErr) {
+          console.warn('admin_users sync note:', adminErr);
+        }
+
+        // Refresh org context silently in background
+        refreshOrg();
+      } catch (err: any) {
+        console.error('Background save error:', err);
+      }
+    };
+
+    // Fire and forget — don't await
+    saveToDB();
   };
 
   // Handle Logout
@@ -241,6 +276,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
 
       {/* Organization Profile Card */}
       <View style={styles.profileCard}>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <View style={styles.profileHeaderRow}>
           <TouchableOpacity
             style={styles.logoWrapper}
@@ -271,7 +307,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
             <Text style={styles.orgName}>{currentOrg?.name || 'Havas Futbol Ligasi'}</Text>
             <View style={styles.badgeRow}>
               <View style={styles.roleBadge}>
-                <Ionicons name="shield-checkmark" size={12} color="#00FF87" />
+                <Ionicons name="shield-checkmark" size={12} color="#FFFFFF" />
                 <Text style={styles.roleBadgeText}>{"BOSH ADMIN"}</Text>
               </View>
               <Text style={styles.orgIdText}>{`ID: #${currentOrg?.id || 1}`}</Text>
@@ -305,8 +341,8 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           <Switch
             value={isRegistrationOpen}
             onValueChange={handleRegistrationToggle}
-            trackColor={{ false: '#334155', true: 'rgba(0, 255, 135, 0.4)' }}
-            thumbColor={isRegistrationOpen ? '#00FF87' : '#94A3B8'}
+            trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(56, 189, 248, 0.4)' }}
+            thumbColor={isRegistrationOpen ? '#38BDF8' : '#94A3B8'}
           />
         </View>
 
@@ -338,8 +374,16 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
       </View>
 
       {/* Account & Organization Details with 1-to-1 SuperAdmin Inline Editing */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeaderRow}>
+      {(() => {
+        const orgColors = Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : [];
+        const isGradient = false;
+        const CardWrapper = View;
+        const wrapperProps = { style: styles.sectionCard };
+
+        return (
+          <CardWrapper {...(wrapperProps as any)}>
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            <View style={styles.sectionHeaderRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text style={styles.sectionTitle}>{"Tashkilot & Admin Ma'lumotlari"}</Text>
             <TouchableOpacity
@@ -437,6 +481,54 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
               </View>
             </View>
 
+            {/* 6. Brand Colors List (Gradient Builder) */}
+            <View style={styles.inlineInputGroup}>
+              <Text style={styles.inlineInputLabel}>{"TASHKILOT RANGLARI *"}</Text>
+              
+              <View style={styles.brandColorsList}>
+                {editBrandColors.map((colorHex, idx) => (
+                  <View key={idx} style={styles.colorEditRow}>
+                    <ColorPicker
+                      value={colorHex}
+                      onChange={(color: string) => handleUpdateBrandColor(idx, color)}
+                      tabs={['picker', 'palettes']}
+                    />
+                    <TextInput
+                      style={styles.colorHexInput}
+                      value={colorHex}
+                      onChangeText={(val) => handleUpdateBrandColor(idx, val)}
+                      placeholder="#HEX"
+                      placeholderTextColor="#64748B"
+                      autoCapitalize="characters"
+                      maxLength={7}
+                    />
+                    {editBrandColors.length > 1 && (
+                      <TouchableOpacity
+                        style={styles.removeColorBtn}
+                        onPress={() => handleRemoveBrandColor(idx)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              <TouchableOpacity style={styles.addColorBtn} onPress={handleAddBrandColor}>
+                <Ionicons name="add" size={16} color="#00FF87" />
+                <Text style={styles.addColorBtnText}>Rang qo'shish</Text>
+              </TouchableOpacity>
+
+              {/* Gradient Preview */}
+              <Text style={[styles.inlineInputLabel, { marginTop: 12 }]}>{"GRADIENT KO'RINISHI (PREVIEW)"}</Text>
+              <LinearGradient
+                colors={(editBrandColors.length > 1 ? editBrandColors : [editBrandColors[0] || '#000', editBrandColors[0] || '#000']) as any}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.gradientPreview}
+              />
+            </View>
+
             {/* Save & Cancel Buttons */}
             <View style={styles.inlineActionRow}>
               <TouchableOpacity
@@ -498,10 +590,15 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
             </View>
           </>
         )}
-      </View>
+          </CardWrapper>
+        );
+      })()}
+
+      <View style={{ height: 20 }} />
 
       {/* Navigation Quick Links */}
       <View style={styles.sectionCard}>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
         <Text style={styles.sectionTitle}>{"Boshqaruv Menyu"}</Text>
 
         <TouchableOpacity
@@ -514,7 +611,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           }}
         >
           <View style={styles.menuIconBox}>
-            <Ionicons name="settings-sharp" size={18} color="#00FF87" />
+            <Ionicons name="settings-sharp" size={18} color="#FFFFFF" />
           </View>
 
           <View style={{ flex: 1 }}>
@@ -564,12 +661,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   profileCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 22,
     padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     gap: 16,
+    overflow: 'hidden',
   },
   profileHeaderRow: {
     flexDirection: 'row',
@@ -588,9 +686,9 @@ const styles = StyleSheet.create({
     width: 62,
     height: 62,
     borderRadius: 20,
-    backgroundColor: '#1E293B',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   logoEditBadge: {
     position: 'absolute',
@@ -599,7 +697,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#00FF87',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -619,15 +717,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(0, 255, 135, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     paddingVertical: 3,
     paddingHorizontal: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   roleBadgeText: {
-    color: '#00FF87',
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0.5,
@@ -661,12 +759,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   toggleLabelGroup: {
     flexDirection: 'row',
@@ -693,12 +791,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sectionCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 20,
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     gap: 14,
+    overflow: 'hidden',
   },
   infoRow: {
     flexDirection: 'row',
@@ -727,6 +826,102 @@ const styles = StyleSheet.create({
   },
   inlineInputGroup: {
     gap: 4,
+  },
+  brandColorsList: {
+    gap: 8,
+    marginTop: 4,
+  },
+  colorEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  colorSquare: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  colorHexInput: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    color: '#FFF',
+    fontSize: 13,
+    height: 36,
+  },
+  removeColorBtn: {
+    width: 36,
+    height: 36,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addColorBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0, 255, 135, 0.1)',
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  addColorBtnText: {
+    color: '#00FF87',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  gradientPreview: {
+    height: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    marginTop: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    backgroundColor: '#1E293B',
+    borderRadius: 20,
+    padding: 20,
+    gap: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalSaveBtn: {
+    backgroundColor: '#00FF87',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  modalSaveBtnText: {
+    color: '#0F172A',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   inlineInputLabel: {
     fontSize: 10,

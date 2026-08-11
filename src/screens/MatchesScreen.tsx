@@ -471,12 +471,37 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     );
   }
 
-  // Filtered Matches
+  // Filtered and Sorted Matches
   const filteredMatches = matches.filter((m) => {
     if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
     if (selectedRound !== 'all' && String(m.round) !== selectedRound) return false;
     if (selectedStatus !== 'all' && m.status !== selectedStatus) return false;
     return true;
+  }).sort((a, b) => {
+    const statusOrder: Record<string, number> = {
+      'live': 1,
+      'scheduled': 2,
+      'postponed': 3,
+      'finished': 4
+    };
+    
+    const getOrder = (status?: string) => statusOrder[status || 'scheduled'] || 5;
+    const orderA = getOrder(a.status);
+    const orderB = getOrder(b.status);
+    
+    if (orderA !== orderB) return orderA - orderB;
+    
+    // If same status, sort by Date and Time
+    const dateA = new Date(`${a.match_date || '2099-01-01'}T${a.match_time || '00:00:00'}`).getTime();
+    const dateB = new Date(`${b.match_date || '2099-01-01'}T${b.match_time || '00:00:00'}`).getTime();
+    
+    // For finished matches, sort descending (most recently finished first)
+    if (a.status === 'finished') {
+      return dateB - dateA;
+    }
+    
+    // For live/scheduled matches, sort ascending (closest matches first)
+    return dateA - dateB;
   });
 
   // Teams filtered by currently selected edit league

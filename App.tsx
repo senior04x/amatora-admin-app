@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import * as Sentry from '@sentry/react-native';
 
@@ -36,6 +37,24 @@ import { NewsScreen } from './src/screens/NewsScreen';
 
 const queryClient = new QueryClient();
 
+const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React.ReactNode }) => {
+  const [hasRendered, setHasRendered] = useState(isActive);
+
+  useEffect(() => {
+    if (isActive && !hasRendered) {
+      setHasRendered(true);
+    }
+  }, [isActive]);
+
+  if (!hasRendered) return null;
+
+  return (
+    <View style={{ flex: 1, display: isActive ? 'flex' : 'none' }}>
+      {children}
+    </View>
+  );
+};
+
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg } = useOrg();
   const [activeTab, setActiveTab] = useState<
@@ -53,48 +72,55 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     setActiveTab(tab);
   };
 
-  const renderActiveScreen = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <DashboardScreen onNavigate={handleNavigate} />;
-      case 'export':
-        return <ExportScreen />;
-      case 'applications':
-        return <ApplicationsScreen initialTab={playersSubTab} />;
-      case 'players':
-        return <PlayersScreen initialSegmentTab={playersSubTab} />;
-      case 'transfers':
-        return <TransfersScreen />;
-      case 'updates':
-        return <ProfileUpdatesScreen />;
-      case 'sponsors':
-        return <SponsorsScreen />;
-      case 'news':
-        return <NewsScreen />;
-      case 'standings':
-        return <StandingsScreen />;
-      case 'account':
-        return <AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onLogout={onLogout} />;
-      case 'matches':
-        return <MatchesScreen onNavigateToCreate={() => setActiveTab('create-match')} />;
-      case 'create-match':
-        return <CreateMatchScreen onSuccess={() => setActiveTab('matches')} />;
-      case 'settings':
-        return <SettingsScreen onGoBack={() => setActiveTab('account')} />;
-      case 'leagues':
-        return <LeaguesScreen />;
-      default:
-        return <DashboardScreen onNavigate={handleNavigate} />;
+  const orgColors = Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : [];
+  const hasGradient = orgColors.length > 0;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (hasGradient) {
+      fadeAnim.setValue(0);
+      Animated.timing(fadeAnim, {
+        toValue: 0.85,
+        duration: 1200,
+        useNativeDriver: true,
+      }).start();
     }
-  };
+  }, [JSON.stringify(orgColors)]);
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
 
+      {/* Organization Gradient Background with smooth animated fade-in */}
+      {hasGradient && (
+        <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim }]}>
+          <LinearGradient
+            colors={(orgColors.length > 1 ? orgColors : [orgColors[0] || '#0F172A', orgColors[0] || '#0F172A']) as any}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
+      )}
+
       <Header />
 
-      <View style={styles.screenContainer}>{renderActiveScreen()}</View>
+      <View style={styles.screenContainer}>
+        <LazyScreen isActive={activeTab === 'dashboard'}><DashboardScreen onNavigate={handleNavigate} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'export'}><ExportScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'applications'}><ApplicationsScreen initialTab={playersSubTab} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'players'}><PlayersScreen initialSegmentTab={playersSubTab} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'transfers'}><TransfersScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'updates'}><ProfileUpdatesScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'sponsors'}><SponsorsScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'news'}><NewsScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'standings'}><StandingsScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onLogout={onLogout} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => setActiveTab('matches')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
+      </View>
 
       {/* Tactile Dark Navigation Dock */}
       <View style={styles.navDockWrapper}>

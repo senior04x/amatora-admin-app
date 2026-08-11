@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 
@@ -273,7 +274,8 @@ export const StandingsScreen: React.FC = () => {
           activeOpacity={0.8}
           onPress={() => setShowLeagueFilter(!showLeagueFilter)}
         >
-          <Ionicons name="trophy" size={16} color="#00FF87" />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons name="trophy" size={16} color="#FFFFFF" />
           <Text style={styles.leagueSelectorText} numberOfLines={1}>
             {selectedLeague || "Liga tanlang"}
           </Text>
@@ -284,6 +286,7 @@ export const StandingsScreen: React.FC = () => {
       {/* Expandable League Picker */}
       {showLeagueFilter && (
         <View style={styles.leagueFilterMenu}>
+          <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           {leagues.map((lg) => (
             <TouchableOpacity
               key={lg.id}
@@ -297,7 +300,7 @@ export const StandingsScreen: React.FC = () => {
               <Text
                 style={[
                   styles.leagueMenuText,
-                  selectedLeague === lg.name && { color: '#00FF87', fontWeight: '900' },
+                  selectedLeague === lg.name && { color: '#FFFFFF', fontWeight: '900' },
                 ]}
               >
                 {lg.name}
@@ -375,10 +378,11 @@ export const StandingsScreen: React.FC = () => {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF87" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />}
         >
           {/* Table Header Row */}
           <View style={styles.tableHeaderRow}>
+            <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <Text style={[styles.thText, { width: 28 }]}>№</Text>
             <Text style={[styles.thText, { flex: 1, textAlign: 'left', paddingLeft: 6 }]}>Jamoa</Text>
             <Text style={[styles.thText, { width: 34 }]}>O'YN</Text>
@@ -386,7 +390,7 @@ export const StandingsScreen: React.FC = () => {
             <Text style={[styles.thText, { width: 30, color: '#F59E0B' }]}>D</Text>
             <Text style={[styles.thText, { width: 30, color: '#EF4444' }]}>M</Text>
             <Text style={[styles.thText, { width: 46 }]}>T-F</Text>
-            <Text style={[styles.thText, { width: 44, color: '#00FF87' }]}>OCHKO</Text>
+            <Text style={[styles.thText, { width: 44, color: '#FFFFFF' }]}>OCHKO</Text>
           </View>
 
           {/* Table Rows */}
@@ -404,6 +408,7 @@ export const StandingsScreen: React.FC = () => {
                   isTop3 && !isTop1 && styles.rankTop3Row,
                 ]}
               >
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                 {/* Rank number badge */}
                 <View style={[styles.rankBadge, isTop1 && styles.rank1Badge]}>
                   <Text style={[styles.rankBadgeText, isTop1 && styles.rank1BadgeText]}>
@@ -478,13 +483,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     paddingHorizontal: 12,
     paddingVertical: 9,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     maxWidth: 160,
+    overflow: 'hidden',
   },
   leagueSelectorText: {
     color: '#FFFFFF',
@@ -492,13 +498,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   leagueFilterMenu: {
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 14,
     padding: 8,
     marginBottom: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     gap: 4,
+    overflow: 'hidden',
   },
   leagueMenuItem: {
     paddingVertical: 10,
@@ -530,11 +537,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   roundPillActive: {
-    backgroundColor: 'rgba(0, 255, 135, 0.2)',
-    borderColor: '#00FF87',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   roundPillText: {
     fontSize: 11,
@@ -542,7 +549,7 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
   },
   roundPillTextActive: {
-    color: '#00FF87',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
   loadingContainer: {
@@ -561,10 +568,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(30, 41, 59, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     borderStyle: 'dashed',
     marginTop: 20,
   },
@@ -587,12 +594,13 @@ const styles = StyleSheet.create({
   tableHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   thText: {
     color: 'rgba(255, 255, 255, 0.5)',
@@ -603,31 +611,34 @@ const styles = StyleSheet.create({
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   rank1Row: {
-    borderColor: '#00FF87',
-    backgroundColor: 'rgba(0, 255, 135, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   rankTop3Row: {
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.22)',
   },
   rankBadge: {
     width: 24,
     height: 24,
     borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
   },
   rank1Badge: {
-    backgroundColor: '#00FF87',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   rankBadgeText: {
     color: 'rgba(255, 255, 255, 0.7)',
@@ -635,7 +646,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   rank1BadgeText: {
-    color: '#000000',
+    color: '#FFFFFF',
   },
   teamCol: {
     flex: 1,
@@ -648,7 +659,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   teamNameText: {
     flex: 1,
@@ -666,17 +677,18 @@ const styles = StyleSheet.create({
     width: 36,
     height: 26,
     borderRadius: 8,
-    backgroundColor: 'rgba(0, 255, 135, 0.15)',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 135, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   rank1PointsBadge: {
-    backgroundColor: '#00FF87',
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   pointsText: {
-    color: '#00FF87',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '900',
   },

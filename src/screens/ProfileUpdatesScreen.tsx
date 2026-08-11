@@ -13,6 +13,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -374,7 +375,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
         </View>
 
         <TouchableOpacity style={styles.refreshBtn} onPress={fetchProfileUpdateRequests}>
-          <Ionicons name="refresh" size={16} color="#00FF66" />
+          <Ionicons name="refresh" size={16} color="#FFFFFF" />
           <Text style={styles.refreshBtnText}>{"Yangilash"}</Text>
         </TouchableOpacity>
       </View>
@@ -434,6 +435,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
         </View>
       ) : filteredRequests.length === 0 ? (
         <View style={styles.emptyCard}>
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <Ionicons name="document-text-outline" size={48} color="rgba(255,255,255,0.2)" />
           <Text style={styles.emptyTitle}>{"Arizalar topilmadi"}</Text>
           <Text style={styles.emptyText}>
@@ -511,6 +513,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
             return (
               <View key={req.id} style={[styles.updateCard, { borderColor: `${statusColor}33` }]}>
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                 {/* CARD HEADER */}
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardDate}>
@@ -755,18 +758,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   cardSkeleton: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 18,
     padding: 16,
   },
   emptyCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 20,
     padding: 36,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     marginTop: 10,
+    overflow: 'hidden',
   },
   emptyTitle: {
     color: '#FFFFFF',
@@ -781,11 +785,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   updateCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 18,
     padding: 16,
-    borderWidth: 1,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     gap: 12,
+    overflow: 'hidden',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -814,11 +820,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   photoSide: {
     alignItems: 'center',
@@ -851,7 +857,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   diffRowContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.04)',
     borderRadius: 10,
@@ -870,13 +876,13 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   changedBadge: {
-    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 4,
   },
   changedBadgeText: {
-    color: '#00FF66',
+    color: '#FFFFFF',
     fontSize: 9,
     fontWeight: '900',
   },
@@ -924,11 +930,13 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.5)',
   },
   approveIconBtn: {
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -936,10 +944,10 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     overflow: 'hidden',
   },
   modalCancelBtn: {
@@ -960,12 +968,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     borderRadius: 12,
     paddingVertical: 12,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   modalSaveText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 13.5,
     fontWeight: '900',
   },

@@ -13,6 +13,7 @@ interface OrgContextType {
   setIsRegistrationOpen: (val: boolean) => void;
   toggleRegistrationStatus: (val: boolean) => Promise<void>;
   refreshOrg: () => Promise<void>;
+  updateOrgLocally: (fields: Partial<any>) => void;
   collabLeagueIds: number[];
   collabLeagueNames: string[];
 }
@@ -208,6 +209,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [orgId]);
 
+  const updateOrgLocally = (fields: Partial<any>) => {
+    setCurrentOrg((prev: any) => ({ ...prev, ...fields }));
+  };
+
   return (
     <OrgContext.Provider
       value={{
@@ -221,6 +226,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsRegistrationOpen,
         toggleRegistrationStatus,
         refreshOrg: fetchOrg,
+        updateOrgLocally,
         collabLeagueIds,
         collabLeagueNames,
       }}

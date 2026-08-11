@@ -14,6 +14,7 @@ import {
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
@@ -301,6 +302,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         {/* Live Preview Card */}
         {homeTeam && awayTeam && (
           <View style={styles.vsPreviewCard}>
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.vsTeamCol}>
               <Image source={{ uri: homeTeam.logo_url }} style={styles.vsTeamLogo} />
               <Text style={styles.vsTeamName} numberOfLines={1}>
@@ -335,7 +337,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           <View style={styles.labelRow}>
             <Text style={styles.label}>{"5. Tur / Bosqich *"}</Text>
             <TouchableOpacity onPress={() => setShowSecretStages(!showSecretStages)}>
-              <Text style={{ color: '#00FF66', fontSize: 11, fontWeight: '700' }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
                 {showSecretStages ? "Yashirish ▲" : "Bosqichlar (Final/Pley-off) ▼"}
               </Text>
             </TouchableOpacity>
@@ -411,6 +413,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           <Modal visible={showDatePicker} transparent animationType="fade">
             <View style={styles.pickerModalOverlay}>
               <View style={styles.pickerModalCard}>
+                <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                 <View style={styles.pickerModalHeader}>
                   <Text style={styles.pickerModalTitle}>O'yin Sanasini Tanlang 📅</Text>
                 </View>
@@ -455,6 +458,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           <Modal visible={showTimePicker} transparent animationType="fade">
             <View style={styles.pickerModalOverlay}>
               <View style={styles.pickerModalCard}>
+                <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
                 <View style={styles.pickerModalHeader}>
                   <Text style={styles.pickerModalTitle}>O'yin Vaqtini Tanlang ⏰</Text>
                 </View>
@@ -524,6 +528,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
         {/* 9. YouTube Translyatsiya Linki (Yashirin Switch Toggle) */}
         <View style={styles.switchRowCard}>
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <View style={{ flex: 1 }}>
             <Text style={styles.switchLabel}>{"YouTube Translyatsiya Linki 📺"}</Text>
             <Text style={styles.switchSubText}>{"Jonli efir havolasini kiritish uchun yoqing"}</Text>
@@ -531,8 +536,8 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           <Switch
             value={enableYtLink}
             onValueChange={setEnableYtLink}
-            trackColor={{ false: '#334155', true: '#00FF66' }}
-            thumbColor={enableYtLink ? '#000000' : '#94A3B8'}
+            trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+            thumbColor={enableYtLink ? '#FFFFFF' : '#94A3B8'}
           />
         </View>
 
@@ -550,6 +555,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
         {/* 10. Qoldirilgan O'yin Switcher (Postponed Toggle) */}
         <View style={styles.switchRowCard}>
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
           <View style={{ flex: 1 }}>
             <Text style={styles.switchLabel}>{"O'yin Qoldirilgan Statusi ⏸️"}</Text>
             <Text style={styles.switchSubText}>{"Uchrashuv noma'lum muddatga qoldirilgan bo'lsa yoqing"}</Text>
@@ -557,7 +563,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           <Switch
             value={isPostponed}
             onValueChange={setIsPostponed}
-            trackColor={{ false: '#334155', true: '#EF4444' }}
+            trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: '#EF4444' }}
             thumbColor={isPostponed ? '#FFFFFF' : '#94A3B8'}
           />
         </View>
@@ -570,7 +576,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           activeOpacity={0.8}
         >
           {loading ? (
-            <ActivityIndicator size="small" color="#000000" />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <Text style={styles.submitBtnText}>{"O'yinni Jadvalga Saqlash"}</Text>
           )}
@@ -582,6 +588,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       <Modal visible={showLeaguePicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Liganu Tanlang 🏆</Text>
               <TouchableOpacity onPress={() => setShowLeaguePicker(false)}>
@@ -739,26 +746,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   input: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 14,
     height: 48,
     paddingHorizontal: 16,
     color: '#FFFFFF',
     fontSize: 14,
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   selectBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 14,
     height: 48,
     paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   selectBtnText: {
     color: '#FFFFFF',
@@ -774,16 +781,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   roundChip: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   roundChipActive: {
-    backgroundColor: '#00FF66',
-    borderColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   roundChipText: {
     color: 'rgba(255, 255, 255, 0.7)',
@@ -791,16 +798,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   roundChipTextActive: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
   secretStagesContainer: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     padding: 12,
     borderRadius: 14,
     gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 102, 0.2)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   secretStagesTitle: {
     color: 'rgba(255, 255, 255, 0.6)',
@@ -813,13 +821,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   secretStageChip: {
-    backgroundColor: '#0B0F17',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
   secretStageChipActive: {
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
   },
   secretStageText: {
     color: '#FFFFFF',
@@ -827,18 +835,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   secretStageTextActive: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
   switchRowCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     padding: 14,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   switchLabel: {
     color: '#FFFFFF',
@@ -852,16 +861,17 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(8, 11, 17, 0.85)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
   modalCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 24,
     padding: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    overflow: 'hidden',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -886,7 +896,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 8,
-    backgroundColor: '#334155',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   pickerItemText: {
     color: '#FFFFFF',
@@ -897,11 +907,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
     borderRadius: 18,
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 102, 0.3)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    overflow: 'hidden',
   },
   vsTeamCol: {
     alignItems: 'center',
@@ -911,7 +922,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 16,
-    backgroundColor: '#334155',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     marginBottom: 6,
   },
   vsTeamName: {
@@ -921,13 +932,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   vsBadge: {
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   vsBadgeText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -940,15 +953,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   impBtnActive: {
-    backgroundColor: '#00FF66',
-    borderColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   impBtnText: {
     color: 'rgba(255, 255, 255, 0.6)',
@@ -956,35 +969,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   impBtnTextActive: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontWeight: '900',
   },
   submitBtn: {
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 10,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   submitBtnText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '900',
   },
   /* Picker Modal Overlay */
   pickerModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(8, 11, 17, 0.85)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
   pickerModalCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     borderRadius: 24,
     padding: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   pickerModalHeader: {
     marginBottom: 16,
@@ -1014,13 +1030,15 @@ const styles = StyleSheet.create({
   },
   pickerOkBtn: {
     flex: 1.5,
-    backgroundColor: '#00FF66',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   pickerOkText: {
-    color: '#000000',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '900',
   },
