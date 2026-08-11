@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert } from 'react-native';
+import * as Updates from 'expo-updates';
 import * as Sentry from '@sentry/react-native';
 
 Sentry.init({
@@ -205,6 +206,29 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [pinState, setPinState] = useState<'checking' | 'locked' | 'not_set' | 'unlocked' | 'editing'>('checking');
+
+  useEffect(() => {
+    async function onFetchUpdateAsync() {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          Alert.alert(
+            "Yangi Yangilanish 🚀",
+            "Ilovaning yangi versiyasi yuklab olindi. O'zgarishlarni ko'rish uchun ilova qayta ishga tushadi.",
+            [{ text: "OK", onPress: async () => await Updates.reloadAsync() }],
+            { cancelable: false }
+          );
+        }
+      } catch (error) {
+        console.log("Yangilanishni tekshirishda xatolik:", error);
+      }
+    }
+    
+    if (!__DEV__) {
+      onFetchUpdateAsync();
+    }
+  }, []);
 
   useEffect(() => {
     // Check active session
