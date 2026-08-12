@@ -155,13 +155,14 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
     }
   };
 
-  const menuNavItems = [
+  const allMenuNavItems = [
     {
       id: 'export',
       title: 'Export',
       icon: 'image-outline',
       color: '#38BDF8',
       action: () => onNavigate && onNavigate('export'),
+      adminOnly: true,
     },
     {
       id: 'jamoalar',
@@ -169,6 +170,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'shirt-outline',
       color: '#4ADE80',
       action: () => onNavigate && onNavigate('players', 'teams'),
+      adminOnly: false,
     },
     {
       id: 'ligalar',
@@ -176,6 +178,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'trophy-outline',
       color: '#FBBF24',
       action: () => onNavigate && onNavigate('leagues'),
+      adminOnly: false,
     },
     {
       id: 'transferlar',
@@ -183,6 +186,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'swap-horizontal-outline',
       color: '#2DD4BF',
       action: () => onNavigate && onNavigate('transfers'),
+      adminOnly: true,
     },
     {
       id: 'updates',
@@ -190,6 +194,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'refresh-outline',
       color: '#A78BFA',
       action: () => onNavigate && onNavigate('updates'),
+      adminOnly: true,
     },
     {
       id: 'schedule',
@@ -197,6 +202,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'calendar-outline',
       color: '#FB7185',
       action: () => onNavigate('matches'),
+      adminOnly: false,
     },
     {
       id: 'standings',
@@ -204,6 +210,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'grid-outline',
       color: '#38BDF8',
       action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
+      adminOnly: false,
     },
     {
       id: 'sponsors',
@@ -211,6 +218,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'business-outline',
       color: '#FB923C',
       action: () => onNavigate && onNavigate('sponsors'),
+      adminOnly: true,
     },
     {
       id: 'news',
@@ -218,8 +226,13 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'newspaper-outline',
       color: '#F87171',
       action: () => onNavigate && onNavigate('news'),
+      adminOnly: true,
     },
   ];
+
+  const menuNavItems = userRole === 'user' 
+    ? allMenuNavItems.filter(item => !item.adminOnly)
+    : allMenuNavItems;
 
   return (
     <View style={styles.root}>

@@ -73,30 +73,73 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         loginEmail = orgs[0].admin_email;
       }
 
-      // Authenticate with Supabase Auth using the standard client so session is persisted
-      const { data, error } = await supabase.auth.signInWithPassword({
+      // 1. First try Supabase Auth (for org_admin or auth registered users)
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password.trim(),
       });
 
-      if (error) {
-        throw new Error(error.message === 'Invalid login credentials' ? 'Noto\'g\'ri parol yoki login' : error.message);
+      if (!authError && authData?.user) {
+        // Verify if user is org_admin
+        const { data: orgData } = await dbClient
+          .from('organizations')
+          .select('id')
+          .eq('admin_email', loginEmail)
+          .limit(1);
+
+        if (orgData && orgData.length > 0) {
+          await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
+          await AsyncStorage.setItem('@amatora_org_id', orgData[0].id.toString());
+          onLoginSuccess();
+          return;
+        }
+
+        // Check if user is in organization_users table
+        const { data: orgUser } = await dbClient
+          .from('organization_users')
+          .select('*')
+          .eq('email', loginEmail)
+          .maybeSingle();
+
+        if (orgUser) {
+          await AsyncStorage.setItem('@amatora_user_role', orgUser.role || 'user');
+          await AsyncStorage.setItem('@amatora_org_id', orgUser.organization_id.toString());
+          onLoginSuccess();
+          return;
+        }
       }
 
-      // Verify the user is an admin of an organization
-      const { data: orgData } = await dbClient
-        .from('organizations')
-        .select('id')
-        .eq('admin_email', loginEmail)
-        .limit(1);
-        
-      if (!orgData || orgData.length === 0) {
-        await supabase.auth.signOut();
-        throw new Error('Sizda tashkilot boshqaruvchisiga xos huquqlar yo\'q!');
+      // 2. Fallback: Check organization_users table directly by email & password
+      const { data: directOrgUser } = await dbClient
+        .from('organization_users')
+        .select('*')
+        .eq('email', loginEmail)
+        .eq('password', password.trim())
+        .maybeSingle();
+
+      if (directOrgUser) {
+        await AsyncStorage.setItem('@amatora_user_role', directOrgUser.role || 'user');
+        await AsyncStorage.setItem('@amatora_org_id', directOrgUser.organization_id.toString());
+        onLoginSuccess();
+        return;
       }
 
-      // Success
-      onLoginSuccess();
+      // 3. Fallback: Check admin_users table directly
+      const { data: adminUser } = await dbClient
+        .from('admin_users')
+        .select('*')
+        .eq('email', loginEmail)
+        .eq('password', password.trim())
+        .maybeSingle();
+
+      if (adminUser) {
+        await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
+        await AsyncStorage.setItem('@amatora_org_id', adminUser.organization_id.toString());
+        onLoginSuccess();
+        return;
+      }
+
+      throw new Error('Noto\'g\'ri parol yoki login!');
     } catch (err: any) {
       console.error('Login error:', err);
       showError(err.message || 'Tizimga kirishda xatolik yuz berdi');

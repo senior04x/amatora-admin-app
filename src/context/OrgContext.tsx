@@ -15,6 +15,8 @@ interface OrgContextType {
   orgId: number;
   currentOrg: any;
   loading: boolean;
+  userRole: 'org_admin' | 'user';
+  setUserRole: (role: 'org_admin' | 'user') => void;
   transferWindowOpen: boolean;
   setTransferWindowOpen: (val: boolean) => void;
   toggleTransferWindow: (val: boolean) => Promise<void>;
@@ -40,6 +42,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [orgId, setOrgId] = useState<number>(1);
   const [currentOrg, setCurrentOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState<'org_admin' | 'user'>('org_admin');
   const [transferWindowOpen, setTransferWindowOpen] = useState<boolean>(false);
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(true);
   const [collabLeagueIds, setCollabLeagueIds] = useState<number[]>([]);
@@ -93,19 +96,38 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const dbClient = supabaseAdmin || supabase;
       let targetOrgId = orgId || 1;
 
-      // 0. Get user session to find their true organization
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.email) {
-        const { data: userOrg } = await dbClient
-          .from('organizations')
-          .select('id')
-          .eq('admin_email', session.user.email)
-          .single();
-        
-        if (userOrg?.id) {
-          targetOrgId = userOrg.id;
-          if (targetOrgId !== orgId) {
-            setOrgId(targetOrgId);
+      // Read stored role & orgId from AsyncStorage
+      const storedRole = await AsyncStorage.getItem('@amatora_user_role');
+      if (storedRole === 'user') {
+        setUserRole('user');
+      } else {
+        setUserRole('org_admin');
+      }
+
+      const storedOrgId = await AsyncStorage.getItem('@amatora_org_id');
+      if (storedOrgId) {
+        const parsedId = parseInt(storedOrgId, 10);
+        if (!isNaN(parsedId)) {
+          targetOrgId = parsedId;
+          setOrgId(parsedId);
+        }
+      }
+
+      // 0. Get user session to find their true organization if org_admin
+      if (storedRole !== 'user') {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          const { data: userOrg } = await dbClient
+            .from('organizations')
+            .select('id')
+            .eq('admin_email', session.user.email)
+            .single();
+          
+          if (userOrg?.id) {
+            targetOrgId = userOrg.id;
+            if (targetOrgId !== orgId) {
+              setOrgId(targetOrgId);
+            }
           }
         }
       }
@@ -303,6 +325,8 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         orgId,
         currentOrg,
         loading,
+        userRole,
+        setUserRole,
         transferWindowOpen,
         setTransferWindowOpen,
         toggleTransferWindow,

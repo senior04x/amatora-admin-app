@@ -67,7 +67,7 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 };
 
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
-  const { currentOrg } = useOrg();
+  const { currentOrg, userRole } = useOrg();
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news'
   >('dashboard');
@@ -77,10 +77,29 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news',
     subTab?: 'players' | 'teams'
   ) => {
+    if (userRole === 'user' && ['account', 'export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'settings'].includes(tab)) {
+      Alert.alert('Cheklangan huquq', 'Sizda ushbu bo\'limga kirish huquqi yo\'q!');
+      return;
+    }
     if (subTab) {
       setPlayersSubTab(subTab);
     }
     setActiveTab(tab);
+  };
+
+  const handleAccountPress = () => {
+    if (userRole === 'user') {
+      Alert.alert(
+        'Tizimdan chiqish',
+        'Akkountdan chiqmoqchimisiz?',
+        [
+          { text: 'Bekor qilish', style: 'cancel' },
+          { text: 'Chiqish', style: 'destructive', onPress: onLogout }
+        ]
+      );
+    } else {
+      setActiveTab('account');
+    }
   };
 
   const orgColors = Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : [];
@@ -213,7 +232,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
           {/* Segment 5: Admin Akkount / Profil (Round Org Logo Avatar) */}
           <TouchableOpacity
             style={styles.segmentItem}
-            onPress={() => setActiveTab('account')}
+            onPress={handleAccountPress}
             activeOpacity={0.7}
           >
             {currentOrg?.logo_url ? (
