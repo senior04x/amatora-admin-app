@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
@@ -252,7 +252,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
             activeOpacity={0.8}
             onPress={() => onNavigate && onNavigate('applications', 'players')}
           >
-            <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
             <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
             <View style={{ flex: 1 }}>
               <Text style={styles.statLabel}>{"Kutilayotgan Arizalar"}</Text>
@@ -274,7 +274,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('players', 'players')}
         >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
           <Ionicons name="people-outline" size={28} color="#2DD4BF" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Qabul Qilingan O'yinchilar"}</Text>
@@ -293,7 +293,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('leagues')}
         >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
           <Ionicons name="trophy-outline" size={28} color="#FBBF24" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Jami Ligalar"}</Text>
@@ -312,7 +312,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('players', 'teams')}
         >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
           <Ionicons name="shirt-outline" size={28} color="#4ADE80" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Qabul Qilingan Jamoalar"}</Text>

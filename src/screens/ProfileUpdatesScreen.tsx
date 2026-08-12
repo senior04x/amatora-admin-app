@@ -11,6 +11,7 @@ import {
   Modal,
   Alert,
   Animated,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -203,12 +204,10 @@ export const ProfileUpdatesScreen: React.FC = () => {
           if (item.comment && item.comment.includes('[PROFILE_UPDATE]')) {
             const parts = item.comment.split('[PROFILE_UPDATE]');
             let jsonStr = parts[1] || '';
-            jsonStr = jsonStr
-              .replace(/\[INSTAGRAM:[^\]]+\]/g, '')
-              .replace(/\[METADATA:[^\]]+\]/g, '')
-              .trim();
-
-            parsedPayload = JSON.parse(jsonStr);
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              parsedPayload = JSON.parse(jsonMatch[0]);
+            }
           }
         } catch (e) {
           console.warn('Failed to parse profile update payload:', e, item.comment);
@@ -435,7 +434,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
         </View>
       ) : filteredRequests.length === 0 ? (
         <View style={styles.emptyCard}>
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
           <Ionicons name="document-text-outline" size={48} color="rgba(255,255,255,0.2)" />
           <Text style={styles.emptyTitle}>{"Arizalar topilmadi"}</Text>
           <Text style={styles.emptyText}>
@@ -513,7 +512,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
             return (
               <View key={req.id} style={[styles.updateCard, { borderColor: `${statusColor}33` }]}>
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
                 {/* CARD HEADER */}
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardDate}>
