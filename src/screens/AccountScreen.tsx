@@ -75,6 +75,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
     orgId,
     currentOrg,
     loading,
+    userRole,
     transferWindowOpen,
     isRegistrationOpen,
     toggleTransferWindow,
@@ -85,6 +86,114 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+
+  // Organizers (User Role) Management State
+  const [showOrganizersModal, setShowOrganizersModal] = useState(false);
+  const [organizersList, setOrganizersList] = useState<any[]>([]);
+  const [loadingOrganizers, setLoadingOrganizers] = useState(false);
+  const [showAddOrganizerForm, setShowAddOrganizerForm] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [newOrgEmail, setNewOrgEmail] = useState('');
+  const [newOrgPassword, setNewOrgPassword] = useState('');
+  const [isCreatingOrgUser, setIsCreatingOrgUser] = useState(false);
+
+  const fetchOrganizers = async () => {
+    try {
+      setLoadingOrganizers(true);
+      const dbClient = supabaseAdmin || supabase;
+      const targetOrgId = currentOrg?.id || orgId || 1;
+
+      const { data, error } = await dbClient
+        .from('organization_users')
+        .select('*')
+        .eq('organization_id', targetOrgId)
+        .order('id', { ascending: false });
+
+      if (!error && data) {
+        setOrganizersList(data);
+      } else {
+        setOrganizersList([]);
+      }
+    } catch (e) {
+      console.error('Fetch organizers error:', e);
+    } finally {
+      setLoadingOrganizers(false);
+    }
+  };
+
+  const handleOpenOrganizersModal = () => {
+    setShowOrganizersModal(true);
+    fetchOrganizers();
+  };
+
+  const handleCreateOrganizer = async () => {
+    if (!newOrgEmail.trim() || !newOrgPassword.trim() || !newOrgName.trim()) {
+      Alert.alert('Xatolik', 'Iltimos, barcha maydonlarni to\'ldiring!');
+      return;
+    }
+
+    try {
+      setIsCreatingOrgUser(true);
+      const dbClient = supabaseAdmin || supabase;
+      const targetOrgId = currentOrg?.id || orgId || 1;
+
+      const { error } = await dbClient.from('organization_users').insert([
+        {
+          organization_id: targetOrgId,
+          email: newOrgEmail.trim().toLowerCase(),
+          password: newOrgPassword.trim(),
+          full_name: newOrgName.trim(),
+          role: 'user',
+        },
+      ]);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (supabaseAdmin && supabaseAdmin.auth && supabaseAdmin.auth.admin) {
+        try {
+          await supabaseAdmin.auth.admin.createUser({
+            email: newOrgEmail.trim().toLowerCase(),
+            password: newOrgPassword.trim(),
+            email_confirm: true,
+          });
+        } catch (authErr) {
+          console.warn('Auth admin create note:', authErr);
+        }
+      }
+
+      Alert.alert('Muvaffaqiyatli', 'Yangi organizator (user) saqlandi!');
+      setNewOrgName('');
+      setNewOrgEmail('');
+      setNewOrgPassword('');
+      setShowAddOrganizerForm(false);
+      fetchOrganizers();
+    } catch (err: any) {
+      Alert.alert('Xatolik', err.message || 'Organizator qo\'shishda xatolik yuz berdi');
+    } finally {
+      setIsCreatingOrgUser(false);
+    }
+  };
+
+  const handleDeleteOrganizer = async (id: any) => {
+    Alert.alert('Tasdiqlash', 'Ushbu organizatorni o\'chirmoqchimisiz?', [
+      { text: 'Bekor qilish', style: 'cancel' },
+      {
+        text: 'O\'chirish',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const dbClient = supabaseAdmin || supabase;
+            await dbClient.from('organization_users').delete().eq('id', id);
+            fetchOrganizers();
+          } catch (e) {
+            console.error('Delete organizer error:', e);
+          }
+        },
+      },
+    ]);
+  };
 
   // 1-to-1 SuperAdmin Organization Edit Form State
   const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -719,6 +828,24 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
         </TouchableOpacity>
 
+        {userRole !== 'user' && (
+          <TouchableOpacity
+            style={styles.menuLinkRow}
+            activeOpacity={0.8}
+            onPress={handleOpenOrganizersModal}
+          >
+            <View style={[styles.menuIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
+              <Ionicons name="people-sharp" size={18} color="#38BDF8" />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.menuLinkText}>{"Organizatorlar (Userlar)"}</Text>
+              <Text style={styles.menuLinkSub}>{"Tashkilot xodimlariga kirish huquqlarini berish va boshqarish"}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={styles.logoutBtn}
           activeOpacity={0.8}
@@ -728,6 +855,148 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           <Text style={styles.logoutBtnText}>{"Tizimdan Chiqish"}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Organizers (User Roles) Management Modal */}
+      <Modal
+        visible={showOrganizersModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowOrganizersModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} />
+
+          <View style={[styles.glassModalCard, { maxWidth: 380, maxHeight: '85%', padding: 20 }]}>
+            <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 16 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.glassModalTitle, { marginBottom: 2, textAlign: 'left' }]}>{"Organizatorlar Bilan Ishlash"}</Text>
+                <Text style={{ color: '#94A3B8', fontSize: 12 }}>{`Tashkilot ID: #${currentOrg?.id || orgId}`}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowOrganizersModal(false)} style={{ padding: 4 }}>
+                <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.6)" />
+              </TouchableOpacity>
+            </View>
+
+            {!showAddOrganizerForm ? (
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                  borderColor: '#38BDF8',
+                  borderWidth: 1,
+                  borderRadius: 14,
+                  paddingVertical: 12,
+                  width: '100%',
+                  marginBottom: 16,
+                }}
+                activeOpacity={0.8}
+                onPress={() => setShowAddOrganizerForm(true)}
+              >
+                <Ionicons name="person-add" size={18} color="#38BDF8" />
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>{"Yangi User (Organizator) Qo'shish"}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: '100%', backgroundColor: 'rgba(0,0,0,0.3)', padding: 14, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                <Text style={{ color: '#38BDF8', fontWeight: '700', fontSize: 14, marginBottom: 10 }}>{"Yangi Organizator Kiritish"}</Text>
+                
+                <TextInput
+                  style={styles.inlineInput}
+                  placeholder="F.I.SH (Ism Familiya)"
+                  placeholderTextColor="#64748B"
+                  value={newOrgName}
+                  onChangeText={setNewOrgName}
+                />
+                
+                <TextInput
+                  style={[styles.inlineInput, { marginTop: 8 }]}
+                  placeholder="Login Email"
+                  placeholderTextColor="#64748B"
+                  value={newOrgEmail}
+                  onChangeText={setNewOrgEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+
+                <TextInput
+                  style={[styles.inlineInput, { marginTop: 8 }]}
+                  placeholder="Parol"
+                  placeholderTextColor="#64748B"
+                  value={newOrgPassword}
+                  onChangeText={setNewOrgPassword}
+                  secureTextEntry
+                />
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center' }}
+                    onPress={() => setShowAddOrganizerForm(false)}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 13 }}>{"Bekor qilish"}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#38BDF8', alignItems: 'center' }}
+                    onPress={handleCreateOrganizer}
+                    disabled={isCreatingOrgUser}
+                  >
+                    {isCreatingOrgUser ? (
+                      <ActivityIndicator size="small" color="#000000" />
+                    ) : (
+                      <Text style={{ color: '#000000', fontWeight: '700', fontSize: 13 }}>{"Saqlash"}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            <ScrollView style={{ width: '100%' }} showsVerticalScrollIndicator={false}>
+              {loadingOrganizers ? (
+                <ActivityIndicator size="small" color="#38BDF8" style={{ marginVertical: 20 }} />
+              ) : organizersList.length === 0 ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Ionicons name="people-outline" size={40} color="rgba(255,255,255,0.2)" />
+                  <Text style={{ color: '#94A3B8', fontSize: 13, marginTop: 8 }}>{"Hozircha organizatorlar yo'q"}</Text>
+                </View>
+              ) : (
+                organizersList.map((item) => (
+                  <View
+                    key={item.id}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: 'rgba(255,255,255,0.06)',
+                      borderRadius: 14,
+                      padding: 12,
+                      marginBottom: 8,
+                      borderWidth: 1,
+                      borderColor: 'rgba(255,255,255,0.1)',
+                    }}
+                  >
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(56, 189, 248, 0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                      <Ionicons name="person" size={18} color="#38BDF8" />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>{item.full_name || 'Organizator'}</Text>
+                      <Text style={{ color: '#94A3B8', fontSize: 12, marginTop: 2 }}>{item.email}</Text>
+                      <Text style={{ color: '#64748B', fontSize: 11, marginTop: 1 }}>{`Parol: ${item.password}`}</Text>
+                    </View>
+
+                    <TouchableOpacity onPress={() => handleDeleteOrganizer(item.id)} style={{ padding: 6 }}>
+                      <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Glassmorphism Logout Confirmation Modal */}
       <Modal
