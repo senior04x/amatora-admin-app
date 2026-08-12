@@ -314,7 +314,10 @@ function App() {
       if (storedPin) {
         setPinState('locked');
       } else {
-        if (isFreshLogin) {
+        const skipped = await AsyncStorage.getItem('@amatora_pin_skipped');
+        if (skipped === 'true') {
+          setPinState('unlocked');
+        } else if (isFreshLogin) {
           setPinState('not_set');
         } else {
           setPinState('unlocked');

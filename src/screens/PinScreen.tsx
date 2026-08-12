@@ -115,23 +115,24 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
   const handleForgotOrResetPin = () => {
     Alert.alert(
       'PIN kodni o\'chirish',
-      'Joriy PIN kod o\'chiriladi va tizimga qayta kirishingiz kerak bo\'ladi. Davom etasizmi?',
+      'Joriy PIN kod o\'chiriladi va tizimdan chiqasiz. Tizimga qayta kirishingiz kerak bo\'ladi. Davom etasizmi?',
       [
         { text: 'Bekor qilish', style: 'cancel' },
         {
-          text: 'O\'chirish',
+          text: 'O\'chirish va chiqish',
           style: 'destructive',
           onPress: async () => {
             try {
               await AsyncStorage.removeItem(PIN_KEY);
               await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+              await AsyncStorage.removeItem('@amatora_pin_skipped');
               DeviceEventEmitter.emit('app_pin_changed');
               DeviceEventEmitter.emit('app_pin_reset');
 
+              await supabase.auth.signOut().catch(() => {});
+
               if (onReset) {
                 onReset();
-              } else {
-                await supabase.auth.signOut();
               }
             } catch (e) {
               console.log('Error deleting pin:', e);
@@ -149,9 +150,10 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
       setMode('confirm');
     } else if (mode === 'confirm') {
       if (enteredPin === tempPin) {
-        // Success: save PIN locally on device
+        // Success: save PIN locally on device and remove skipped flag
         try {
           await AsyncStorage.setItem(PIN_KEY, enteredPin);
+          await AsyncStorage.removeItem('@amatora_pin_skipped');
           DeviceEventEmitter.emit('app_pin_changed');
 
           // Prompt for Biometrics enrollment if device supports hardware
@@ -176,11 +178,12 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
                   onPress: async () => {
                     const authRes = await LocalAuthentication.authenticateAsync({
                       promptMessage: 'Biometriyani tasdiqlang',
-                      disableDeviceFallback: true,
+                      fallbackLabel: '',
+                      cancelLabel: 'Bekor qilish',
                     });
+
                     if (authRes.success) {
                       await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
-                      DeviceEventEmitter.emit('app_biometrics_changed');
                     } else {
                       await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
                     }
@@ -191,32 +194,27 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
               { cancelable: false }
             );
           } else {
+            await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
             onSuccess();
           }
         } catch (err) {
-          setErrorMsg('PIN kod saqlashda xatolik');
+          setErrorMsg('PIN kodni saqlashda xatolik');
           setPin('');
         }
       } else {
-        // Mismatch
         Vibration.vibrate(400);
-        setErrorMsg('PIN kod mos kelmadi, qayta urinib ko\'ring');
+        setErrorMsg('PIN kodlar mos kelmadi!');
         setPin('');
-        setMode('create');
         setTempPin('');
+        setMode('create');
       }
     } else if (mode === 'verify') {
       try {
         const storedPin = await AsyncStorage.getItem(PIN_KEY);
         if (enteredPin === storedPin) {
-          if (action === 'edit') {
-            setMode('create');
-            setPin('');
-            setErrorMsg('');
-            setShowResetOption(false);
-          } else {
-            onSuccess();
-          }
+          setErrorMsg('');
+          setPin('');
+          onSuccess();
         } else {
           Vibration.vibrate(400);
           setErrorMsg('PIN kod noto\'g\'ri');
@@ -230,7 +228,10 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
+    try {
+      await AsyncStorage.setItem('@amatora_pin_skipped', 'true');
+    } catch (e) {}
     onSuccess();
   };
 
