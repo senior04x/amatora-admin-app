@@ -175,22 +175,11 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
                 {
                   text: 'Ha, yoqish',
                   onPress: async () => {
-                    const authRes = await LocalAuthentication.authenticateAsync({
-                      promptMessage: 'Biometriyani tasdiqlang',
-                      fallbackLabel: '',
-                      cancelLabel: 'Bekor qilish',
-                    });
-
-                    if (authRes.success) {
-                      await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
-                    } else {
-                      await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
-                    }
+                    await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
                     onSuccess();
                   },
                 },
-              ],
-              { cancelable: false }
+              ]
             );
           } else {
             await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');

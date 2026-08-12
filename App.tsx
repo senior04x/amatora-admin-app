@@ -296,15 +296,10 @@ function App() {
       setPinState('editing');
     });
 
-    const changedListener = DeviceEventEmitter.addListener('app_pin_changed', () => {
-      checkPinStatus(false);
-    });
-
     return () => {
       subscription.unsubscribe();
       resetListener.remove();
       editListener.remove();
-      changedListener.remove();
     };
   }, []);
 
