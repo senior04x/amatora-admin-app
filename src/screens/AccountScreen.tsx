@@ -67,8 +67,13 @@ const TextSkeleton: React.FC<{ width?: number | string; height?: number; borderR
   );
 };
 
-export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogout?: () => void }> = ({
+export const AccountScreen: React.FC<{
+  onNavigateToSettings?: () => void;
+  onNavigateToOrganizers?: () => void;
+  onLogout?: () => void;
+}> = ({
   onNavigateToSettings,
+  onNavigateToOrganizers,
   onLogout,
 }) => {
   const {
@@ -832,7 +837,11 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           <TouchableOpacity
             style={styles.menuLinkRow}
             activeOpacity={0.8}
-            onPress={handleOpenOrganizersModal}
+            onPress={() => {
+              if (onNavigateToOrganizers) {
+                onNavigateToOrganizers();
+              }
+            }}
           >
             <View style={[styles.menuIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
               <Ionicons name="people-sharp" size={18} color="#38BDF8" />

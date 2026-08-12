@@ -44,6 +44,7 @@ import { TransfersScreen } from './src/screens/TransfersScreen';
 import { ProfileUpdatesScreen } from './src/screens/ProfileUpdatesScreen';
 import { SponsorsScreen } from './src/screens/SponsorsScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
+import { OrganizersScreen } from './src/screens/OrganizersScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 
 const queryClient = new QueryClient();
@@ -69,15 +70,15 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, userRole } = useOrg();
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news'
+    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers'
   >('dashboard');
   const [playersSubTab, setPlayersSubTab] = useState<'players' | 'teams'>('players');
 
   const handleNavigate = (
-    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news',
+    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers',
     subTab?: 'players' | 'teams'
   ) => {
-    if (userRole === 'user' && ['account', 'export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'settings'].includes(tab)) {
+    if (userRole === 'user' && ['account', 'export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'settings', 'organizers'].includes(tab)) {
       Alert.alert('Cheklangan huquq', 'Sizda ushbu bo\'limga kirish huquqi yo\'q!');
       return;
     }
@@ -146,7 +147,8 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'sponsors'}><SponsorsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'news'}><NewsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'standings'}><StandingsScreen /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onLogout={onLogout} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onNavigateToOrganizers={() => setActiveTab('organizers')} onLogout={onLogout} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => setActiveTab('matches')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
