@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { Platform, Vibration } from 'react-native';
+import { Platform } from 'react-native';
 
 /**
  * Triggers a crisp, light iOS haptic feedback pulse.
@@ -16,46 +16,44 @@ export const triggerIosLightHaptic = () => {
 };
 
 /**
- * Triggers a continuous, seamless crescendo vibration on iOS (1200ms).
- * Has zero pauses or gaps ("to'xtab-to'xtab bo'lmasdan"), smoothly ramping up
- * in intensity from light to heavy as the background gradient covers the screen.
+ * Triggers a soft, subtle, gentle iOS haptic wave during the 1.2s gradient fade-in.
+ * Uses ONLY soft Light impact / selection taps without harsh motor vibrations,
+ * making it feel extremely smooth, elegant, and light on iOS devices.
  */
 export const triggerIosCrescendoHaptic = () => {
   if (Platform.OS !== 'ios') return;
 
   try {
-    // 1. Continuous unbroken vibration motor stream on iOS for 1200ms
-    Vibration.vibrate(1200);
+    // 1. Initial gentle light tap as gradient starts
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    // 2. Rapid seamless micro-haptic wave every 60ms that escalates in force
-    let step = 0;
-    const totalSteps = 20; // 20 steps over 1200ms
-    const interval = setInterval(() => {
-      step++;
-      if (step > totalSteps || Platform.OS !== 'ios') {
-        clearInterval(interval);
-        return;
-      }
-
-      try {
-        if (step <= 7) {
-          // Phase 1 (0ms - 420ms): Light continuous feel
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        } else if (step <= 14) {
-          // Phase 2 (420ms - 840ms): Medium continuous feel
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-        } else {
-          // Phase 3 (840ms - 1200ms): Heavy peak feel as gradient finishes covering screen
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-        }
-      } catch (e) {}
-    }, 60);
-
-    // Cleanup timer after 1250ms
+    // 2. Soft selection pulse (250ms)
     setTimeout(() => {
-      clearInterval(interval);
-    }, 1250);
+      if (Platform.OS === 'ios') {
+        try {
+          Haptics.selectionAsync().catch(() => {});
+        } catch (e) {}
+      }
+    }, 250);
+
+    // 3. Gentle light impact pulse (550ms)
+    setTimeout(() => {
+      if (Platform.OS === 'ios') {
+        try {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        } catch (e) {}
+      }
+    }, 550);
+
+    // 4. Soft selection pulse (850ms) as gradient finishes covering screen
+    setTimeout(() => {
+      if (Platform.OS === 'ios') {
+        try {
+          Haptics.selectionAsync().catch(() => {});
+        } catch (e) {}
+      }
+    }, 850);
   } catch (e) {
-    // Crash-proof safe fallback
+    // Safe crash-proof fallback
   }
 };
