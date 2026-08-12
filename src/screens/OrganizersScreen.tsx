@@ -112,7 +112,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false, // Instant selection without slow cropper delay
-        quality: 0.5,
+        quality: 0.6,
         base64: true,
       });
 
@@ -129,6 +129,66 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     }
   };
 
+  const uploadAvatarToSupabase = async (dbClient: any, localUri: string): Promise<string | null> => {
+    try {
+      if (!localUri) return null;
+      if (localUri.startsWith('http://') || localUri.startsWith('https://')) {
+        return localUri;
+      }
+
+      const fileExt = 'jpg';
+      const fileName = `user_avatar_${Date.now()}.${fileExt}`;
+      const filePath = `user-avatars/${fileName}`;
+
+      let arrayBuffer: ArrayBuffer | null = null;
+      if (localUri.startsWith('data:image')) {
+        const base64Data = localUri.split(',')[1];
+        const decodeBase64 = (b64: string): Uint8Array => {
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+          let str = b64.replace(/=+$/, '');
+          let output = new Uint8Array((str.length * 3) >> 2);
+          let p = 0;
+          for (let i = 0; i < str.length; i += 4) {
+            let n =
+              (chars.indexOf(str[i]) << 18) |
+              (chars.indexOf(str[i + 1]) << 12) |
+              ((chars.indexOf(str[i + 2]) || 0) << 6) |
+              (chars.indexOf(str[i + 3]) || 0);
+            output[p++] = (n >> 16) & 0xff;
+            if (str[i + 2] !== '=' && str[i + 2] !== undefined) output[p++] = (n >> 8) & 0xff;
+            if (str[i + 3] !== '=' && str[i + 3] !== undefined) output[p++] = n & 0xff;
+          }
+          return output;
+        };
+        arrayBuffer = decodeBase64(base64Data).buffer;
+      } else {
+        const res = await fetch(localUri);
+        const blob = await res.blob();
+        arrayBuffer = await new Response(blob).arrayBuffer();
+      }
+
+      const { error: uploadError } = await dbClient.storage
+        .from('player-photos')
+        .upload(filePath, arrayBuffer, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.warn('Avatar storage upload warn:', uploadError);
+      }
+
+      const { data: urlData } = dbClient.storage
+        .from('player-photos')
+        .getPublicUrl(filePath);
+
+      return urlData?.publicUrl || localUri;
+    } catch (e) {
+      console.error('Upload avatar to Supabase error:', e);
+      return localUri;
+    }
+  };
+
   const handleCreateOrganizer = async () => {
     if (!newOrgEmail.trim() || !newOrgPassword.trim() || !newOrgName.trim()) {
       Alert.alert('Xatolik', 'Iltimos, barcha maydonlarni to\'ldiring!');
@@ -140,6 +200,12 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
       const dbClient = supabaseAdmin || supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
 
+      // Upload avatar image to Supabase Storage bucket first to get public HTTP URL
+      let uploadedAvatarUrl: string | null = null;
+      if (newOrgAvatar) {
+        uploadedAvatarUrl = await uploadAvatarToSupabase(dbClient, newOrgAvatar);
+      }
+
       const { error } = await dbClient.from('organization_users').insert([
         {
           organization_id: targetOrgId,
@@ -147,7 +213,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
           password: newOrgPassword.trim(),
           full_name: newOrgName.trim(),
           role: 'user',
-          avatar_url: newOrgAvatar || null,
+          avatar_url: uploadedAvatarUrl || null,
         },
       ]);
 
