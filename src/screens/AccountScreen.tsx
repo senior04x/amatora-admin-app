@@ -861,6 +861,7 @@ export const AccountScreen: React.FC<{
               </>
             )}
           </>
+        )}
       </View>
 
       <View style={{ height: 20 }} />
