@@ -66,6 +66,23 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
 
   const toggleBiometrics = async (val: boolean) => {
     if (val) {
+      const p = await AsyncStorage.getItem('@amatora_pin_code');
+      if (!p) {
+        Alert.alert(
+          'PIN kod yo\'q',
+          'Face ID yoki Barmoq izini yoqish uchun avval PIN kod o\'rnating.',
+          [
+            { text: 'Bekor qilish', style: 'cancel' },
+            {
+              text: 'PIN kod o\'rnatish',
+              onPress: () => handleSetOrEditPin(),
+            },
+          ]
+        );
+        setBiometricsEnabled(false);
+        return;
+      }
+
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
       if (!hasHardware || !isEnrolled) {
@@ -78,15 +95,21 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         return;
       }
 
-      const res = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Biometrik parolni yoqish uchun tasdiqlang',
-        disableDeviceFallback: true,
-      });
+      try {
+        const res = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Biometriyani tasdiqlang',
+          fallbackLabel: '',
+          cancelLabel: 'Bekor qilish',
+        });
 
-      if (res.success) {
-        setBiometricsEnabled(true);
-        await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
-      } else {
+        if (res.success) {
+          setBiometricsEnabled(true);
+          await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
+        } else {
+          setBiometricsEnabled(false);
+          await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+        }
+      } catch (err) {
         setBiometricsEnabled(false);
         await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
       }
