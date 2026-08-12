@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
-import * as Sentry from '@sentry/react-native';
 
 import * as Notifications from 'expo-notifications';
 
@@ -12,11 +11,6 @@ Notifications.setNotificationHandler({
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
-});
-
-Sentry.init({
-  dsn: 'https://dummy@sentry.io/1234567',
-  tracesSampleRate: 1.0,
 });
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
