@@ -44,7 +44,7 @@ import { TransfersScreen } from './src/screens/TransfersScreen';
 import { ProfileUpdatesScreen } from './src/screens/ProfileUpdatesScreen';
 import { SponsorsScreen } from './src/screens/SponsorsScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
-import { triggerIosLightHaptic } from './src/utils/haptics';
+import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 
 const queryClient = new QueryClient();
 
@@ -89,7 +89,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (hasGradient) {
-      triggerIosLightHaptic();
+      triggerIosCrescendoHaptic();
       fadeAnim.setValue(0);
       Animated.timing(fadeAnim, {
         toValue: 0.85,

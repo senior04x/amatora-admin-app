@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
-import { triggerIosLightHaptic } from '../utils/haptics';
+import { triggerIosCrescendoHaptic } from '../utils/haptics';
 
 export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogout?: () => void }> = ({
   onNavigateToSettings,
@@ -137,8 +137,8 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
       return;
     }
 
-    // Trigger light iOS haptic vibration when gradient colors are saved and applied
-    triggerIosLightHaptic();
+    // Trigger progressive crescendo iOS vibration while gradient expands & covers screen
+    triggerIosCrescendoHaptic();
 
     const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
 

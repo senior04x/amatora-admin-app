@@ -3,7 +3,7 @@ import { AppState, Animated, TouchableOpacity, Text, StyleSheet, View } from 're
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, supabaseAdmin } from '../supabaseClient';
-import { triggerIosLightHaptic } from '../utils/haptics';
+import { triggerIosCrescendoHaptic } from '../utils/haptics';
 
 interface ToastOptions {
   message: string;
@@ -292,7 +292,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateOrgLocally = (fields: Partial<any>) => {
     if (fields.brand_colors) {
-      triggerIosLightHaptic();
+      triggerIosCrescendoHaptic();
     }
     setCurrentOrg((prev: any) => ({ ...prev, ...fields }));
   };
