@@ -210,7 +210,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       icon: 'grid-outline',
       color: '#38BDF8',
       action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
-      adminOnly: false,
+      adminOnly: true,
     },
     {
       id: 'sponsors',
