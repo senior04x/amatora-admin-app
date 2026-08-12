@@ -433,7 +433,7 @@ function App() {
   );
 }
 
-export default Sentry.wrap(App);
+export default App;
 
 const styles = StyleSheet.create({
   container: {
