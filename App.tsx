@@ -4,6 +4,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import * as Sentry from '@sentry/react-native';
 
+import * as Notifications from 'expo-notifications';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
 Sentry.init({
   dsn: 'https://dummy@sentry.io/1234567',
   tracesSampleRate: 1.0,
@@ -34,6 +44,7 @@ import { TransfersScreen } from './src/screens/TransfersScreen';
 import { ProfileUpdatesScreen } from './src/screens/ProfileUpdatesScreen';
 import { SponsorsScreen } from './src/screens/SponsorsScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
+import { triggerIosLightHaptic } from './src/utils/haptics';
 
 const queryClient = new QueryClient();
 
@@ -78,6 +89,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (hasGradient) {
+      triggerIosLightHaptic();
       fadeAnim.setValue(0);
       Animated.timing(fadeAnim, {
         toValue: 0.85,
@@ -262,7 +274,7 @@ function App() {
       const loggedIn = !!session;
       setIsLoggedIn(loggedIn);
       if (loggedIn) {
-        checkPinStatus();
+        checkPinStatus(false);
       } else {
         setAuthLoading(false);
       }
@@ -291,16 +303,20 @@ function App() {
     };
   }, []);
 
-  const checkPinStatus = async () => {
+  const checkPinStatus = async (isFreshLogin: boolean = false) => {
     try {
       const storedPin = await AsyncStorage.getItem('@amatora_pin_code');
       if (storedPin) {
         setPinState('locked');
       } else {
-        setPinState('not_set');
+        if (isFreshLogin) {
+          setPinState('not_set');
+        } else {
+          setPinState('unlocked');
+        }
       }
     } catch (e) {
-      setPinState('not_set');
+      setPinState('unlocked');
     } finally {
       setAuthLoading(false);
     }
@@ -324,10 +340,21 @@ function App() {
         ) : !isLoggedIn ? (
           <LoginScreen onLoginSuccess={() => {
             setIsLoggedIn(true);
-            checkPinStatus();
+            checkPinStatus(true);
           }} />
         ) : pinState === 'locked' || pinState === 'not_set' || pinState === 'editing' ? (
-          <PinScreen action={pinState === 'editing' ? 'edit' : 'login'} onSuccess={() => setPinState('unlocked')} />
+          <PinScreen
+            action={pinState === 'editing' ? 'edit' : 'login'}
+            onSuccess={() => {
+              setPinState('unlocked');
+              DeviceEventEmitter.emit('app_pin_changed');
+            }}
+            onReset={() => {
+              setIsLoggedIn(false);
+              setPinState('checking');
+              supabase.auth.signOut().catch(() => {});
+            }}
+          />
         ) : (
           <OrgProvider>
             <MainAppContent onLogout={() => {

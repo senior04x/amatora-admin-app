@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
 import { BlurView } from 'expo-blur';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as Notifications from 'expo-notifications';
 import { useOrg } from '../context/OrgContext';
 import { supabaseAdmin, supabase } from '../supabaseClient';
 import pkg from '../../package.json';
@@ -16,17 +17,128 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   const { currentOrg } = useOrg();
-  const [biometricsEnabled, setBiometricsEnabled] = useState(true);
+  const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [hasPin, setHasPin] = useState(false);
 
   useEffect(() => {
-    checkPin();
+    loadSettings();
+
+    const pinSub = DeviceEventEmitter.addListener('app_pin_changed', () => {
+      checkPin();
+    });
+
+    const bioSub = DeviceEventEmitter.addListener('app_biometrics_changed', () => {
+      loadBiometricsStatus();
+    });
+
+    return () => {
+      pinSub.remove();
+      bioSub.remove();
+    };
   }, []);
+
+  const loadSettings = async () => {
+    await checkPin();
+    await loadBiometricsStatus();
+    await loadNotificationsStatus();
+  };
 
   const checkPin = async () => {
     const p = await AsyncStorage.getItem('@amatora_pin_code');
     setHasPin(!!p);
+  };
+
+  const loadBiometricsStatus = async () => {
+    const bio = await AsyncStorage.getItem('@amatora_biometrics_enabled');
+    setBiometricsEnabled(bio === 'true');
+  };
+
+  const loadNotificationsStatus = async () => {
+    const notif = await AsyncStorage.getItem('@amatora_notifications_enabled');
+    if (notif !== null) {
+      setNotificationsEnabled(notif === 'true');
+    } else {
+      const { status } = await Notifications.getPermissionsAsync();
+      setNotificationsEnabled(status === 'granted');
+    }
+  };
+
+  const toggleBiometrics = async (val: boolean) => {
+    if (val) {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!hasHardware || !isEnrolled) {
+        Alert.alert(
+          'Biometriya sozlanmagan',
+          'Qurilmangizda Face ID / Barmoq izi mavjud emas yoki telefon sozlamalarida biometriya o\'rnatilmagan.'
+        );
+        setBiometricsEnabled(false);
+        await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+        return;
+      }
+
+      const res = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Biometrik parolni yoqish uchun tasdiqlang',
+        disableDeviceFallback: true,
+      });
+
+      if (res.success) {
+        setBiometricsEnabled(true);
+        await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
+      } else {
+        setBiometricsEnabled(false);
+        await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+      }
+    } else {
+      setBiometricsEnabled(false);
+      await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+    }
+  };
+
+  const toggleNotifications = async (val: boolean) => {
+    if (val) {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        Alert.alert(
+          'Bildirishnomalar rad etildi',
+          'Push-bildirishnomalardan foydalanish uchun telefon sozlamalaridan ruxsat bering.'
+        );
+        setNotificationsEnabled(false);
+        await AsyncStorage.setItem('@amatora_notifications_enabled', 'false');
+        return;
+      }
+
+      setNotificationsEnabled(true);
+      await AsyncStorage.setItem('@amatora_notifications_enabled', 'true');
+
+      // Request and store push token if available
+      try {
+        const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
+        if (tokenData?.data) {
+          await AsyncStorage.setItem('@amatora_push_token', tokenData.data);
+          if (currentOrg?.id) {
+            const dbClient = supabaseAdmin || supabase;
+            dbClient
+              .from('organizations')
+              .update({ push_token: tokenData.data })
+              .eq('id', currentOrg.id)
+              .catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.log('Push token fetch error:', err);
+      }
+    } else {
+      setNotificationsEnabled(false);
+      await AsyncStorage.setItem('@amatora_notifications_enabled', 'false');
+    }
   };
 
   const handleSetOrEditPin = () => {
@@ -40,7 +152,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   const handleResetPin = () => {
     Alert.alert(
       'PIN kodni o\'chirish',
-      'Rostdan ham joriy PIN kodni o\'chirib tashlamoqchimisiz? Keyingi safar ilovaga kirganingizda yangi PIN kod o\'rnatishingiz so\'raladi.',
+      'Rostdan ham joriy PIN kodni o\'chirib tashlamoqchimisiz?',
       [
         { text: 'Bekor qilish', style: 'cancel' },
         {
@@ -48,17 +160,22 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 1. Delete locally
+              // 1. Delete locally INSTANTLY
               await AsyncStorage.removeItem('@amatora_pin_code');
+              await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+              setHasPin(false);
+              setBiometricsEnabled(false);
+              DeviceEventEmitter.emit('app_pin_changed');
               
-              // 2. Delete from database
+              // 2. Delete from database in background non-blockingly
               if (currentOrg?.id) {
                 const dbClient = supabaseAdmin || supabase;
-                await dbClient.from('organizations').update({ app_pin_code: null }).eq('id', currentOrg.id);
+                dbClient
+                  .from('organizations')
+                  .update({ app_pin_code: null })
+                  .eq('id', currentOrg.id)
+                  .catch((err) => console.log('Error deleting pin from DB:', err));
               }
-
-              setHasPin(false);
-              // Do NOT emit app_pin_reset so it doesn't jump to PinScreen
             } catch (e) {
               Alert.alert('Xatolik', 'PIN kodni o\'chirishda xatolik yuz berdi.');
             }
@@ -99,7 +216,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         </View>
         <Switch
           value={biometricsEnabled}
-          onValueChange={setBiometricsEnabled}
+          onValueChange={toggleBiometrics}
           trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
           thumbColor={biometricsEnabled ? '#FFFFFF' : '#94A3B8'}
         />
@@ -118,7 +235,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         </View>
         <Switch
           value={notificationsEnabled}
-          onValueChange={setNotificationsEnabled}
+          onValueChange={toggleNotifications}
           trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
           thumbColor={notificationsEnabled ? '#FFFFFF' : '#94A3B8'}
         />

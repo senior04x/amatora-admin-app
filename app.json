@@ -7,14 +7,15 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.amatora.adminapp"
+      "bundleIdentifier": "com.amatora.adminapp",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "AMATORA Admin ilovasiga kirish uchun Face ID dan foydalaniladi."
+      }
     },
     "android": {
       "package": "com.amatora.adminapp"
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/64a552bf-be37-4da8-80c1-8473e71ad8b2"
     },
@@ -25,6 +26,12 @@
       }
     },
     "plugins": [
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "AMATORA Admin ilovasiga kirish uchun Face ID dan foydalaniladi."
+        }
+      ],
       "@react-native-community/datetimepicker",
       "@sentry/react-native"
     ]

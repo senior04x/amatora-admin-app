@@ -12,3 +12,5 @@ veda
 .idea/
 .vscode/
 *.swp
+credentials.json
+

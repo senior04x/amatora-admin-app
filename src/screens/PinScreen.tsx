@@ -6,32 +6,22 @@ import {
   TouchableOpacity,
   Vibration,
   ImageBackground,
+  DeviceEventEmitter,
+  Alert,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
-import Svg, { Path } from 'react-native-svg';
-
 const FaceIdIcon = ({ size = 28, color = '#FFFFFF' }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <Path d="M7 4H6a2 2 0 0 0-2 2v1" />
-    <Path d="M17 4h1a2 2 0 0 1 2 2v1" />
-    <Path d="M4 17v1a2 2 0 0 0 2 2h1" />
-    <Path d="M20 17v1a2 2 0 0 1-2 2h-1" />
-    
-    <Path d="M9.5 10v1.5" />
-    <Path d="M14.5 10v1.5" />
-    
-    <Path d="M12 11v3.5a1 1 0 0 1-1 1h-.5" />
-    
-    <Path d="M9.5 16.5c1.2 1.5 3.8 1.5 5 0" />
-  </Svg>
+  <Ionicons name="scan-outline" size={size} color={color} />
 );
+import * as LocalAuthentication from 'expo-local-authentication';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
 interface PinScreenProps {
   onSuccess: () => void;
+  onReset?: () => void;
   action?: 'login' | 'edit';
 }
 
@@ -40,11 +30,12 @@ type PinMode = 'checking' | 'create' | 'confirm' | 'verify';
 const PIN_LENGTH = 4;
 const PIN_KEY = '@amatora_pin_code';
 
-export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login' }) => {
+export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action = 'login' }) => {
   const [mode, setMode] = useState<PinMode>('checking');
   const [pin, setPin] = useState<string>('');
   const [tempPin, setTempPin] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [showResetOption, setShowResetOption] = useState<boolean>(false);
 
   useEffect(() => {
     checkExistingPin();
@@ -55,11 +46,50 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login
       const storedPin = await AsyncStorage.getItem(PIN_KEY);
       if (storedPin) {
         setMode('verify');
+        const bioEnabled = await AsyncStorage.getItem('@amatora_biometrics_enabled');
+        if (bioEnabled === 'true') {
+          setTimeout(() => {
+            handleBiometricAuth();
+          }, 350);
+        }
       } else {
         setMode('create');
       }
     } catch (err) {
       setMode('create');
+    }
+  };
+
+  const handleBiometricAuth = async () => {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (!hasHardware) {
+        Alert.alert('Biometriya', 'Qurilmangizda biometrik apparat (Face ID / Barmoq izi) topilmadi.');
+        return;
+      }
+
+      if (!isEnrolled) {
+        Alert.alert('Biometriya', 'Qurilma sozlamalarida Face ID / Barmoq izi sozlanmagan.');
+        return;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'AMATORA Admin ilovasiga kirish',
+        fallbackLabel: '',
+        cancelLabel: 'Bekor qilish',
+      });
+
+      if (result.success) {
+        onSuccess();
+      } else if (result.error && result.error !== 'user_cancel' && result.error !== 'app_cancel') {
+        Alert.alert('Face ID Xatoligi', `Xatolik turi: ${result.error}`);
+      }
+    } catch (err: any) {
+      console.log('Biometric auth error:', err);
+      Alert.alert('Xatolik', err?.message || 'Biometriyadan foydalanishda xatolik yuz berdi');
     }
   };
 
@@ -82,6 +112,45 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login
     }
   };
 
+  const handleForgotOrResetPin = () => {
+    Alert.alert(
+      'PIN kodni o\'chirish',
+      'Joriy PIN kod o\'chiriladi va tizimga qayta kirishingiz kerak bo\'ladi. Davom etasizmi?',
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: 'O\'chirish',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AsyncStorage.removeItem(PIN_KEY);
+              await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+              DeviceEventEmitter.emit('app_pin_changed');
+              
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user?.email) {
+                const dbClient = supabaseAdmin || supabase;
+                dbClient
+                  .from('organizations')
+                  .update({ app_pin_code: null })
+                  .eq('admin_email', session.user.email)
+                  .catch(() => {});
+              }
+
+              if (onReset) {
+                onReset();
+              } else {
+                await supabase.auth.signOut();
+              }
+            } catch (e) {
+              console.log('Error deleting pin:', e);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handlePinComplete = async (enteredPin: string) => {
     if (mode === 'create') {
       setTempPin(enteredPin);
@@ -89,18 +158,63 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login
       setMode('confirm');
     } else if (mode === 'confirm') {
       if (enteredPin === tempPin) {
-        // Success: save PIN
+        // Success: save PIN locally INSTANTLY
         try {
           await AsyncStorage.setItem(PIN_KEY, enteredPin);
-          
-          // Sync with DB
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user?.email) {
-            const dbClient = supabaseAdmin || supabase;
-            await dbClient.from('organizations').update({ app_pin_code: enteredPin }).eq('admin_email', session.user.email);
-          }
+          DeviceEventEmitter.emit('app_pin_changed');
 
-          onSuccess();
+          // Sync with DB in the background non-blockingly
+          (async () => {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user?.email) {
+                const dbClient = supabaseAdmin || supabase;
+                await dbClient.from('organizations').update({ app_pin_code: enteredPin }).eq('admin_email', session.user.email);
+              }
+            } catch (bgErr) {
+              console.log('Background DB PIN sync error:', bgErr);
+            }
+          })();
+
+          // Prompt for Biometrics enrollment if device supports hardware
+          const hasHardware = await LocalAuthentication.hasHardwareAsync();
+          const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+          if (hasHardware && isEnrolled) {
+            Alert.alert(
+              'Face ID / Barmoq Izi',
+              'Ilovaga tez va xavfsiz kirish uchun biometrik paroldan foydalanishni xohlaysizmi?',
+              [
+                {
+                  text: 'Yo\'q',
+                  style: 'cancel',
+                  onPress: async () => {
+                    await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+                    onSuccess();
+                  },
+                },
+                {
+                  text: 'Ha, yoqish',
+                  onPress: async () => {
+                    const authRes = await LocalAuthentication.authenticateAsync({
+                      promptMessage: 'Biometriyani tasdiqlang',
+                      disableDeviceFallback: true,
+                    });
+                    if (authRes.success) {
+                      await AsyncStorage.setItem('@amatora_biometrics_enabled', 'true');
+                      DeviceEventEmitter.emit('app_biometrics_changed');
+                    } else {
+                      await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+                    }
+                    onSuccess();
+                  },
+                },
+              ],
+              { cancelable: false }
+            );
+          } else {
+            onSuccess();
+          }
         } catch (err) {
           setErrorMsg('PIN kod saqlashda xatolik');
           setPin('');
@@ -121,12 +235,14 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login
             setMode('create');
             setPin('');
             setErrorMsg('');
+            setShowResetOption(false);
           } else {
             onSuccess();
           }
         } else {
           Vibration.vibrate(400);
           setErrorMsg('PIN kod noto\'g\'ri');
+          setShowResetOption(true);
           setPin('');
         }
       } catch (err) {
@@ -209,9 +325,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login
               <TouchableOpacity
                 style={styles.keyBtnEmpty}
                 activeOpacity={0.6}
-                onPress={() => {
-                  // TODO: Implement FaceID / Biometrics
-                }}
+                onPress={handleBiometricAuth}
               >
                 <FaceIdIcon size={28} color="#FFFFFF" />
               </TouchableOpacity>
@@ -230,6 +344,18 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, action = 'login
                 <Ionicons name="backspace-outline" size={28} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
+
+            {/* Reset PIN Option on Incorrect PIN */}
+            {showResetOption && mode === 'verify' && (
+              <TouchableOpacity
+                style={styles.resetPinBtn}
+                activeOpacity={0.75}
+                onPress={handleForgotOrResetPin}
+              >
+                <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                <Text style={styles.resetPinBtnText}>PIN kodni o'chirish</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </BlurView>
       </ImageBackground>
@@ -241,6 +367,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  resetPinBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 22,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+  },
+  resetPinBtnText: {
+    color: '#EF4444',
+    fontSize: 13,
+    fontWeight: '700',
   },
   bgImage: {
     flex: 1,

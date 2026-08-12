@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { triggerIosLightHaptic } from '../utils/haptics';
 
 export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogout?: () => void }> = ({
   onNavigateToSettings,
@@ -136,6 +137,9 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
       return;
     }
 
+    // Trigger light iOS haptic vibration when gradient colors are saved and applied
+    triggerIosLightHaptic();
+
     const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
 
     // 1. INSTANTLY update RAM state so gradient background changes immediately on device!
@@ -242,25 +246,13 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
     ]);
   };
 
-  // Switcher Handlers with Alert Feedback
+  // Switcher Handlers (Feedback via Top Toast in OrgContext)
   const handleRegistrationToggle = async (val: boolean) => {
     await toggleRegistrationStatus(val);
-    Alert.alert(
-      'Ro\'yxatdan O\'tish Holati',
-      val
-        ? "Ro'yxatdan o'tish OCHILDI! Endi yangi arizalar qabul qilinadi."
-        : "Ro'yxatdan o'tish YOPILDI!"
-    );
   };
 
   const handleTransferToggle = async (val: boolean) => {
     await toggleTransferWindow(val);
-    Alert.alert(
-      'Transfer Oynasi Statusi',
-      val
-        ? "Transfer oynasi OCHILDI! O'yinchilar tahririga ruxsat berildi."
-        : "Transfer oynasi YOPILDI!"
-    );
   };
 
   return (

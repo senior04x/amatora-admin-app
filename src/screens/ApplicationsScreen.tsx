@@ -186,6 +186,147 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
   // Detail Modal State
   const [selectedDetailItem, setSelectedDetailItem] = useState<any | null>(null);
+  const [loadingTeamRoster, setLoadingTeamRoster] = useState(false);
+  const [teamRosterPlayers, setTeamRosterPlayers] = useState<any[]>([]);
+
+  // Fetch Team's Players directly from DB when a team card is clicked
+  const fetchTeamRoster = async (teamItem: any) => {
+    if (!teamItem || teamItem.isPlayer) return;
+    setLoadingTeamRoster(true);
+    setTeamRosterPlayers([]);
+    try {
+      const dbClient = supabaseAdmin || supabase;
+      const teamId = teamItem.id;
+      const teamName = teamItem.name ? teamItem.name.trim() : '';
+
+      let rawApps: any[] = [];
+      let playersData: any[] = [];
+
+      // 1a. Fetch applications by team_id
+      if (teamId) {
+        try {
+          const { data: appById } = await dbClient
+            .from('applications')
+            .select('*')
+            .eq('team_id', teamId);
+          if (appById) rawApps.push(...appById);
+        } catch (e) {}
+      }
+
+      // 1b. Fetch applications by team_name if available
+      if (teamName) {
+        try {
+          const { data: appByName } = await dbClient
+            .from('applications')
+            .select('*')
+            .ilike('team_name', teamName);
+          if (appByName) {
+            appByName.forEach((item: any) => {
+              if (!rawApps.some((existing) => existing.id === item.id)) {
+                rawApps.push(item);
+              }
+            });
+          }
+        } catch (e) {}
+      }
+
+      // 2a. Fetch players by team_id
+      if (teamId) {
+        try {
+          const { data: pById } = await dbClient
+            .from('players')
+            .select('*')
+            .eq('team_id', teamId);
+          if (pById) playersData.push(...pById);
+        } catch (e) {}
+      }
+
+      // 2b. Fetch players by team_name
+      if (teamName) {
+        try {
+          const { data: pByName } = await dbClient
+            .from('players')
+            .select('*')
+            .ilike('team_name', teamName);
+          if (pByName) {
+            pByName.forEach((item: any) => {
+              if (!playersData.some((existing) => existing.id === item.id)) {
+                playersData.push(item);
+              }
+            });
+          }
+        } catch (e) {}
+      }
+
+      // 2c. Fetch players via team_players join table
+      if (teamId) {
+        try {
+          const { data: tpData } = await dbClient
+            .from('team_players')
+            .select('player_id, players(*)')
+            .eq('team_id', teamId);
+          if (tpData) {
+            tpData.forEach((row: any) => {
+              if (row.players && !playersData.some((existing) => existing.id === row.players.id)) {
+                playersData.push(row.players);
+              }
+            });
+          }
+        } catch (e) {}
+      }
+
+      // Filter applications (exclude profile updates)
+      const validApps = rawApps.filter(
+        (p: any) => !p.comment || !p.comment.includes('[PROFILE_UPDATE]')
+      );
+
+      // Map of players to avoid duplicates
+      const map = new Map<string, any>();
+
+      validApps.forEach((p: any) => {
+        const key = p.id ? `app_${p.id}` : (p.passport_id || p.full_name || p.name);
+        map.set(String(key), { ...p, isFromAppTable: true });
+      });
+
+      playersData.forEach((p: any) => {
+        const pName = p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+        let existingKey = Array.from(map.keys()).find((k) => {
+          const item = map.get(k);
+          return (
+            (p.passport_id && item.passport_id === p.passport_id) ||
+            (pName && (item.full_name === pName || item.name === pName))
+          );
+        });
+
+        if (!existingKey) {
+          map.set(`player_${p.id}`, {
+            id: p.id,
+            full_name: pName,
+            photo_url: p.avatar_url || p.photo_url,
+            position: p.position || 'O\'yinchi',
+            status: p.status || 'approved',
+            team_id: p.team_id || teamId,
+            team_name: p.team_name || teamName,
+            isFromPlayersTable: true,
+          });
+        }
+      });
+
+      setTeamRosterPlayers(Array.from(map.values()));
+    } catch (err) {
+      console.error('Fetch team roster error:', err);
+      setTeamRosterPlayers([]);
+    } finally {
+      setLoadingTeamRoster(false);
+    }
+  };
+
+  const openDetailModal = (item: any, isPlayer: boolean) => {
+    setSelectedDetailItem({ ...item, isPlayer });
+    if (!isPlayer) {
+      fetchTeamRoster(item);
+    }
+  };
 
   // Status Change Overlay State for Roster Player
   const [statusPickerPlayer, setStatusPickerPlayer] = useState<any | null>(null);
@@ -541,6 +682,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     setStatusPickerPlayer(null);
 
     setPlayerApps((prev) =>
+      prev.map((p) => (p.id === item.id ? { ...p, status: newStatus } : p))
+    );
+
+    setTeamRosterPlayers((prev) =>
       prev.map((p) => (p.id === item.id ? { ...p, status: newStatus } : p))
     );
 
@@ -1131,7 +1276,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   {/* Center Details */}
                   <TouchableOpacity
                     style={styles.cardInfoCol}
-                    onPress={() => setSelectedDetailItem({ ...item, isPlayer })}
+                    onPress={() => openDetailModal(item, isPlayer)}
                     activeOpacity={0.7}
                   >
                     <Text style={styles.applicantName} numberOfLines={1}>
@@ -1385,19 +1530,29 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   </View>
                 )}
 
-                {/* If Team Application, Show Team's Roster List */}
+                {/* If Team Application, Show Team's Roster List fetched from Database */}
                 {!selectedDetailItem.isPlayer && (
                   <View style={{ gap: 10, marginTop: 10 }}>
-                    <Text style={[styles.modalTitle, { fontSize: 14.5, color: '#00FF66' }]}>
-                      {`Jamoaning o'yinchilari arizalari (${getTeamRosterPlayers(selectedDetailItem).length})`}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={[styles.modalTitle, { fontSize: 14.5, color: '#00FF66' }]}>
+                        {`Jamoaning o'yinchilari (${teamRosterPlayers.length})`}
+                      </Text>
+                      {loadingTeamRoster && <ActivityIndicator size="small" color="#00FF66" />}
+                    </View>
 
-                    {getTeamRosterPlayers(selectedDetailItem).length === 0 ? (
+                    {loadingTeamRoster ? (
+                      <View style={{ paddingVertical: 20, alignItems: 'center', gap: 8 }}>
+                        <ActivityIndicator size="small" color="#00FF66" />
+                        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
+                          {"O'yinchilar bazadan yuklanmoqda..."}
+                        </Text>
+                      </View>
+                    ) : teamRosterPlayers.length === 0 ? (
                       <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
-                        {"Ushbu jamoaga tegishli o'yinchi arizalari hali biriktirilmagan"}
+                        {"Ushbu jamoaga tegishli o'yinchilar hali biriktirilmagan"}
                       </Text>
                     ) : (
-                      getTeamRosterPlayers(selectedDetailItem).map((pItem: any) => {
+                      teamRosterPlayers.map((pItem: any, pIdx: number) => {
                         const pName =
                           pItem.full_name ||
                           `${pItem.first_name || ''} ${pItem.last_name || ''}`.trim() ||
@@ -1409,7 +1564,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop';
 
                         return (
-                          <View key={pItem.id} style={styles.rosterPlayerRowCard}>
+                          <View key={pItem.id ? `roster-${pItem.id}-${pIdx}` : `roster-name-${pIdx}`} style={styles.rosterPlayerRowCard}>
                             <TouchableOpacity
                               style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
                               onPress={() => setSelectedDetailItem({ ...pItem, isPlayer: true })}

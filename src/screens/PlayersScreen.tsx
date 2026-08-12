@@ -1528,43 +1528,42 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 </View>
               </TouchableOpacity>
             </Modal>
-
-            {/* FULLSCREEN PINCH-TO-ZOOM IMAGE LIGHTBOX MODAL WITH BLUR BACKDROP */}
-            <Modal
-              visible={!!fullImagePreview}
-              transparent
-              animationType="fade"
-              onRequestClose={() => setFullImagePreview(null)}
-            >
-              <View style={styles.imagePreviewOverlay}>
-                <TouchableOpacity
-                  style={styles.imagePreviewCloseBtn}
-                  onPress={() => setFullImagePreview(null)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="close-circle" size={36} color="#FFFFFF" />
-                </TouchableOpacity>
-
-                {fullImagePreview && (
-                  <ScrollView
-                    contentContainerStyle={styles.zoomScrollViewContent}
-                    maximumZoomScale={4}
-                    minimumZoomScale={1}
-                    showsHorizontalScrollIndicator={false}
-                    showsVerticalScrollIndicator={false}
-                    centerContent
-                  >
-                    <Image
-                      source={{ uri: fullImagePreview }}
-                      style={styles.fullScreenImage}
-                      resizeMode="contain"
-                    />
-                  </ScrollView>
-                )}
-              </View>
-            </Modal>
-
           </View>
+        </View>
+      </Modal>
+
+      {/* FULLSCREEN PINCH-TO-ZOOM IMAGE LIGHTBOX MODAL WITH BLUR BACKDROP (ROOT LEVEL) */}
+      <Modal
+        visible={!!fullImagePreview}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullImagePreview(null)}
+      >
+        <View style={styles.imagePreviewOverlay}>
+          <TouchableOpacity
+            style={styles.imagePreviewCloseBtn}
+            onPress={() => setFullImagePreview(null)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="close-circle" size={36} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {fullImagePreview && (
+            <ScrollView
+              contentContainerStyle={styles.zoomScrollViewContent}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              centerContent
+            >
+              <Image
+                source={{ uri: fullImagePreview }}
+                style={styles.fullScreenImage}
+                resizeMode="contain"
+              />
+            </ScrollView>
+          )}
         </View>
       </Modal>
     </View>
