@@ -230,18 +230,49 @@ export const AccountScreen: React.FC<{
     setEditBrandColors((prev) => prev.filter((_, idx) => idx !== index));
   };
 
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
+
   useEffect(() => {
-    if (currentOrg) {
-      setEditName(currentOrg.name || '');
-      setEditSlug(currentOrg.slug || '');
-      // Email priority: admin_users (merged) > organizations.admin_email > organizations.email
-      setEditEmail(currentOrg.admin_email || currentOrg.email || '');
-      setEditPassword(currentOrg.admin_password || currentOrg.password || '');
-      const phoneVal = currentOrg.contact_phone || currentOrg.phone || '';
-      setEditPhoneSuffix(rawPhone(phoneVal));
-      setEditBrandColors(Array.isArray(currentOrg.brand_colors) ? currentOrg.brand_colors : ['#00FF87']);
-    }
-  }, [currentOrg]);
+    const loadData = async () => {
+      if (userRole === 'user') {
+        try {
+          const dbClient = supabaseAdmin || supabase;
+          const { data: sessionData } = await supabase.auth.getSession();
+          const sessionEmail = sessionData?.session?.user?.email;
+
+          if (sessionEmail) {
+            const { data: userRec } = await dbClient
+              .from('organization_users')
+              .select('*')
+              .ilike('email', sessionEmail)
+              .maybeSingle();
+
+            if (userRec) {
+              setEditName(userRec.full_name || 'Organizator');
+              setEditEmail(userRec.email || sessionEmail);
+              setEditPassword(userRec.password || '');
+              setUserAvatarUrl(userRec.avatar_url || null);
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('Fetch user account record error:', e);
+        }
+      }
+
+      if (currentOrg) {
+        setEditName(currentOrg.name || '');
+        setEditSlug(currentOrg.slug || '');
+        setEditEmail(currentOrg.admin_email || currentOrg.email || '');
+        setEditPassword(currentOrg.admin_password || currentOrg.password || '');
+        const phoneVal = currentOrg.contact_phone || currentOrg.phone || '';
+        setEditPhoneSuffix(rawPhone(phoneVal));
+        setEditBrandColors(Array.isArray(currentOrg.brand_colors) ? currentOrg.brand_colors : ['#00FF87']);
+      }
+    };
+
+    loadData();
+  }, [currentOrg, userRole]);
 
   // Handle Organization Logo Upload
   const handlePickLogo = async () => {
@@ -438,7 +469,7 @@ export const AccountScreen: React.FC<{
             style={styles.logoWrapper}
             activeOpacity={0.8}
             onPress={handlePickLogo}
-            disabled={isUploadingLogo}
+            disabled={isUploadingLogo || userRole === 'user'}
           >
             {isUploadingLogo ? (
               <ActivityIndicator size="small" color="#00FF87" />
@@ -447,140 +478,147 @@ export const AccountScreen: React.FC<{
                 <Image
                   source={{
                     uri:
-                      currentOrg?.logo_url ||
-                      'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=120&auto=format&fit=crop',
+                      userRole === 'user'
+                        ? (userAvatarUrl || currentOrg?.logo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop')
+                        : (currentOrg?.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=120&auto=format&fit=crop'),
                   }}
                   style={styles.orgLogo}
                 />
-                <View style={styles.logoEditBadge}>
-                  <Ionicons name="camera" size={12} color="#000000" />
-                </View>
+                {userRole !== 'user' && (
+                  <View style={styles.logoEditBadge}>
+                    <Ionicons name="camera" size={12} color="#000000" />
+                  </View>
+                )}
               </>
             )}
           </TouchableOpacity>
 
           <View style={{ flex: 1 }}>
-            {loading || !currentOrg?.name ? (
+            {loading || (!currentOrg?.name && userRole !== 'user') ? (
               <View style={{ gap: 6, marginVertical: 4 }}>
                 <TextSkeleton width={180} height={20} borderRadius={6} />
                 <TextSkeleton width={100} height={14} borderRadius={4} />
               </View>
             ) : (
               <>
-                <Text style={styles.orgName}>{currentOrg.name}</Text>
+                <Text style={styles.orgName}>{userRole === 'user' ? (editName || 'Organizator') : currentOrg.name}</Text>
                 <View style={styles.badgeRow}>
-                  <View style={styles.roleBadge}>
-                    <Ionicons name="shield-checkmark" size={12} color="#FFFFFF" />
-                    <Text style={styles.roleBadgeText}>{"BOSH ADMIN"}</Text>
+                  <View style={[styles.roleBadge, userRole === 'user' && { backgroundColor: 'rgba(56, 189, 248, 0.25)', borderColor: 'rgba(56, 189, 248, 0.4)' }]}>
+                    <Ionicons name={userRole === 'user' ? "person-circle" : "shield-checkmark"} size={12} color={userRole === 'user' ? "#38BDF8" : "#FFFFFF"} />
+                    <Text style={[styles.roleBadgeText, userRole === 'user' && { color: '#38BDF8' }]}>
+                      {userRole === 'user' ? "ORGANIZATOR" : "BOSH ADMIN"}
+                    </Text>
                   </View>
-                  <Text style={styles.orgIdText}>{`ID: #${currentOrg.id}`}</Text>
+                  <Text style={styles.orgIdText}>{`Tashkilot: ${currentOrg?.name || 'Amatora'}`}</Text>
                 </View>
               </>
             )}
           </View>
         </View>
 
-        <View style={styles.divider} />
+        {userRole !== 'user' && (
+          <>
+            <View style={styles.divider} />
 
-        {/* Quick Toggles Section */}
-        <Text style={styles.sectionTitle}>{"Tizim Kalit Sozlamalari"}</Text>
+            {/* Quick Toggles Section */}
+            <Text style={styles.sectionTitle}>{"Tizim Kalit Sozlamalari"}</Text>
 
-        {/* 1. Registration Switch */}
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleLabelGroup}>
-            <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
-              <Ionicons name="person-add" size={18} color="#38BDF8" />
+            {/* 1. Registration Switch */}
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabelGroup}>
+                <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
+                  <Ionicons name="person-add" size={18} color="#38BDF8" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleTitle}>{"Ro'yxatdan O'tish Holati"}</Text>
+                  <Text
+                    style={[
+                      styles.toggleSub,
+                      { color: isRegistrationOpen ? '#00FF87' : '#EF4444' },
+                    ]}
+                  >
+                    {isRegistrationOpen ? "OCHIQ (Arizalar qabul qilinmoqda)" : "YOPILGAN (Qabul to'xtatilgan)"}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={isRegistrationOpen}
+                onValueChange={handleRegistrationToggle}
+                trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(56, 189, 248, 0.4)' }}
+                thumbColor={isRegistrationOpen ? '#38BDF8' : '#94A3B8'}
+              />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.toggleTitle}>{"Ro'yxatdan O'tish Holati"}</Text>
-              <Text
-                style={[
-                  styles.toggleSub,
-                  { color: isRegistrationOpen ? '#00FF87' : '#EF4444' },
-                ]}
+
+            {/* 2. Transfer Window Switch */}
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabelGroup}>
+                <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                  <Ionicons name="swap-horizontal" size={18} color="#F59E0B" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleTitle}>{"Transfer Oynasi Holati"}</Text>
+                  <Text
+                    style={[
+                      styles.toggleSub,
+                      { color: transferWindowOpen ? '#00FF87' : '#EF4444' },
+                    ]}
+                  >
+                    {transferWindowOpen ? "OCHIQ (O'yinchilar ko'chishi mumkin)" : "YOPILGAN (O'yinchilar ko'chishi to'xtatilgan)"}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={transferWindowOpen}
+                onValueChange={handleTransferToggle}
+                trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(245, 158, 11, 0.4)' }}
+                thumbColor={transferWindowOpen ? '#F59E0B' : '#94A3B8'}
+              />
+            </View>
+
+            {/* Registration Website Link Card */}
+            <View style={styles.toggleRow}>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
+                  Alert.alert("Sayt havolasi", url);
+                }}
               >
-                {isRegistrationOpen ? "OCHIQ (Arizalar qabul qilinmoqda)" : "YOPILGAN (Qabul to'xtatilgan)"}
-              </Text>
-            </View>
-          </View>
-          <Switch
-            value={isRegistrationOpen}
-            onValueChange={handleRegistrationToggle}
-            trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(56, 189, 248, 0.4)' }}
-            thumbColor={isRegistrationOpen ? '#38BDF8' : '#94A3B8'}
-          />
-        </View>
+                <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(0, 255, 135, 0.15)' }]}>
+                  <Ionicons name="globe-outline" size={18} color="#00FF87" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleTitle}>{"Ro'yxatdan o'tkazish sayti"}</Text>
+                  <Text style={[styles.toggleSub, { color: '#00FF87', textDecorationLine: 'underline' }]} numberOfLines={1}>
+                    {`https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`}
+                  </Text>
+                </View>
+              </TouchableOpacity>
 
-        {/* 2. Transfer Window Switch */}
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleLabelGroup}>
-            <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-              <Ionicons name="swap-horizontal" size={18} color="#F59E0B" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.toggleTitle}>{"Transfer Oynasi Statusi"}</Text>
-              <Text
-                style={[
-                  styles.toggleSub,
-                  { color: transferWindowOpen ? '#F59E0B' : '#EF4444' },
-                ]}
+              <TouchableOpacity
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  borderRadius: 10,
+                  backgroundColor: 'rgba(0, 255, 135, 0.15)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(0, 255, 135, 0.3)',
+                }}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
+                  Alert.alert(
+                    "Nusxalandi!",
+                    `Sayt havolasi:\n\n${url}\n\nUshbu havolani ishtirokchilar va jamoalarga yuboring.`
+                  );
+                }}
               >
-                {transferWindowOpen ? "OCHIQ (O'yinchi tahrirlashga ruxsat)" : "YOPILGAN (Arizalar qulflangan)"}
-              </Text>
+                <Ionicons name="copy-outline" size={16} color="#00FF87" />
+              </TouchableOpacity>
             </View>
-          </View>
-          <Switch
-            value={transferWindowOpen}
-            onValueChange={handleTransferToggle}
-            trackColor={{ false: '#334155', true: 'rgba(245, 158, 11, 0.4)' }}
-            thumbColor={transferWindowOpen ? '#F59E0B' : '#94A3B8'}
-          />
-        </View>
-
-        {/* 3. Ro'yxatdan o'tkazish sayti (Registration Website Link) */}
-        <View style={styles.toggleRow}>
-          <TouchableOpacity
-            style={styles.toggleLabelGroup}
-            activeOpacity={0.7}
-            onPress={() => {
-              const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
-              Linking.openURL(url).catch(() => {
-                Alert.alert('Xatolik', 'Brauzerni ochib bo\'lmadi');
-              });
-            }}
-          >
-            <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(0, 255, 135, 0.15)' }]}>
-              <Ionicons name="globe-outline" size={18} color="#00FF87" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.toggleTitle}>{"Ro'yxatdan o'tkazish sayti"}</Text>
-              <Text style={[styles.toggleSub, { color: '#00FF87', textDecorationLine: 'underline' }]} numberOfLines={1}>
-                {`https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`}
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderRadius: 10,
-              backgroundColor: 'rgba(0, 255, 135, 0.15)',
-              borderWidth: 1,
-              borderColor: 'rgba(0, 255, 135, 0.3)',
-            }}
-            activeOpacity={0.7}
-            onPress={() => {
-              const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
-              Alert.alert(
-                "Nusxalandi!",
-                `Sayt havolasi:\n\n${url}\n\nUshbu havolani ishtirokchilar va jamoalarga yuboring.`
-              );
-            }}
-          >
-            <Ionicons name="copy-outline" size={16} color="#00FF87" />
-          </TouchableOpacity>
-        </View>
+          </>
+        )}
       </View>
 
       {/* Account & Organization Details with 1-to-1 SuperAdmin Inline Editing */}
@@ -594,62 +632,66 @@ export const AccountScreen: React.FC<{
           <CardWrapper {...(wrapperProps as any)}>
             <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
             <View style={styles.sectionHeaderRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={styles.sectionTitle}>{"Tashkilot & Admin Ma'lumotlari"}</Text>
-            <TouchableOpacity
-              style={styles.inlineEditIconBtn}
-              activeOpacity={0.8}
-              onPress={() => setIsEditingInfo(!isEditingInfo)}
-            >
-              <Ionicons name={isEditingInfo ? "close-circle" : "create-outline"} size={18} color="#00FF87" />
-            </TouchableOpacity>
-          </View>
-        </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.sectionTitle}>
+                  {userRole === 'user' ? "Mening Akkount Ma'lumotlarim" : "Tashkilot & Admin Ma'lumotlari"}
+                </Text>
+                <TouchableOpacity
+                  style={styles.inlineEditIconBtn}
+                  activeOpacity={0.8}
+                  onPress={() => setIsEditingInfo(!isEditingInfo)}
+                >
+                  <Ionicons name={isEditingInfo ? "close-circle" : "create-outline"} size={18} color="#00FF87" />
+                </TouchableOpacity>
+              </View>
+            </View>
 
         {isEditingInfo ? (
           <View style={styles.inlineFormContainer}>
-            {/* 1. Org Name Input */}
+            {/* 1. Name Input */}
             <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{"TASHKILOT NOMI *"}</Text>
+              <Text style={styles.inlineInputLabel}>{userRole === 'user' ? "ISMI VA FAMILIYASI *" : "TASHKILOT NOMI *"}</Text>
               <TextInput
                 style={styles.textInput}
                 value={editName}
                 onChangeText={setEditName}
-                placeholder="Tashkilot nomini kiriting..."
+                placeholder="Ism Familiyani kiriting..."
                 placeholderTextColor="#64748B"
               />
             </View>
 
-            {/* 2. Org Slug Input */}
-            <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{"IDENTIFIKATOR / SLUG *"}</Text>
-              <TextInput
-                style={styles.textInput}
-                value={editSlug}
-                onChangeText={setEditSlug}
-                placeholder="tashkilot-slug"
-                placeholderTextColor="#64748B"
-                autoCapitalize="none"
-              />
-            </View>
+            {/* 2. Slug Input (Admin Only) */}
+            {userRole !== 'user' && (
+              <View style={styles.inlineInputGroup}>
+                <Text style={styles.inlineInputLabel}>{"IDENTIFIKATOR / SLUG *"}</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={editSlug}
+                  onChangeText={setEditSlug}
+                  placeholder="tashkilot-slug"
+                  placeholderTextColor="#64748B"
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
 
-            {/* 3. Admin Email Input */}
+            {/* 3. Email Input */}
             <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{"ADMIN EMAIL MANZILI *"}</Text>
+              <Text style={styles.inlineInputLabel}>{userRole === 'user' ? "LOGIN EMAIL *" : "ADMIN EMAIL MANZILI *"}</Text>
               <TextInput
                 style={styles.textInput}
                 value={editEmail}
                 onChangeText={setEditEmail}
-                placeholder="admin@amatora.uz"
+                placeholder="email@domain.com"
                 placeholderTextColor="#64748B"
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
             </View>
 
-            {/* 4. Admin Password Input with Eye Toggle */}
+            {/* 4. Password Input with Eye Toggle */}
             <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{"ADMIN PAROLI *"}</Text>
+              <Text style={styles.inlineInputLabel}>{userRole === 'user' ? "KIRISH PAROLI *" : "ADMIN PAROLI *"}</Text>
               <View style={styles.passwordInputWrapper}>
                 <TextInput
                   style={[styles.textInput, { flex: 1, borderWidth: 0 }]}
@@ -669,75 +711,64 @@ export const AccountScreen: React.FC<{
               </View>
             </View>
 
-            {/* 5. Contact Phone Input with locked +998 prefix */}
-            <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{"BOG'LANISH TELEFONI *"}</Text>
-              <View style={styles.phoneInputWrapper}>
-                <View style={styles.phonePrefixBox}>
-                  <Text style={styles.phonePrefixText}>{'+998'}</Text>
-                </View>
-                <TextInput
-                  style={styles.phoneInput}
-                  value={editPhoneSuffix}
-                  onChangeText={(v) => {
-                    const digits = v.replace(/[^0-9 ]/g, '');
-                    setEditPhoneSuffix(digits);
-                  }}
-                  placeholder="90 123 45 67"
-                  placeholderTextColor="#64748B"
-                  keyboardType="number-pad"
-                  maxLength={12}
-                />
-              </View>
-            </View>
-
-            {/* 6. Brand Colors List (Gradient Builder) */}
-            <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{"TASHKILOT RANGLARI *"}</Text>
-              
-              <View style={styles.brandColorsList}>
-                {editBrandColors.map((colorHex, idx) => (
-                  <View key={idx} style={styles.colorEditRow}>
-                    <ColorPicker
-                      value={colorHex}
-                      onChange={(color: string) => handleUpdateBrandColor(idx, color)}
-                      tabs={['picker', 'palettes']}
-                    />
-                    <TextInput
-                      style={styles.colorHexInput}
-                      value={colorHex}
-                      onChangeText={(val) => handleUpdateBrandColor(idx, val)}
-                      placeholder="#HEX"
-                      placeholderTextColor="#64748B"
-                      autoCapitalize="characters"
-                      maxLength={7}
-                    />
-                    {editBrandColors.length > 1 && (
-                      <TouchableOpacity
-                        style={styles.removeColorBtn}
-                        onPress={() => handleRemoveBrandColor(idx)}
-                      >
-                        <Ionicons name="trash-outline" size={16} color="#EF4444" />
-                      </TouchableOpacity>
-                    )}
+            {/* 5. Contact Phone Input (Admin Only) */}
+            {userRole !== 'user' && (
+              <View style={styles.inlineInputGroup}>
+                <Text style={styles.inlineInputLabel}>{"BOG'LANISH TELEFONI *"}</Text>
+                <View style={styles.phoneInputWrapper}>
+                  <View style={styles.phonePrefixBox}>
+                    <Text style={styles.phonePrefixText}>{'+998'}</Text>
                   </View>
-                ))}
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={editPhoneSuffix}
+                    onChangeText={(v) => {
+                      const digits = v.replace(/[^0-9 ]/g, '');
+                      setEditPhoneSuffix(digits);
+                    }}
+                    placeholder="90 123 45 67"
+                    placeholderTextColor="#64748B"
+                    keyboardType="number-pad"
+                    maxLength={12}
+                  />
+                </View>
               </View>
+            )}
 
-              <TouchableOpacity style={styles.addColorBtn} onPress={handleAddBrandColor}>
-                <Ionicons name="add" size={16} color="#00FF87" />
-                <Text style={styles.addColorBtnText}>Rang qo'shish</Text>
-              </TouchableOpacity>
-
-              {/* Gradient Preview */}
-              <Text style={[styles.inlineInputLabel, { marginTop: 12 }]}>{"GRADIENT KO'RINISHI (PREVIEW)"}</Text>
-              <LinearGradient
-                colors={(editBrandColors.length > 1 ? editBrandColors : [editBrandColors[0] || '#000', editBrandColors[0] || '#000']) as any}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.gradientPreview}
-              />
-            </View>
+            {/* 6. Brand Colors List (Admin Only) */}
+            {userRole !== 'user' && (
+              <View style={styles.inlineInputGroup}>
+                <Text style={styles.inlineInputLabel}>{"TASHKILOT RANGLARI *"}</Text>
+                <View style={styles.brandColorsList}>
+                  {editBrandColors.map((colorHex, idx) => (
+                    <View key={idx} style={styles.colorEditRow}>
+                      <ColorPicker
+                        value={colorHex}
+                        onChange={(color: string) => handleUpdateBrandColor(idx, color)}
+                        tabs={['picker', 'palettes']}
+                      />
+                      <TextInput
+                        style={styles.colorHexInput}
+                        value={colorHex}
+                        onChangeText={(val) => handleUpdateBrandColor(idx, val)}
+                        placeholder="#HEX"
+                        placeholderTextColor="#64748B"
+                        autoCapitalize="characters"
+                        maxLength={7}
+                      />
+                      {editBrandColors.length > 1 && (
+                        <TouchableOpacity
+                          style={styles.removeColorBtn}
+                          onPress={() => handleRemoveBrandColor(idx)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
 
             {/* Save & Cancel Buttons */}
             <View style={styles.inlineActionRow}>
@@ -766,46 +797,76 @@ export const AccountScreen: React.FC<{
           </View>
         ) : (
           <>
-            <View style={styles.infoRow}>
-              <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.infoLabel}>{"Tashkilot:"}</Text>
-              {loading || (!currentOrg?.name && !editName) ? (
-                <TextSkeleton width={140} height={14} borderRadius={4} />
-              ) : (
-                <Text style={styles.infoValue}>{currentOrg?.name || editName}</Text>
-              )}
-            </View>
+            {userRole === 'user' ? (
+              <>
+                <View style={styles.infoRow}>
+                  <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Ismi va Familiyasi:"}</Text>
+                  <Text style={styles.infoValue}>{editName || 'Organizator'}</Text>
+                </View>
 
-            <View style={styles.infoRow}>
-              <Ionicons name="link-outline" size={16} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.infoLabel}>{"Identifikator:"}</Text>
-              {loading || (!currentOrg?.slug && !editSlug) ? (
-                <TextSkeleton width={80} height={14} borderRadius={4} />
-              ) : (
-                <Text style={styles.infoValue}>{currentOrg?.slug || editSlug}</Text>
-              )}
-            </View>
+                <View style={styles.infoRow}>
+                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Login Email:"}</Text>
+                  <Text style={styles.infoValue}>{editEmail || '—'}</Text>
+                </View>
 
-            <View style={styles.infoRow}>
-              <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.infoLabel}>{"Email:"}</Text>
-              <Text style={styles.infoValue}>
-                {editEmail || currentOrg?.admin_email || currentOrg?.email || '—'}
-              </Text>
-            </View>
+                <View style={styles.infoRow}>
+                  <Ionicons name="key-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Parol:"}</Text>
+                  <Text style={styles.infoValue}>{"••••••••"}</Text>
+                </View>
 
-            <View style={styles.infoRow}>
-              <Ionicons name="call-outline" size={16} color="rgba(255,255,255,0.5)" />
-              <Text style={styles.infoLabel}>{"Telefon:"}</Text>
-              <Text style={styles.infoValue}>
-                {(() => {
-                  const ph = currentOrg?.contact_phone || currentOrg?.phone || '';
-                  if (ph) return ph;
-                  if (editPhoneSuffix) return `+998 ${editPhoneSuffix}`;
-                  return '—';
-                })()}
-              </Text>
-            </View>
+                <View style={styles.infoRow}>
+                  <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Tashkilot:"}</Text>
+                  <Text style={styles.infoValue}>{currentOrg?.name || 'Amatora'}</Text>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.infoRow}>
+                  <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Tashkilot:"}</Text>
+                  {loading || (!currentOrg?.name && !editName) ? (
+                    <TextSkeleton width={140} height={14} borderRadius={4} />
+                  ) : (
+                    <Text style={styles.infoValue}>{currentOrg?.name || editName}</Text>
+                  )}
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Ionicons name="link-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Identifikator:"}</Text>
+                  {loading || (!currentOrg?.slug && !editSlug) ? (
+                    <TextSkeleton width={80} height={14} borderRadius={4} />
+                  ) : (
+                    <Text style={styles.infoValue}>{currentOrg?.slug || editSlug}</Text>
+                  )}
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Email:"}</Text>
+                  <Text style={styles.infoValue}>
+                    {editEmail || currentOrg?.admin_email || currentOrg?.email || '—'}
+                  </Text>
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Ionicons name="call-outline" size={16} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.infoLabel}>{"Telefon:"}</Text>
+                  <Text style={styles.infoValue}>
+                    {(() => {
+                      const ph = currentOrg?.contact_phone || currentOrg?.phone || '';
+                      if (ph) return ph;
+                      if (editPhoneSuffix) return `+998 ${editPhoneSuffix}`;
+                      return '—';
+                    })()}
+                  </Text>
+                </View>
+              </>
+            )}
           </>
         )}
           </CardWrapper>
