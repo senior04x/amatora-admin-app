@@ -154,7 +154,6 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
         try {
           await AsyncStorage.setItem(PIN_KEY, enteredPin);
           await AsyncStorage.removeItem('@amatora_pin_skipped');
-          DeviceEventEmitter.emit('app_pin_changed');
 
           // Prompt for Biometrics enrollment if device supports hardware
           const hasHardware = await LocalAuthentication.hasHardwareAsync();
