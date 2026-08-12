@@ -1,3 +1,11 @@
+if (typeof global !== 'undefined' && (global as any).ErrorUtils) {
+  const defaultHandler = (global as any).ErrorUtils.getGlobalHandler();
+  (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+    console.error('=== EXPLICIT ERROR STACK TRACE ===\n', error, '\nSTACK:\n', error?.stack);
+    if (defaultHandler) defaultHandler(error, isFatal);
+  });
+}
+
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
