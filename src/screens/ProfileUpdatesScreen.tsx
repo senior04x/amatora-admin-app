@@ -454,46 +454,46 @@ export const ProfileUpdatesScreen: React.FC = () => {
             const statusColor = isApproved ? '#00FF66' : isRejected ? '#EF4444' : '#F59E0B';
             const statusLabel = isApproved ? 'Tasdiqlangan' : isRejected ? 'Rad Etilgan' : 'Kutilmoqda';
 
-            const oldPhoto = oldData.photoUrl || req.photo_url || '';
-            const newPhoto = newData.photoUrl || oldPhoto;
+            const oldPhoto = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
+            const newPhoto = newData.photoUrl || newData.photo || oldPhoto;
 
             const commentMeta = extractMetaFromComment(req.comment);
 
-            const oldFirstName = oldData.firstName || oldData.first_name || '';
-            const oldLastName = oldData.lastName || oldData.last_name || '';
+            const oldFirstName = oldData.firstName || oldData.first_name || req.first_name || '';
+            const oldLastName = oldData.lastName || oldData.last_name || req.last_name || '';
             const oldName = `${oldFirstName} ${oldLastName}`.trim() || '—';
 
             const newFirstName = newData.firstName || req.first_name || '';
             const newLastName = newData.lastName || req.last_name || '';
             const newName = `${newFirstName} ${newLastName}`.trim() || '—';
 
-            const oldFatherName = oldData.fatherName || oldData.father_name || '—';
+            const oldFatherName = oldData.fatherName || oldData.father_name || req.father_name || '—';
             const newFatherName = newData.fatherName || req.father_name || '—';
 
-            const oldPhone = oldData.phone || '—';
+            const oldPhone = oldData.phone || req.phone || '—';
             const newPhone = newData.phone || req.phone || '—';
 
-            const oldPassport = `${oldData.passportSeries || oldData.passport_series || ''} ${oldData.passportNumber || oldData.passport_number || ''}`.trim() || '—';
+            const oldPassport = `${oldData.passportSeries || oldData.passport_series || req.passport_series || ''} ${oldData.passportNumber || oldData.passport_number || req.passport_number || ''}`.trim() || '—';
             const newPassport = `${newData.passportSeries || req.passport_series || ''} ${newData.passportNumber || req.passport_number || ''}`.trim() || '—';
 
-            const oldPosition = oldData.position || '—';
+            const oldPosition = oldData.position || req.position || '—';
             const newPosition = newData.position || req.position || '—';
 
-            const oldPlayerNumber = oldData.playerNumber ? `#${oldData.playerNumber}` : oldData.player_number ? `#${oldData.player_number}` : '—';
+            const oldPlayerNumber = oldData.playerNumber ? `#${oldData.playerNumber}` : oldData.player_number ? `#${oldData.player_number}` : req.player_number ? `#${req.player_number}` : '—';
             const newPlayerNumber = newData.playerNumber ? `#${newData.playerNumber}` : req.player_number ? `#${req.player_number}` : '—';
 
-            const oldCitizenship = oldData.citizenship || commentMeta.citizenship || '—';
+            const oldCitizenship = oldData.citizenship || commentMeta.citizenship || req.citizenship || '—';
             const newCitizenship = newData.citizenship || oldCitizenship;
 
-            const oldHeight = oldData.height || commentMeta.height || '';
-            const oldWeight = oldData.weight || commentMeta.weight || '';
+            const oldHeight = oldData.height || commentMeta.height || req.height || '';
+            const oldWeight = oldData.weight || commentMeta.weight || req.weight || '';
             const oldHW = oldHeight || oldWeight ? `${oldHeight ? `${oldHeight} SM` : '—'} / ${oldWeight ? `${oldWeight} KG` : '—'}` : '— / —';
 
             const newHeight = newData.height || oldHeight;
             const newWeight = newData.weight || oldWeight;
             const newHW = newHeight || newWeight ? `${newHeight ? `${newHeight} SM` : '—'} / ${newWeight ? `${newWeight} KG` : '—'}` : '— / —';
 
-            const oldBirthDate = oldData.birthDate || oldData.birth_date || '—';
+            const oldBirthDate = oldData.birthDate || oldData.birth_date || req.birth_date || '—';
             const newBirthDate = newData.birthDate || req.birth_date || '—';
 
             const oldInsta =

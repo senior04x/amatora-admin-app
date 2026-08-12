@@ -96,6 +96,33 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const hasGradient = orgColors.length > 0;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  // Realtime Pending Unconfirmed Count for "Ma'lumot Almashinuvi" (Updates / Applications)
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        let query = supabase
+          .from('applications')
+          .select('id', { count: 'exact', head: true })
+          .or('status.eq.pending,status.eq.kutilmoqda,status.is.null');
+
+        if (currentOrg?.id) {
+          query = query.eq('organization_id', currentOrg.id);
+        }
+
+        const { count } = await query;
+        setPendingCount(count || 0);
+      } catch (e) {
+        console.error('Error fetching pending count:', e);
+      }
+    };
+
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 10000);
+    return () => clearInterval(interval);
+  }, [currentOrg?.id]);
+
   useEffect(() => {
     if (hasGradient) {
       triggerIosCrescendoHaptic();
@@ -186,7 +213,31 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={styles.segmentDivider} />
 
-          {/* Segment 3: CENTER '+' QUICK ADD MATCH BUTTON */}
+          {/* Segment 3: Ma'lumot Almashinuvi (Refresh with RED BADGE COUNT) */}
+          <TouchableOpacity
+            style={styles.segmentItem}
+            onPress={() => setActiveTab('updates')}
+            activeOpacity={0.7}
+          >
+            <View style={{ position: 'relative' }}>
+              <Ionicons
+                name="refresh-outline"
+                size={22}
+                color={activeTab === 'updates' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
+                style={activeTab === 'updates' && styles.glowingIcon}
+              />
+              {pendingCount > 0 && (
+                <View style={styles.badgeCircle}>
+                  <Text style={styles.badgeText}>{pendingCount > 99 ? '99+' : pendingCount}</Text>
+                </View>
+              )}
+            </View>
+            <View style={[styles.activeDot, activeTab === 'updates' && styles.activeDotGlow]} />
+          </TouchableOpacity>
+
+          <View style={styles.segmentDivider} />
+
+          {/* Segment 4: CENTER '+' QUICK ADD MATCH BUTTON */}
           <TouchableOpacity
             style={styles.segmentItem}
             onPress={() => setActiveTab('create-match')}
@@ -203,7 +254,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={styles.segmentDivider} />
 
-          {/* Segment 4: Turnir Jadvali (Stats / Standings Outline) */}
+          {/* Segment 5: Turnir Jadvali (Stats / Standings Outline) */}
           <TouchableOpacity
             style={styles.segmentItem}
             onPress={() => setActiveTab('standings')}
@@ -220,7 +271,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={styles.segmentDivider} />
 
-          {/* Segment 5: Admin Akkount / Profil (Round Org Logo Avatar) */}
+          {/* Segment 6: Admin Akkount / Profil (Round Org Logo Avatar) */}
           <TouchableOpacity
             style={styles.segmentItem}
             onPress={handleAccountPress}
@@ -473,5 +524,25 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 1,
     shadowRadius: 5,
+  },
+  badgeCircle: {
+    position: 'absolute',
+    top: -6,
+    right: -10,
+    backgroundColor: '#FF3B30',
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#0F172A',
+    zIndex: 10,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 9.5,
+    fontWeight: '900',
   },
 });
