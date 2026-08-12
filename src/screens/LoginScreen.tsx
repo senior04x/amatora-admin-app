@@ -86,20 +86,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       // Verify the user is an admin of an organization
       const { data: orgData } = await dbClient
         .from('organizations')
-        .select('id, app_pin_code')
+        .select('id')
         .eq('admin_email', loginEmail)
         .limit(1);
         
       if (!orgData || orgData.length === 0) {
         await supabase.auth.signOut();
         throw new Error('Sizda tashkilot boshqaruvchisiga xos huquqlar yo\'q!');
-      }
-
-      // Sync pin code from DB to local storage
-      if (orgData[0].app_pin_code) {
-        await AsyncStorage.setItem('@amatora_pin_code', orgData[0].app_pin_code);
-      } else {
-        await AsyncStorage.removeItem('@amatora_pin_code');
       }
 
       // Success

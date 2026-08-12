@@ -127,16 +127,6 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
               await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
               DeviceEventEmitter.emit('app_pin_changed');
               DeviceEventEmitter.emit('app_pin_reset');
-              
-              const { data: { session } } = await supabase.auth.getSession();
-              const dbClient = supabaseAdmin || supabase;
-              if (session?.user?.email) {
-                await dbClient
-                  .from('organizations')
-                  .update({ app_pin_code: null })
-                  .eq('admin_email', session.user.email)
-                  .catch(() => {});
-              }
 
               if (onReset) {
                 onReset();
@@ -159,23 +149,10 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
       setMode('confirm');
     } else if (mode === 'confirm') {
       if (enteredPin === tempPin) {
-        // Success: save PIN locally INSTANTLY
+        // Success: save PIN locally on device
         try {
           await AsyncStorage.setItem(PIN_KEY, enteredPin);
           DeviceEventEmitter.emit('app_pin_changed');
-
-          // Sync with DB in the background non-blockingly
-          (async () => {
-            try {
-              const { data: { session } } = await supabase.auth.getSession();
-              if (session?.user?.email) {
-                const dbClient = supabaseAdmin || supabase;
-                await dbClient.from('organizations').update({ app_pin_code: enteredPin }).eq('admin_email', session.user.email);
-              }
-            } catch (bgErr) {
-              console.log('Background DB PIN sync error:', bgErr);
-            }
-          })();
 
           // Prompt for Biometrics enrollment if device supports hardware
           const hasHardware = await LocalAuthentication.hasHardwareAsync();

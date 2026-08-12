@@ -160,33 +160,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 1. Delete locally INSTANTLY
+              // Delete locally on device
               await AsyncStorage.removeItem('@amatora_pin_code');
               await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
               setHasPin(false);
               setBiometricsEnabled(false);
               DeviceEventEmitter.emit('app_pin_changed');
               DeviceEventEmitter.emit('app_pin_reset');
-              
-              // 2. Delete from database permanently
-              const dbClient = supabaseAdmin || supabase;
-              const { data: { session } } = await supabase.auth.getSession();
-              
-              if (currentOrg?.id) {
-                await dbClient
-                  .from('organizations')
-                  .update({ app_pin_code: null })
-                  .eq('id', currentOrg.id)
-                  .catch((err) => console.log('Error deleting pin by id:', err));
-              }
-              
-              if (session?.user?.email) {
-                await dbClient
-                  .from('organizations')
-                  .update({ app_pin_code: null })
-                  .eq('admin_email', session.user.email)
-                  .catch((err) => console.log('Error deleting pin by email:', err));
-              }
 
               Alert.alert('Muvaffaqiyatli', 'PIN kod o\'chirildi');
             } catch (e) {
