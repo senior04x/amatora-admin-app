@@ -1,4 +1,3 @@
-import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +11,7 @@ import {
   TextInput,
   Linking,
   Animated,
+  Modal,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -83,6 +83,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
   } = useOrg();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // 1-to-1 SuperAdmin Organization Edit Form State
   const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -279,16 +280,12 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
 
   // Handle Logout
   const handleLogout = () => {
-    Alert.alert('Tizimdan chiqish', 'Chindan ham admin akkountidan chiqmoqchimisiz?', [
-      { text: 'Bekor qilish', style: 'cancel' },
-      {
-        text: 'Chiqish',
-        style: 'destructive',
-        onPress: () => {
-          if (onLogout) onLogout();
-        },
-      },
-    ]);
+    setShowLogoutModal(true);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutModal(false);
+    if (onLogout) onLogout();
   };
 
   // Switcher Handlers (Feedback via Top Toast in OrgContext)
@@ -730,11 +727,111 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           <Text style={styles.logoutBtnText}>{"Tizimdan Chiqish"}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Glassmorphism Logout Confirmation Modal */}
+      <Modal
+        visible={showLogoutModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+          
+          <View style={styles.glassModalCard}>
+            <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+            
+            <Text style={styles.glassModalTitle}>{"Akkountdan chiqmoqchimisiz?"}</Text>
+
+            <View style={styles.glassModalActions}>
+              <TouchableOpacity
+                style={styles.glassModalBtnStay}
+                activeOpacity={0.7}
+                onPress={() => setShowLogoutModal(false)}
+              >
+                <Text style={styles.glassModalTextStay}>{"Qolish"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.glassModalBtnLogout}
+                activeOpacity={0.7}
+                onPress={confirmLogout}
+              >
+                <Text style={styles.glassModalTextLogout}>{"Chiqish"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  glassModalCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  glassModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 22,
+    letterSpacing: 0.2,
+  },
+  glassModalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+  },
+  glassModalBtnStay: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  glassModalTextStay: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  glassModalBtnLogout: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  glassModalTextLogout: {
+    color: '#EF4444',
+    fontSize: 15,
+    fontWeight: '700',
+  },
   container: {
     flex: 1,
     backgroundColor: 'transparent',
