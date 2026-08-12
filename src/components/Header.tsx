@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Animated } from 'react
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
+import { supabase, supabaseAdmin } from '../supabaseClient';
 
 const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number; style?: any }> = ({
   width = 100,
@@ -45,7 +46,37 @@ const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number;
 };
 
 export const Header: React.FC = () => {
-  const { currentOrg, loading } = useOrg();
+  const { currentOrg, loading, userRole } = useOrg();
+  const [userName, setUserName] = React.useState<string | null>(null);
+  const [userAvatar, setUserAvatar] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const fetchUserHeader = async () => {
+      if (userRole === 'user') {
+        try {
+          const dbClient = supabaseAdmin || supabase;
+          const { data: sessionData } = await supabase.auth.getSession();
+          const email = sessionData?.session?.user?.email;
+          if (email) {
+            const { data: uRec } = await dbClient
+              .from('organization_users')
+              .select('full_name, avatar_url')
+              .ilike('email', email)
+              .maybeSingle();
+
+            if (uRec) {
+              setUserName(uRec.full_name || 'Organizator');
+              setUserAvatar(uRec.avatar_url || null);
+            }
+          }
+        } catch (e) {
+          console.error('Header fetch user error:', e);
+        }
+      }
+    };
+
+    fetchUserHeader();
+  }, [userRole]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -54,33 +85,36 @@ export const Header: React.FC = () => {
     return 'Xayrli kech';
   };
 
+  const displayName = userRole === 'user' ? (userName || 'Organizator') : currentOrg?.name;
+  const displayAvatar = userRole === 'user' ? userAvatar : currentOrg?.logo_url;
+
   return (
     <BlurView intensity={50} tint="dark" style={styles.headerContainer}>
       <View style={styles.leftRow}>
-        {/* Skeleton for Logo */}
+        {/* Logo / Avatar */}
         <View style={styles.logoBadge}>
-          {loading ? (
+          {loading && !displayName ? (
             <HeaderSkeletonLoader width={44} height={44} style={{ borderRadius: 12 }} />
-          ) : currentOrg?.logo_url ? (
+          ) : displayAvatar ? (
             <Image
-              source={{ uri: currentOrg.logo_url }}
-              style={styles.logoImage}
-              resizeMode="contain"
+              source={{ uri: displayAvatar }}
+              style={[styles.logoImage, userRole === 'user' && { borderRadius: 22 }]}
+              resizeMode={userRole === 'user' ? "cover" : "contain"}
             />
           ) : (
-            <Ionicons name="trophy" size={24} color="#00FF66" />
+            <Ionicons name={userRole === 'user' ? "person-circle" : "trophy"} size={32} color={userRole === 'user' ? "#38BDF8" : "#00FF66"} />
           )}
         </View>
 
-        {/* Skeleton for Name & Status */}
+        {/* Name & Greeting */}
         <View style={styles.titleCol}>
-          {loading || !currentOrg?.name ? (
+          {loading && !displayName ? (
             <View style={{ gap: 6 }}>
               <HeaderSkeletonLoader width={140} height={16} />
             </View>
           ) : (
             <>
-              <Text style={styles.orgName}>{currentOrg.name}</Text>
+              <Text style={styles.orgName}>{displayName}</Text>
               <Text style={styles.greetingText}>{getGreeting()}</Text>
             </>
           )}
