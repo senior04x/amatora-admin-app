@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { logUserLoginWithLocation } from '../utils/locationLogger';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -88,8 +89,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           .limit(1);
 
         if (orgData && orgData.length > 0) {
+          const targetOrgId = orgData[0].id;
           await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
-          await AsyncStorage.setItem('@amatora_org_id', orgData[0].id.toString());
+          await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+          logUserLoginWithLocation({
+            organizationId: targetOrgId,
+            userEmail: loginEmail,
+            userName: 'Bosh Admin',
+            userRole: 'org_admin',
+          });
           onLoginSuccess();
           return;
         }
@@ -102,8 +110,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           .maybeSingle();
 
         if (orgUser) {
-          await AsyncStorage.setItem('@amatora_user_role', orgUser.role || 'user');
-          await AsyncStorage.setItem('@amatora_org_id', orgUser.organization_id.toString());
+          const targetOrgId = orgUser.organization_id;
+          const role = orgUser.role || 'user';
+          await AsyncStorage.setItem('@amatora_user_role', role);
+          await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+          logUserLoginWithLocation({
+            organizationId: targetOrgId,
+            userEmail: loginEmail,
+            userName: orgUser.full_name || loginEmail,
+            userRole: role,
+          });
           onLoginSuccess();
           return;
         }
@@ -118,8 +134,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         .maybeSingle();
 
       if (directOrgUser) {
-        await AsyncStorage.setItem('@amatora_user_role', directOrgUser.role || 'user');
-        await AsyncStorage.setItem('@amatora_org_id', directOrgUser.organization_id.toString());
+        const targetOrgId = directOrgUser.organization_id;
+        const role = directOrgUser.role || 'user';
+        await AsyncStorage.setItem('@amatora_user_role', role);
+        await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+        logUserLoginWithLocation({
+          organizationId: targetOrgId,
+          userEmail: loginEmail,
+          userName: directOrgUser.full_name || loginEmail,
+          userRole: role,
+        });
         onLoginSuccess();
         return;
       }
@@ -133,8 +157,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         .maybeSingle();
 
       if (adminUser) {
+        const targetOrgId = adminUser.organization_id;
         await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
-        await AsyncStorage.setItem('@amatora_org_id', adminUser.organization_id.toString());
+        await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+        logUserLoginWithLocation({
+          organizationId: targetOrgId,
+          userEmail: loginEmail,
+          userName: 'Bosh Admin',
+          userRole: 'org_admin',
+        });
         onLoginSuccess();
         return;
       }

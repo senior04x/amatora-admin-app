@@ -20,6 +20,7 @@ interface OrganizersScreenProps {
 
 export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) => {
   const { orgId, currentOrg, showToast } = useOrg();
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'logs'>('users');
   const [organizersList, setOrganizersList] = useState<any[]>([]);
   const [loadingOrganizers, setLoadingOrganizers] = useState(false);
   const [showAddOrganizerForm, setShowAddOrganizerForm] = useState(false);
@@ -27,6 +28,10 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
   const [newOrgEmail, setNewOrgEmail] = useState('');
   const [newOrgPassword, setNewOrgPassword] = useState('');
   const [isCreatingOrgUser, setIsCreatingOrgUser] = useState(false);
+
+  // Login Activity Logs State
+  const [loginLogs, setLoginLogs] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
 
   const fetchOrganizers = async () => {
     try {
@@ -52,9 +57,52 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     }
   };
 
+  const fetchLoginLogs = async () => {
+    try {
+      setLoadingLogs(true);
+      const dbClient = supabaseAdmin || supabase;
+      const targetOrgId = currentOrg?.id || orgId || 1;
+
+      const { data, error } = await dbClient
+        .from('user_login_logs')
+        .select('*')
+        .eq('organization_id', targetOrgId)
+        .order('login_at', { ascending: false })
+        .limit(100);
+
+      if (!error && data) {
+        setLoginLogs(data);
+      } else {
+        setLoginLogs([]);
+      }
+    } catch (e) {
+      console.error('Fetch login logs error:', e);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
   useEffect(() => {
     fetchOrganizers();
+    fetchLoginLogs();
   }, [currentOrg?.id, orgId]);
+
+  const formatLogTime = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleString('uz-UZ', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch (e) {
+      return dateStr;
+    }
+  };
 
   const handleCreateOrganizer = async () => {
     if (!newOrgEmail.trim() || !newOrgPassword.trim() || !newOrgName.trim()) {
@@ -150,109 +198,194 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
         </View>
       </View>
 
+      {/* SubTab Switcher */}
+      <View style={styles.subTabRow}>
+        <TouchableOpacity
+          style={[styles.subTabBtn, activeSubTab === 'users' && styles.subTabBtnActive]}
+          onPress={() => setActiveSubTab('users')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="people" size={16} color={activeSubTab === 'users' ? '#38BDF8' : '#94A3B8'} />
+          <Text style={[styles.subTabText, activeSubTab === 'users' && styles.subTabTextActive]}>{"Userlar (" + organizersList.length + ")"}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.subTabBtn, activeSubTab === 'logs' && styles.subTabBtnActive]}
+          onPress={() => {
+            setActiveSubTab('logs');
+            fetchLoginLogs();
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="location" size={16} color={activeSubTab === 'logs' ? '#38BDF8' : '#94A3B8'} />
+          <Text style={[styles.subTabText, activeSubTab === 'logs' && styles.subTabTextActive]}>{"Kirish Tarixi va Joylashuvi"}</Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Action Button: Add User */}
-        {!showAddOrganizerForm ? (
-          <TouchableOpacity
-            style={styles.addBtn}
-            activeOpacity={0.8}
-            onPress={() => setShowAddOrganizerForm(true)}
-          >
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-            <Ionicons name="person-add" size={20} color="#38BDF8" />
-            <Text style={styles.addBtnText}>{"Yangi User (Organizator) Qo'shish"}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.formCard}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-            <Text style={styles.formTitle}>{"Yangi Organizator Kiritish"}</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="F.I.SH (Ism Familiya)"
-              placeholderTextColor="#64748B"
-              value={newOrgName}
-              onChangeText={setNewOrgName}
-            />
-
-            <TextInput
-              style={[styles.input, { marginTop: 10 }]}
-              placeholder="Login Email"
-              placeholderTextColor="#64748B"
-              value={newOrgEmail}
-              onChangeText={setNewOrgEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-
-            <TextInput
-              style={[styles.input, { marginTop: 10 }]}
-              placeholder="Parol"
-              placeholderTextColor="#64748B"
-              value={newOrgPassword}
-              onChangeText={setNewOrgPassword}
-              secureTextEntry
-            />
-
-            <View style={styles.formActions}>
+        {activeSubTab === 'users' ? (
+          <>
+            {/* Action Button: Add User */}
+            {!showAddOrganizerForm ? (
               <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => setShowAddOrganizerForm(false)}
+                style={styles.addBtn}
+                activeOpacity={0.8}
+                onPress={() => setShowAddOrganizerForm(true)}
               >
-                <Text style={styles.cancelBtnText}>{"Bekor qilish"}</Text>
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <Ionicons name="person-add" size={20} color="#38BDF8" />
+                <Text style={styles.addBtnText}>{"Yangi User (Organizator) Qo'shish"}</Text>
               </TouchableOpacity>
+            ) : (
+              <View style={styles.formCard}>
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <Text style={styles.formTitle}>{"Yangi Organizator Kiritish"}</Text>
 
-              <TouchableOpacity
-                style={styles.saveBtn}
-                onPress={handleCreateOrganizer}
-                disabled={isCreatingOrgUser}
-              >
-                {isCreatingOrgUser ? (
-                  <ActivityIndicator size="small" color="#000000" />
-                ) : (
-                  <Text style={styles.saveBtnText}>{"Saqlash"}</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+                <TextInput
+                  style={styles.input}
+                  placeholder="F.I.SH (Ism Familiya)"
+                  placeholderTextColor="#64748B"
+                  value={newOrgName}
+                  onChangeText={setNewOrgName}
+                />
 
-        {/* Organizers List Section */}
-        <Text style={styles.sectionTitle}>{"Mavjud Organizatorlar"}</Text>
+                <TextInput
+                  style={[styles.input, { marginTop: 10 }]}
+                  placeholder="Login Email"
+                  placeholderTextColor="#64748B"
+                  value={newOrgEmail}
+                  onChangeText={setNewOrgEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
 
-        {loadingOrganizers ? (
-          <ActivityIndicator size="medium" color="#38BDF8" style={{ marginVertical: 30 }} />
-        ) : organizersList.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-            <Ionicons name="people-outline" size={48} color="rgba(255,255,255,0.2)" />
-            <Text style={styles.emptyText}>{"Hozircha biriktirilgan organizatorlar yo'q"}</Text>
-          </View>
-        ) : (
-          organizersList.map((item) => (
-            <View key={item.id} style={styles.userCard}>
-              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-              <View style={styles.avatarBox}>
-                <Ionicons name="person" size={20} color="#38BDF8" />
+                <TextInput
+                  style={[styles.input, { marginTop: 10 }]}
+                  placeholder="Parol"
+                  placeholderTextColor="#64748B"
+                  value={newOrgPassword}
+                  onChangeText={setNewOrgPassword}
+                  secureTextEntry
+                />
+
+                <View style={styles.formActions}>
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    onPress={() => setShowAddOrganizerForm(false)}
+                  >
+                    <Text style={styles.cancelBtnText}>{"Bekor qilish"}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.saveBtn}
+                    onPress={handleCreateOrganizer}
+                    disabled={isCreatingOrgUser}
+                  >
+                    {isCreatingOrgUser ? (
+                      <ActivityIndicator size="small" color="#000000" />
+                    ) : (
+                      <Text style={styles.saveBtnText}>{"Saqlash"}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
+            )}
 
-              <View style={{ flex: 1 }}>
-                <Text style={styles.userName}>{item.full_name || 'Organizator'}</Text>
-                <Text style={styles.userEmail}>{item.email}</Text>
-                <Text style={styles.userPassword}>{`Parol: ${item.password}`}</Text>
+            {/* Organizers List Section */}
+            <Text style={styles.sectionTitle}>{"Mavjud Organizatorlar"}</Text>
+
+            {loadingOrganizers ? (
+              <ActivityIndicator size="medium" color="#38BDF8" style={{ marginVertical: 30 }} />
+            ) : organizersList.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <Ionicons name="people-outline" size={48} color="rgba(255,255,255,0.2)" />
+                <Text style={styles.emptyText}>{"Hozircha biriktirilgan organizatorlar yo'q"}</Text>
               </View>
+            ) : (
+              organizersList.map((item) => (
+                <View key={item.id} style={styles.userCard}>
+                  <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                  <View style={styles.avatarBox}>
+                    <Ionicons name="person" size={20} color="#38BDF8" />
+                  </View>
 
-              <TouchableOpacity
-                style={styles.deleteBtn}
-                onPress={() => handleDeleteOrganizer(item.id)}
-              >
-                <Ionicons name="trash-outline" size={18} color="#EF4444" />
-              </TouchableOpacity>
-            </View>
-          ))
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.userName}>{item.full_name || 'Organizator'}</Text>
+                    <Text style={styles.userEmail}>{item.email}</Text>
+                    <Text style={styles.userPassword}>{`Parol: ${item.password}`}</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => handleDeleteOrganizer(item.id)}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </>
+        ) : (
+          <>
+            {/* Login Activity Logs View */}
+            <Text style={styles.sectionTitle}>{"Foydalanuvchilar Kirish Tarixi va Joylashuvlari"}</Text>
+
+            {loadingLogs ? (
+              <ActivityIndicator size="medium" color="#38BDF8" style={{ marginVertical: 30 }} />
+            ) : loginLogs.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <Ionicons name="location-outline" size={48} color="rgba(255,255,255,0.2)" />
+                <Text style={styles.emptyText}>{"Hozircha kirish tarixi yo'q"}</Text>
+              </View>
+            ) : (
+              loginLogs.map((log) => (
+                <View key={log.id} style={styles.logCard}>
+                  <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                  
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <View style={styles.logAvatar}>
+                      <Ionicons name="person-circle" size={22} color="#38BDF8" />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.logUserName}>{log.user_name || log.user_email}</Text>
+                      <Text style={styles.logUserEmail}>{log.user_email}</Text>
+                    </View>
+
+                    <View style={styles.roleBadge}>
+                      <Text style={styles.roleBadgeText}>{(log.user_role || 'user').toUpperCase()}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.logDivider} />
+
+                  <View style={styles.logRow}>
+                    <Ionicons name="time-outline" size={15} color="#38BDF8" />
+                    <Text style={styles.logDetailText}>{`Kirgan vaqti: ${formatLogTime(log.login_at)}`}</Text>
+                  </View>
+
+                  <View style={[styles.logRow, { marginTop: 4 }]}>
+                    <Ionicons name="location-outline" size={15} color="#4ADE80" />
+                    <Text style={[styles.logDetailText, { color: '#E2E8F0', fontWeight: '600' }]}>
+                      {`Joylashuv: ${log.location_address || 'Aniqlanmadi'}`}
+                    </Text>
+                  </View>
+
+                  {log.device_info && (
+                    <View style={[styles.logRow, { marginTop: 4 }]}>
+                      <Ionicons name="hardware-chip-outline" size={15} color="#94A3B8" />
+                      <Text style={styles.logSubText}>{`Qurilma: ${log.device_info}`}</Text>
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
+          </>
         )}
       </ScrollView>
     </View>
@@ -291,9 +424,90 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  subTabRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  subTabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  subTabBtnActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderColor: 'rgba(56, 189, 248, 0.35)',
+  },
+  subTabText: {
+    color: '#94A3B8',
+    fontSize: 12.5,
+    fontWeight: '600',
+  },
+  subTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
   scrollContent: {
     paddingBottom: 140,
     gap: 16,
+  },
+  logCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
+  },
+  logAvatar: {
+    marginRight: 8,
+  },
+  logUserName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  logUserEmail: {
+    color: '#94A3B8',
+    fontSize: 12,
+  },
+  roleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(56, 189, 248, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+  },
+  roleBadgeText: {
+    color: '#38BDF8',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  logDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 8,
+  },
+  logRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  logDetailText: {
+    color: '#CBD5E1',
+    fontSize: 12.5,
+  },
+  logSubText: {
+    color: '#94A3B8',
+    fontSize: 11.5,
   },
   addBtn: {
     flexDirection: 'row',
