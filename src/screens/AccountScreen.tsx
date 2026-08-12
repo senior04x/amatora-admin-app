@@ -352,34 +352,40 @@ export const AccountScreen: React.FC<{
             .eq('id', targetOrgId);
         }
 
-        // Sync admin_users
+        // Sync admin_users or organization_users
         try {
-          const { data: adminUser } = await dbClient
-            .from('admin_users')
-            .select('id')
-            .eq('organization_id', targetOrgId)
-            .eq('role', 'org_admin')
-            .maybeSingle();
-
-          if (adminUser) {
-            const uPayload: any = {};
-            if (editEmail.trim()) uPayload.email = editEmail.trim();
-            if (editPassword.trim()) uPayload.password = editPassword.trim();
-            if (fullPhone) uPayload.phone_number = fullPhone;
-            if (Object.keys(uPayload).length > 0) {
-              await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
-            }
+          if (userRole === 'user') {
+            const { data: userData } = await supabase.auth.getUser();
+            const currentEmail = userData?.user?.email || editEmail.trim();
+            await dbClient
+              .from('organization_users')
+              .update({
+                email: editEmail.trim(),
+                password: editPassword.trim(),
+                full_name: editName.trim(),
+              })
+              .eq('organization_id', targetOrgId)
+              .ilike('email', currentEmail);
           } else {
-            await dbClient.from('admin_users').insert([{
-              organization_id: targetOrgId,
-              email: editEmail.trim() || 'admin@amatora.uz',
-              password: editPassword.trim() || '123456',
-              phone_number: fullPhone || '',
-              role: 'org_admin',
-            }]);
+            const { data: adminUser } = await dbClient
+              .from('admin_users')
+              .select('id')
+              .eq('organization_id', targetOrgId)
+              .eq('role', 'org_admin')
+              .maybeSingle();
+
+            if (adminUser) {
+              const uPayload: any = {};
+              if (editEmail.trim()) uPayload.email = editEmail.trim();
+              if (editPassword.trim()) uPayload.password = editPassword.trim();
+              if (fullPhone) uPayload.phone_number = fullPhone;
+              if (Object.keys(uPayload).length > 0) {
+                await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
+              }
+            }
           }
         } catch (adminErr) {
-          console.warn('admin_users sync note:', adminErr);
+          console.warn('User credential sync note:', adminErr);
         }
 
         // Refresh org context silently in background

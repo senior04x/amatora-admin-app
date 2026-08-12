@@ -8,9 +8,11 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -104,6 +106,29 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     }
   };
 
+  const handlePickAvatar = async () => {
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (!res.canceled && res.assets[0]) {
+        const asset = res.assets[0];
+        if (asset.base64) {
+          setNewOrgAvatar(`data:image/jpeg;base64,${asset.base64}`);
+        } else {
+          setNewOrgAvatar(asset.uri);
+        }
+      }
+    } catch (e) {
+      console.error('Avatar pick error:', e);
+    }
+  };
+
   const handleCreateOrganizer = async () => {
     if (!newOrgEmail.trim() || !newOrgPassword.trim() || !newOrgName.trim()) {
       Alert.alert('Xatolik', 'Iltimos, barcha maydonlarni to\'ldiring!');
@@ -122,6 +147,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
           password: newOrgPassword.trim(),
           full_name: newOrgName.trim(),
           role: 'user',
+          avatar_url: newOrgAvatar || null,
         },
       ]);
 
@@ -244,6 +270,35 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
                 <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
                 <Text style={styles.formTitle}>{"Yangi Organizator Kiritish"}</Text>
 
+                {/* Avatar Image Picker Button */}
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    borderRadius: 12,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    marginBottom: 10,
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.12)',
+                  }}
+                  onPress={handlePickAvatar}
+                  activeOpacity={0.8}
+                >
+                  {newOrgAvatar ? (
+                    <Image source={{ uri: newOrgAvatar }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+                  ) : (
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(56, 189, 248, 0.2)', justifyContent: 'center', alignItems: 'center' }}>
+                      <Ionicons name="camera-outline" size={20} color="#38BDF8" />
+                    </View>
+                  )}
+                  <Text style={{ color: '#E2E8F0', fontSize: 13, fontWeight: '600' }}>
+                    {newOrgAvatar ? "Rasm tanlandi (O'zgartirish)" : "User Rasmini Yuklash (Galereyadan)"}
+                  </Text>
+                </TouchableOpacity>
+
                 <TextInput
                   style={styles.input}
                   placeholder="F.I.SH (Ism Familiya)"
@@ -309,9 +364,13 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
               organizersList.map((item) => (
                 <View key={item.id} style={styles.userCard}>
                   <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                  <View style={styles.avatarBox}>
-                    <Ionicons name="person" size={20} color="#38BDF8" />
-                  </View>
+                  {item.avatar_url ? (
+                    <Image source={{ uri: item.avatar_url }} style={{ width: 42, height: 42, borderRadius: 21, marginRight: 12 }} />
+                  ) : (
+                    <View style={styles.avatarBox}>
+                      <Ionicons name="person" size={20} color="#38BDF8" />
+                    </View>
+                  )}
 
                   <View style={{ flex: 1 }}>
                     <Text style={styles.userName}>{item.full_name || 'Organizator'}</Text>

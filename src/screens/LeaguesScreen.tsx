@@ -277,7 +277,8 @@ const LeagueSkeletonLoader = () => {
 
 // Leagues Screen Component
 export const LeaguesScreen: React.FC = () => {
-  const { orgId, collabLeagueIds } = useOrg();
+  const { orgId, userRole, collabLeagueIds } = useOrg();
+  const isReadOnlyUser = userRole === 'user';
   const [leagues, setLeagues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1004,16 +1005,18 @@ export const LeaguesScreen: React.FC = () => {
             </View>
 
             {/* Bottom: Action Tabs — Collab & Edit */}
-            <View style={s.actionTabs}>
-              <TouchableOpacity style={s.actionTab} onPress={() => handleOpenCollabModal(item)} activeOpacity={0.7}>
-                <Ionicons name="paper-plane-outline" size={14} color="rgba(255,255,255,0.8)" />
-                <Text style={s.actionTabText}>{"Collab"}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.actionTab} onPress={() => handleEditLeague(item)} activeOpacity={0.7}>
-                <Ionicons name="create-outline" size={16} color="rgba(255,255,255,0.8)" />
-                <Text style={s.actionTabText}>{"Tahrirlash"}</Text>
-              </TouchableOpacity>
-            </View>
+            {!isReadOnlyUser && (
+              <View style={s.actionTabs}>
+                <TouchableOpacity style={s.actionTab} onPress={() => handleOpenCollabModal(item)} activeOpacity={0.7}>
+                  <Ionicons name="paper-plane-outline" size={14} color="rgba(255,255,255,0.8)" />
+                  <Text style={s.actionTabText}>{"Collab"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.actionTab} onPress={() => handleEditLeague(item)} activeOpacity={0.7}>
+                  <Ionicons name="create-outline" size={16} color="rgba(255,255,255,0.8)" />
+                  <Text style={s.actionTabText}>{"Tahrirlash"}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </ImageBackground>
       </View>
@@ -1066,16 +1069,18 @@ export const LeaguesScreen: React.FC = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />}
           renderItem={renderLeagueCard}
           ListFooterComponent={
-            <TouchableOpacity style={s.addBtn} onPress={handleCreateLeague} activeOpacity={0.8}>
-              <Ionicons name="add" size={20} color="#FFFFFF" />
-              <Text style={s.addBtnText}>{"LIGA QO'SHISH"}</Text>
-            </TouchableOpacity>
+            !isReadOnlyUser ? (
+              <TouchableOpacity style={s.addBtn} onPress={handleCreateLeague} activeOpacity={0.8}>
+                <Ionicons name="add-circle" size={20} color="#000000" />
+                <Text style={s.addBtnText}>{"Yangi Liga Qo'shish"}</Text>
+              </TouchableOpacity>
+            ) : null
           }
         />
       )}
 
       {/* If empty, still show add button */}
-      {!loading && leagues.length === 0 && (
+      {!loading && leagues.length === 0 && !isReadOnlyUser && (
         <TouchableOpacity style={s.addBtn} onPress={handleCreateLeague} activeOpacity={0.8}>
           <Ionicons name="add" size={20} color="#FFFFFF" />
           <Text style={s.addBtnText}>{"LIGA QO'SHISH"}</Text>

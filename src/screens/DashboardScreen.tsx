@@ -246,25 +246,27 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
       <Text style={styles.sectionTitle}>{"Umumiy Statistika"}</Text>
       <View style={styles.statsColumn}>
         {/* Card 1: Kutilayotgan Arizalar */}
-        <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
-          activeOpacity={0.8}
-          onPress={() => onNavigate && onNavigate('applications', 'players')}
-        >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-          <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Kutilayotgan Arizalar"}</Text>
-            {loading ? (
-              <SkeletonLoader width={160} height={24} />
-            ) : (
-              <Text style={[styles.statValue, { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' }]}>
-                {`${counts.applications}ta o'yinchi / ${counts.pendingTeams}ta jamoa`}
-              </Text>
-            )}
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
-        </TouchableOpacity>
+        {userRole !== 'user' && (
+          <TouchableOpacity
+            style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
+            activeOpacity={0.8}
+            onPress={() => onNavigate && onNavigate('applications', 'players')}
+          >
+            <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.statLabel}>{"Kutilayotgan Arizalar"}</Text>
+              {loading ? (
+                <SkeletonLoader width={160} height={24} />
+              ) : (
+                <Text style={[styles.statValue, { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' }]}>
+                  {`${counts.applications}ta o'yinchi / ${counts.pendingTeams}ta jamoa`}
+                </Text>
+              )}
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+          </TouchableOpacity>
+        )}
 
         {/* Card 2: Qabul Qilingan O'yinchilar */}
         <TouchableOpacity

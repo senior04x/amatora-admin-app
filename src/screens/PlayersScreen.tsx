@@ -54,6 +54,7 @@ const SwipeablePlayerCard = ({
   onOpen,
   onDelete,
   onImagePress,
+  isReadOnlyUser,
 }: any) => {
   const panX = useRef(new Animated.Value(0)).current;
   const hapticTriggeredRef = useRef(false);
@@ -81,6 +82,7 @@ const SwipeablePlayerCard = ({
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
+        if (isReadOnlyUser) return false;
         // Only capture gesture if horizontal swipe is clearly dominant
         return Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dy) < 10;
       },
@@ -254,7 +256,8 @@ const SwipeablePlayerCard = ({
 };
 
 export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }) => {
-  const { orgId, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, refreshOrg } = useOrg();
+  const { orgId, userRole, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, refreshOrg } = useOrg();
+  const isReadOnlyUser = userRole === 'user';
   const [fullImagePreview, setFullImagePreview] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialSegmentTab || 'players');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1073,6 +1076,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               onOpen={handleOpenItem}
               onDelete={handlePromptDelete}
               onImagePress={(imgUrl: string) => setFullImagePreview(imgUrl)}
+              isReadOnlyUser={isReadOnlyUser}
             />
           )}
         />
@@ -1446,40 +1450,42 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             )}
 
             {/* Modal Bottom Action Bar (Pencil Switcher & Save Button) */}
-            <View style={styles.modalFooterRow}>
-              <TouchableOpacity
-                style={[styles.pencilBtn, isEditing && styles.pencilBtnActive]}
-                onPress={() => setIsEditing(!isEditing)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={isEditing ? "create" : "create-outline"}
-                  size={18}
-                  color="#FFFFFF"
-                />
-                <Text style={[styles.pencilBtnText, isEditing && styles.pencilBtnTextActive]}>
-                  {isEditing ? "Tahrirlash rejimida" : "Tahrirlash"}
-                </Text>
-              </TouchableOpacity>
-
-              {isEditing && (
+            {!isReadOnlyUser && (
+              <View style={styles.modalFooterRow}>
                 <TouchableOpacity
-                  style={styles.saveBtn}
-                  onPress={handleSaveDetails}
-                  disabled={saving}
-                  activeOpacity={0.8}
+                  style={[styles.pencilBtn, isEditing && styles.pencilBtnActive]}
+                  onPress={() => setIsEditing(!isEditing)}
+                  activeOpacity={0.7}
                 >
-                  {saving ? (
-                    <ActivityIndicator size="small" color="#000000" />
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark-circle" size={18} color="#000000" />
-                      <Text style={styles.saveBtnText}>{"Saqlash"}</Text>
-                    </>
-                  )}
+                  <Ionicons
+                    name={isEditing ? "create" : "create-outline"}
+                    size={18}
+                    color="#FFFFFF"
+                  />
+                  <Text style={[styles.pencilBtnText, isEditing && styles.pencilBtnTextActive]}>
+                    {isEditing ? "Tahrirlash rejimida" : "Tahrirlash"}
+                  </Text>
                 </TouchableOpacity>
-              )}
-            </View>
+
+                {isEditing && (
+                  <TouchableOpacity
+                    style={styles.saveBtn}
+                    onPress={handleSaveDetails}
+                    disabled={saving}
+                    activeOpacity={0.8}
+                  >
+                    {saving ? (
+                      <ActivityIndicator size="small" color="#000000" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={18} color="#000000" />
+                        <Text style={styles.saveBtnText}>{"Saqlash"}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
             {/* INTERACTIVE OPEN-CLOSE MODAL SELECT PICKER (NESTED INSIDE MAIN MODAL FOR CLICKABILITY) */}
             <Modal visible={!!selectPickerConfig} transparent animationType="fade">
