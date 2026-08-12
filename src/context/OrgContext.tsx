@@ -38,7 +38,7 @@ export const useOrg = () => {
 
 export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [orgId, setOrgId] = useState<number>(1);
-  const [currentOrg, setCurrentOrg] = useState<any>({ name: 'Havas Futbol Ligasi', id: 1 });
+  const [currentOrg, setCurrentOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [transferWindowOpen, setTransferWindowOpen] = useState<boolean>(false);
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(true);

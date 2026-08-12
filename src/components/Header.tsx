@@ -74,13 +74,13 @@ export const Header: React.FC = () => {
 
         {/* Skeleton for Name & Status */}
         <View style={styles.titleCol}>
-          {loading ? (
+          {loading || !currentOrg?.name ? (
             <View style={{ gap: 6 }}>
               <HeaderSkeletonLoader width={140} height={16} />
             </View>
           ) : (
             <>
-              <Text style={styles.orgName}>{currentOrg?.name || 'Havas Futbol Ligasi'}</Text>
+              <Text style={styles.orgName}>{currentOrg.name}</Text>
               <Text style={styles.greetingText}>{getGreeting()}</Text>
             </>
           )}

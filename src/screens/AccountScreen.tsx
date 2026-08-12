@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   TextInput,
   Linking,
+  Animated,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,6 +23,49 @@ import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
 
+const TextSkeleton: React.FC<{ width?: number | string; height?: number; borderRadius?: number; style?: any }> = ({
+  width = 120,
+  height = 16,
+  borderRadius = 6,
+  style,
+}) => {
+  const opacityAnim = React.useRef(new Animated.Value(0.3)).current;
+
+  React.useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacityAnim, {
+          toValue: 0.7,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 0.3,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width,
+          height,
+          borderRadius,
+          backgroundColor: 'rgba(255, 255, 255, 0.22)',
+          opacity: opacityAnim,
+        },
+        style,
+      ]}
+    />
+  );
+};
+
 export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogout?: () => void }> = ({
   onNavigateToSettings,
   onLogout,
@@ -29,6 +73,7 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
   const {
     orgId,
     currentOrg,
+    loading,
     transferWindowOpen,
     isRegistrationOpen,
     toggleTransferWindow,
@@ -297,14 +342,23 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
           </TouchableOpacity>
 
           <View style={{ flex: 1 }}>
-            <Text style={styles.orgName}>{currentOrg?.name || 'Havas Futbol Ligasi'}</Text>
-            <View style={styles.badgeRow}>
-              <View style={styles.roleBadge}>
-                <Ionicons name="shield-checkmark" size={12} color="#FFFFFF" />
-                <Text style={styles.roleBadgeText}>{"BOSH ADMIN"}</Text>
+            {loading || !currentOrg?.name ? (
+              <View style={{ gap: 6, marginVertical: 4 }}>
+                <TextSkeleton width={180} height={20} borderRadius={6} />
+                <TextSkeleton width={100} height={14} borderRadius={4} />
               </View>
-              <Text style={styles.orgIdText}>{`ID: #${currentOrg?.id || 1}`}</Text>
-            </View>
+            ) : (
+              <>
+                <Text style={styles.orgName}>{currentOrg.name}</Text>
+                <View style={styles.badgeRow}>
+                  <View style={styles.roleBadge}>
+                    <Ionicons name="shield-checkmark" size={12} color="#FFFFFF" />
+                    <Text style={styles.roleBadgeText}>{"BOSH ADMIN"}</Text>
+                  </View>
+                  <Text style={styles.orgIdText}>{`ID: #${currentOrg.id}`}</Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
 
@@ -597,13 +651,21 @@ export const AccountScreen: React.FC<{ onNavigateToSettings?: () => void; onLogo
             <View style={styles.infoRow}>
               <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.5)" />
               <Text style={styles.infoLabel}>{"Tashkilot:"}</Text>
-              <Text style={styles.infoValue}>{currentOrg?.name || editName || 'Havas Futbol Ligasi'}</Text>
+              {loading || (!currentOrg?.name && !editName) ? (
+                <TextSkeleton width={140} height={14} borderRadius={4} />
+              ) : (
+                <Text style={styles.infoValue}>{currentOrg?.name || editName}</Text>
+              )}
             </View>
 
             <View style={styles.infoRow}>
               <Ionicons name="link-outline" size={16} color="rgba(255,255,255,0.5)" />
               <Text style={styles.infoLabel}>{"Identifikator:"}</Text>
-              <Text style={styles.infoValue}>{currentOrg?.slug || editSlug || 'hfl'}</Text>
+              {loading || (!currentOrg?.slug && !editSlug) ? (
+                <TextSkeleton width={80} height={14} borderRadius={4} />
+              ) : (
+                <Text style={styles.infoValue}>{currentOrg?.slug || editSlug}</Text>
+              )}
             </View>
 
             <View style={styles.infoRow}>
