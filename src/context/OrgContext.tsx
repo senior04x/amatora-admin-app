@@ -227,21 +227,22 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const dbClient = supabaseAdmin || supabase;
 
-      // 1. Primary storage: Update/insert ONLY this organization's specific key `REGISTRATION_OPEN_${currentOrgId}`
-      const key = `REGISTRATION_OPEN_${currentOrgId}`;
-      const { data: ex } = await dbClient.from('sponsors').select('id').eq('name', key).maybeSingle();
-      if (ex) {
-        await dbClient.from('sponsors').update({ logo_url: val ? 'true' : 'false' }).eq('id', ex.id);
-      } else {
-        await dbClient.from('sponsors').insert({ name: key, logo_url: val ? 'true' : 'false', organization_id: currentOrgId });
+      // Primary DB Column: Update organizations.is_registration_open
+      const { error } = await dbClient.from('organizations').update({ is_registration_open: val }).eq('id', currentOrgId);
+      if (error) {
+        console.warn('Update organizations.is_registration_open warn:', error);
       }
 
-      // 2. Secondary sync: Safely update organizations table for this specific organization
+      // Sync sponsors KV fallback for backwards compatibility
       try {
-        await dbClient.from('organizations').update({ is_registration_open: val }).eq('id', currentOrgId);
-      } catch (e) {
-        // Ignore if is_registration_open column does not exist in organizations table schema
-      }
+        const key = `REGISTRATION_OPEN_${currentOrgId}`;
+        const { data: ex } = await dbClient.from('sponsors').select('id').eq('name', key).maybeSingle();
+        if (ex) {
+          await dbClient.from('sponsors').update({ logo_url: val ? 'true' : 'false' }).eq('id', ex.id);
+        } else {
+          await dbClient.from('sponsors').insert({ name: key, logo_url: val ? 'true' : 'false', organization_id: currentOrgId });
+        }
+      } catch (e) {}
 
       showToast({
         message: val ? "Ro'yxatdan o'tish OCHILDI" : "Ro'yxatdan o'tish YOPILDI",
