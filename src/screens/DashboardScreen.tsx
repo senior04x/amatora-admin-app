@@ -47,7 +47,7 @@ const SkeletonLoader: React.FC<{ width?: number; height?: number }> = ({ width =
 };
 
 export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
-  const { orgId } = useOrg();
+  const { orgId, userRole } = useOrg();
   const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
