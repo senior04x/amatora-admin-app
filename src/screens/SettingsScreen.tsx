@@ -166,17 +166,31 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
               setHasPin(false);
               setBiometricsEnabled(false);
               DeviceEventEmitter.emit('app_pin_changed');
+              DeviceEventEmitter.emit('app_pin_reset');
               
-              // 2. Delete from database in background non-blockingly
+              // 2. Delete from database permanently
+              const dbClient = supabaseAdmin || supabase;
+              const { data: { session } } = await supabase.auth.getSession();
+              
               if (currentOrg?.id) {
-                const dbClient = supabaseAdmin || supabase;
-                dbClient
+                await dbClient
                   .from('organizations')
                   .update({ app_pin_code: null })
                   .eq('id', currentOrg.id)
-                  .catch((err) => console.log('Error deleting pin from DB:', err));
+                  .catch((err) => console.log('Error deleting pin by id:', err));
               }
+              
+              if (session?.user?.email) {
+                await dbClient
+                  .from('organizations')
+                  .update({ app_pin_code: null })
+                  .eq('admin_email', session.user.email)
+                  .catch((err) => console.log('Error deleting pin by email:', err));
+              }
+
+              Alert.alert('Muvaffaqiyatli', 'PIN kod o\'chirildi');
             } catch (e) {
+              console.error('Error deleting pin:', e);
               Alert.alert('Xatolik', 'PIN kodni o\'chirishda xatolik yuz berdi.');
             }
           }

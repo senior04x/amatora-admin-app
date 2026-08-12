@@ -126,11 +126,12 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
               await AsyncStorage.removeItem(PIN_KEY);
               await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
               DeviceEventEmitter.emit('app_pin_changed');
+              DeviceEventEmitter.emit('app_pin_reset');
               
               const { data: { session } } = await supabase.auth.getSession();
+              const dbClient = supabaseAdmin || supabase;
               if (session?.user?.email) {
-                const dbClient = supabaseAdmin || supabase;
-                dbClient
+                await dbClient
                   .from('organizations')
                   .update({ app_pin_code: null })
                   .eq('admin_email', session.user.email)

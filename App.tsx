@@ -289,17 +289,22 @@ function App() {
     });
 
     const resetListener = DeviceEventEmitter.addListener('app_pin_reset', () => {
-      setPinState('not_set');
+      checkPinStatus(false);
     });
 
     const editListener = DeviceEventEmitter.addListener('app_pin_edit', () => {
       setPinState('editing');
     });
 
+    const changedListener = DeviceEventEmitter.addListener('app_pin_changed', () => {
+      checkPinStatus(false);
+    });
+
     return () => {
       subscription.unsubscribe();
       resetListener.remove();
       editListener.remove();
+      changedListener.remove();
     };
   }, []);
 
