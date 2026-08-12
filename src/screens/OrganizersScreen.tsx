@@ -29,6 +29,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgEmail, setNewOrgEmail] = useState('');
   const [newOrgPassword, setNewOrgPassword] = useState('');
+  const [newOrgAvatar, setNewOrgAvatar] = useState<string | null>(null);
   const [isCreatingOrgUser, setIsCreatingOrgUser] = useState(false);
 
   // Login Activity Logs State
@@ -176,6 +177,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
       setNewOrgName('');
       setNewOrgEmail('');
       setNewOrgPassword('');
+      setNewOrgAvatar(null);
       setShowAddOrganizerForm(false);
       fetchOrganizers();
     } catch (err: any) {

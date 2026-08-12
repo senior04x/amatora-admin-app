@@ -622,16 +622,9 @@ export const AccountScreen: React.FC<{
       </View>
 
       {/* Account & Organization Details with 1-to-1 SuperAdmin Inline Editing */}
-      {(() => {
-        const orgColors = Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : [];
-        const isGradient = false;
-        const CardWrapper = View;
-        const wrapperProps = { style: styles.sectionCard };
-
-        return (
-          <CardWrapper {...(wrapperProps as any)}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-            <View style={styles.sectionHeaderRow}>
+      <View style={styles.sectionCard}>
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <View style={styles.sectionHeaderRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={styles.sectionTitle}>
                   {userRole === 'user' ? "Mening Akkount Ma'lumotlarim" : "Tashkilot & Admin Ma'lumotlari"}
@@ -868,10 +861,7 @@ export const AccountScreen: React.FC<{
               </>
             )}
           </>
-        )}
-          </CardWrapper>
-        );
-      })()}
+      </View>
 
       <View style={{ height: 20 }} />
 
