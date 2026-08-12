@@ -111,9 +111,8 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.7,
+        allowsEditing: false, // Instant selection without slow cropper delay
+        quality: 0.5,
         base64: true,
       });
 
