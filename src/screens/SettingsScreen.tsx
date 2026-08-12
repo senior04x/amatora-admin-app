@@ -142,11 +142,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   };
 
   const handleSetOrEditPin = () => {
-    if (hasPin) {
-      DeviceEventEmitter.emit('app_pin_edit');
-    } else {
-      DeviceEventEmitter.emit('app_pin_reset');
-    }
+    DeviceEventEmitter.emit('app_pin_edit');
   };
 
   const handleResetPin = () => {
@@ -179,26 +175,26 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
     );
   };
 
+  const onNavigateBack = () => {
+    if (onGoBack) onGoBack();
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
       {/* Header Row with Back Button */}
       <View style={styles.headerRow}>
-        {onGoBack && (
-          <TouchableOpacity style={styles.backBtn} activeOpacity={0.8} onPress={onGoBack}>
-            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-        )}
-        <View style={{ flex: 1 }}>
-          <Text style={styles.screenTitle}>Sozlamalar</Text>
-          <Text style={styles.screenSub}>Mobil ilova va xavfsizlik</Text>
-        </View>
+        <TouchableOpacity style={styles.backBtn} activeOpacity={0.7} onPress={onNavigateBack}>
+          <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Sozlamalar</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       {/* Security Section */}
       <Text style={styles.sectionHeader}>Xavfsizlik & Kirish</Text>
 
       <View style={styles.settingItem}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
         <View style={styles.settingLeft}>
           <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
             <Ionicons name="finger-print" size={20} color="#FFFFFF" />
@@ -217,14 +213,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
       </View>
 
       <View style={styles.settingItem}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
         <View style={styles.settingLeft}>
           <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
             <Ionicons name="notifications" size={20} color="#FFFFFF" />
           </View>
           <View>
-            <Text style={styles.settingTitle}>Push Bildirishnomalar</Text>
-            <Text style={styles.settingSub}>Yangi arizalar va transfer xabarlari</Text>
+            <Text style={styles.settingTitle}>Bildirishnomalar</Text>
+            <Text style={styles.settingSub}>Tizim xabarlari va eslatmalar</Text>
           </View>
         </View>
         <Switch
@@ -238,7 +234,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
       {hasPin ? (
         <>
           <TouchableOpacity style={styles.settingItem} activeOpacity={0.7} onPress={handleSetOrEditPin}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
             <View style={styles.settingLeft}>
               <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
                 <Ionicons name="keypad" size={20} color="#FFFFFF" />
@@ -252,7 +248,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.settingItem, { borderColor: 'rgba(239, 68, 68, 0.3)' }]} activeOpacity={0.7} onPress={handleResetPin}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
             <View style={styles.settingLeft}>
               <View style={[styles.settingIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
                 <Ionicons name="trash" size={20} color="#EF4444" />
@@ -267,7 +263,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         </>
       ) : (
         <TouchableOpacity style={styles.settingItem} activeOpacity={0.7} onPress={handleSetOrEditPin}>
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
           <View style={styles.settingLeft}>
             <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
               <Ionicons name="keypad" size={20} color="#FFFFFF" />
