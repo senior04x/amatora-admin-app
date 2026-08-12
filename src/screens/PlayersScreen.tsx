@@ -15,6 +15,7 @@ import {
   Vibration,
   Animated,
   PanResponder,
+  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
@@ -32,7 +33,7 @@ interface Props {
 const SkeletonCard = () => {
   return (
     <View style={styles.skeletonCard}>
-      <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+      <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
       <View style={styles.skeletonAvatar} />
       <View style={{ flex: 1, gap: 8 }}>
         <View style={styles.skeletonTitleLine} />
