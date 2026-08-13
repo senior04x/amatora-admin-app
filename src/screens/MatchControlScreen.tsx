@@ -197,11 +197,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     setTimeout(async () => {
       try {
         const nameKey = `MATCH_TIMER_${matchId}`;
+        const targetOrgId = match?.organization_id || orgId || null;
         const { data: existing } = await dbClient.from('sponsors').select('id').eq('name', nameKey).maybeSingle();
         if (existing) {
-          await dbClient.from('sponsors').update({ logo_url: payloadStr, image_url: payloadStr }).eq('id', existing.id);
+          await dbClient.from('sponsors').update({ logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId }).eq('id', existing.id);
         } else {
-          await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr, image_url: payloadStr });
+          await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId });
         }
       } catch (e) {}
 
