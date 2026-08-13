@@ -704,7 +704,12 @@ export const ProfileUpdatesScreen: React.FC = () => {
         await dbClient.from('players').update(updatePayload).eq('id', targetPlayerId);
       }
 
-      await updateTicketStatus(reqItem.id, 'approved');
+      // Ensure the ticket itself is marked approved with team_id null so it NEVER creates a duplicate player
+      if (reqItem.id !== targetPlayerId) {
+        await dbClient.from('applications').update({ status: 'approved', team_id: null }).eq('id', reqItem.id);
+      } else {
+        await updateTicketStatus(reqItem.id, 'approved');
+      }
 
       // Trigger push notification to player
       const targetPlayerIdForNotif = reqItem.payload?.playerId || reqItem.player_id || reqItem.id;
@@ -735,7 +740,12 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
     // 2. Background DB Update
     try {
-      await updateTicketStatus(reqItem.id, 'rejected');
+      const targetPlayerId = reqItem.payload?.playerId || reqItem.player_id;
+      if (reqItem.id !== targetPlayerId) {
+        await dbClient.from('applications').update({ status: 'rejected', team_id: null }).eq('id', reqItem.id);
+      } else {
+        await updateTicketStatus(reqItem.id, 'rejected');
+      }
 
       // Trigger push notification to player
       const targetPlayerId = reqItem.payload?.playerId || reqItem.player_id || reqItem.id;
