@@ -136,9 +136,24 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   // Helper to apply persistent timer payload dynamically (1:1 Web Admin logic)
   const applyTimerPayload = (payload: any) => {
     if (!payload) return;
-    const baseSec = payload.timer_seconds !== undefined ? Number(payload.timer_seconds) : 0;
-    const isRunning = !!payload.is_timer_running;
-    const startedAt = payload.timer_started_at;
+
+    let baseSec = 0;
+    if (payload.timer_seconds !== undefined && payload.timer_seconds !== null) {
+      baseSec = Number(payload.timer_seconds) || 0;
+    } else if (payload.timerSeconds !== undefined && payload.timerSeconds !== null) {
+      baseSec = Number(payload.timerSeconds) || 0;
+    }
+
+    let isRunning = false;
+    if (payload.is_timer_running !== undefined && payload.is_timer_running !== null) {
+      isRunning = String(payload.is_timer_running) === 'true' || payload.is_timer_running === true;
+    } else if (payload.isTimerRunning !== undefined && payload.isTimerRunning !== null) {
+      isRunning = String(payload.isTimerRunning) === 'true' || payload.isTimerRunning === true;
+    } else if (payload.status === 'first_half' || payload.status === 'second_half' || payload.status === 'live') {
+      isRunning = true;
+    }
+
+    let startedAt = payload.timer_started_at || payload.timerStartedAt;
 
     setIsTimerRunning(isRunning);
     baseTimerSecondsRef.current = baseSec;
@@ -148,7 +163,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       const startedMs = new Date(startedAt).getTime();
       if (!isNaN(startedMs)) {
         const elapsedSec = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
-        setTimerSeconds(baseSec + elapsedSec);
+        if (elapsedSec < 14400) {
+          setTimerSeconds(baseSec + elapsedSec);
+        } else {
+          setTimerSeconds(baseSec);
+        }
       } else {
         setTimerSeconds(baseSec);
       }
@@ -172,16 +191,17 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       updated_at: new Date().toISOString(),
     };
 
+    const payloadStr = JSON.stringify(timerPayload);
+
     // 2. Background DB Async Sync
     setTimeout(async () => {
       try {
         const nameKey = `MATCH_TIMER_${matchId}`;
-        const payloadStr = JSON.stringify(timerPayload);
         const { data: existing } = await dbClient.from('sponsors').select('id').eq('name', nameKey).maybeSingle();
         if (existing) {
-          await dbClient.from('sponsors').update({ logo_url: payloadStr }).eq('id', existing.id);
+          await dbClient.from('sponsors').update({ logo_url: payloadStr, image_url: payloadStr }).eq('id', existing.id);
         } else {
-          await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr });
+          await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr, image_url: payloadStr });
         }
       } catch (e) {}
 
@@ -207,15 +227,16 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (payload: any) => {
         setMatch((prev: any) => ({ ...prev, ...payload.new }));
-        if (payload.new?.timer_seconds !== undefined || payload.new?.is_timer_running !== undefined) {
+        if (payload.new?.timer_started_at !== undefined && payload.new?.timer_started_at !== null) {
           applyTimerPayload(payload.new);
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sponsors', filter: `name=eq.MATCH_TIMER_${matchId}` }, (payload: any) => {
         const record = payload.new || payload.record;
-        if (record?.logo_url) {
+        const jsonStr = record?.logo_url || record?.image_url || record?.url;
+        if (jsonStr) {
           try {
-            const parsed = JSON.parse(record.logo_url);
+            const parsed = JSON.parse(jsonStr);
             applyTimerPayload(parsed);
           } catch (e) {}
         }
@@ -272,18 +293,23 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       // Fetch persistent timer state from sponsors OR match (1:1 Web Admin logic)
       const { data: timerSp } = await dbClient
         .from('sponsors')
-        .select('logo_url')
+        .select('*')
         .eq('name', `MATCH_TIMER_${matchId}`)
         .maybeSingle();
 
-      if (timerSp?.logo_url) {
-        try {
-          const parsed = JSON.parse(timerSp.logo_url);
-          applyTimerPayload(parsed);
-        } catch (e) {
-          applyTimerPayload(matchData);
+      let loadedTimer = false;
+      if (timerSp) {
+        const jsonStr = timerSp.logo_url || timerSp.image_url || timerSp.url;
+        if (jsonStr) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            applyTimerPayload({ ...matchData, ...parsed });
+            loadedTimer = true;
+          } catch (e) {}
         }
-      } else {
+      }
+
+      if (!loadedTimer) {
         applyTimerPayload(matchData);
       }
 
@@ -390,8 +416,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   // Instant Reset Timer (0ms RAM response)
   const resetTimerManual = () => {
     const defaultSec = match?.status === 'second_half' ? halfDurationSecs : 0;
-    const nowIso = isTimerRunning ? new Date().toISOString() : null;
-    updateTimerDBAndState(defaultSec, nowIso, isTimerRunning);
+    updateTimerDBAndState(defaultSec, null, false);
   };
 
   // Instant Optimistic Score Adjuster (+1 / -1)
@@ -475,6 +500,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     if (newStatus === 'first_half') {
       newBaseSec = 0;
       newRunning = true;
+      nowIso = new Date().toISOString();
     } else if (newStatus === 'half_time') {
       newBaseSec = timerSeconds < halfDurationSecs ? halfDurationSecs : timerSeconds;
       newRunning = false;
@@ -482,6 +508,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     } else if (newStatus === 'second_half') {
       newBaseSec = timerSeconds < halfDurationSecs ? halfDurationSecs : timerSeconds;
       newRunning = true;
+      nowIso = new Date().toISOString();
     } else if (newStatus === 'finished') {
       newRunning = false;
       nowIso = null;

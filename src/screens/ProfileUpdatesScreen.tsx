@@ -13,6 +13,7 @@ import {
   Animated,
   Platform,
   RefreshControl,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -225,31 +226,32 @@ const UpdateCardItem: React.FC<{
     })
   ).current;
 
-  // Paper Fly Animation for Approval
+  // Shrink-to-icon Animation for Approval
   const runApproveAnim = (): Promise<void> => {
     return new Promise((resolve) => {
-      Animated.parallel([
-        Animated.timing(translateY, { toValue: -280, duration: 550, useNativeDriver: true }),
-        Animated.timing(translateX, { toValue: 120, duration: 550, useNativeDriver: true }),
-        Animated.timing(scale, { toValue: 0.05, duration: 550, useNativeDriver: true }),
-        Animated.timing(rotate, { toValue: 1, duration: 550, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0, duration: 550, useNativeDriver: true }),
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.04, duration: 150, useNativeDriver: true }),
+        Animated.parallel([
+          Animated.timing(scale, { toValue: 0.02, duration: 380, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0, duration: 380, useNativeDriver: true }),
+          Animated.timing(translateY, { toValue: 40, duration: 380, useNativeDriver: true }),
+        ]),
       ]).start(() => resolve());
     });
   };
 
-  // Red Overlay + Fly Animation for Rejection
+  // Red Overlay + Shrink-to-icon Animation for Rejection
   const runRejectAnim = (): Promise<void> => {
     return new Promise((resolve) => {
-      Animated.timing(redOverlay, { toValue: 1, duration: 220, useNativeDriver: true }).start(() => {
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 1.04, duration: 150, useNativeDriver: true }),
         Animated.parallel([
-          Animated.timing(translateY, { toValue: -280, duration: 500, useNativeDriver: true }),
-          Animated.timing(translateX, { toValue: 160, duration: 500, useNativeDriver: true }),
-          Animated.timing(scale, { toValue: 0.05, duration: 500, useNativeDriver: true }),
-          Animated.timing(rotate, { toValue: -1, duration: 500, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
-        ]).start(() => resolve());
-      });
+          Animated.timing(redOverlay, { toValue: 1, duration: 200, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 0.02, duration: 380, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0, duration: 380, useNativeDriver: true }),
+          Animated.timing(translateY, { toValue: 40, duration: 380, useNativeDriver: true }),
+        ]),
+      ]).start(() => resolve());
     });
   };
 
@@ -463,36 +465,59 @@ const UpdateCardItem: React.FC<{
           />
         </View>
 
-        {/* CARD ACTION BUTTONS */}
-        <View style={styles.cardActionsRow}>
-          <TouchableOpacity
-            style={[styles.actionIconBtn, styles.rejectIconBtn]}
-            onPress={() => onReject(req, runRejectAnim)}
-            disabled={isProcessing}
-          >
-            <Ionicons name="close" size={20} color="#EF4444" />
-          </TouchableOpacity>
+        {/* CARD ACTION BUTTONS (Only shown for pending requests) */}
+        {isPending ? (
+          <View style={styles.cardActionsRow}>
+            <TouchableOpacity
+              style={[styles.actionIconBtn, styles.rejectIconBtn]}
+              onPress={() => onReject(req, runRejectAnim)}
+              disabled={isProcessing}
+            >
+              <Ionicons name="close" size={20} color="#EF4444" />
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.actionIconBtn, styles.deleteIconBtn]}
-            onPress={() => onDeletePress(req, runDeleteAnim)}
-            disabled={isProcessing}
-          >
-            <Ionicons name="trash-outline" size={20} color="#EF4444" />
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionIconBtn, styles.deleteIconBtn]}
+              onPress={() => onDeletePress(req, runDeleteAnim)}
+              disabled={isProcessing}
+            >
+              <Ionicons name="trash-outline" size={20} color="#EF4444" />
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.actionIconBtn, styles.approveIconBtn]}
-            onPress={() => onApprove(req, runApproveAnim)}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <ActivityIndicator size="small" color="#000000" />
-            ) : (
-              <Ionicons name="checkmark" size={20} color="#000000" />
-            )}
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              style={[styles.actionIconBtn, styles.approveIconBtn]}
+              onPress={() => onApprove(req, runApproveAnim)}
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <Ionicons name="checkmark" size={20} color="#000000" />
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={{ marginTop: 12, alignItems: 'flex-end' }}>
+            <View
+              style={[
+                styles.statusPillBadge,
+                {
+                  backgroundColor: `${statusColor}1F`,
+                  borderColor: statusColor,
+                },
+              ]}
+            >
+              <Ionicons
+                name={statusLabel.includes('Rad') || statusLabel.includes('RAD') ? "close-circle" : "checkmark-circle"}
+                size={16}
+                color={statusColor}
+              />
+              <Text style={[styles.statusPillText, { color: statusColor }]}>
+                {statusLabel}
+              </Text>
+            </View>
+          </View>
+        )}
       </Animated.View>
     </View>
   );
@@ -501,12 +526,20 @@ const UpdateCardItem: React.FC<{
 export const ProfileUpdatesScreen: React.FC = () => {
   const { orgId } = useOrg();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>('players');
-  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [showOnlyChanged, setShowOnlyChanged] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  // Full-Page Modals State for Approved & Rejected Requests
+  const [showApprovedModal, setShowApprovedModal] = useState<boolean>(false);
+  const [showRejectedModal, setShowRejectedModal] = useState<boolean>(false);
+  const [approvedTab, setApprovedTab] = useState<'players' | 'teams'>('players');
+  const [rejectedTab, setRejectedTab] = useState<'players' | 'teams'>('players');
+  const [approvedSearchQuery, setApprovedSearchQuery] = useState<string>('');
+  const [rejectedSearchQuery, setRejectedSearchQuery] = useState<string>('');
 
   // Delete confirmation modal state
   const [itemToDelete, setItemToDelete] = useState<any | null>(null);
@@ -601,9 +634,19 @@ export const ProfileUpdatesScreen: React.FC = () => {
     return error;
   };
 
-  // Approve Request: Update existing player ONLY & mark request as processed
+  // Approve Request: Instant RAM Caching + Background DB Sync (NO Alerts)
   const handleApprove = async (reqItem: any) => {
     setProcessingId(reqItem.id);
+
+    // 1. INSTANT OPTIMISTIC RAM STATE UPDATE (0ms delay)
+    setRequests((prev) =>
+      prev.map((r) => (r.id === reqItem.id ? { ...r, status: 'approved' } : r))
+    );
+
+    setToastMsg("Ariza muvaffaqiyatli tasdiqlandi! ✓");
+    setTimeout(() => setToastMsg(null), 2500);
+
+    // 2. Background DB Update
     try {
       const targetPlayerId = reqItem.payload?.playerId || reqItem.player_id;
       const newData = reqItem.payload?.newData || {};
@@ -656,47 +699,35 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
         Object.keys(updatePayload).forEach((key) => updatePayload[key] === undefined && delete updatePayload[key]);
 
-        const { error: playerErr } = await dbClient.from('applications').update(updatePayload).eq('id', targetPlayerId);
-        if (playerErr) {
-          console.error('Error updating player record:', playerErr);
-          Alert.alert('Xatolik', "O'yinchi ma'lumotlarini yangilashda xatolik: " + playerErr.message);
-          return;
-        }
-
-        // Also update players table if present
+        await dbClient.from('applications').update(updatePayload).eq('id', targetPlayerId);
         await dbClient.from('players').update(updatePayload).eq('id', targetPlayerId);
       }
 
-      const ticketErr = await updateTicketStatus(reqItem.id, 'approved');
-      if (ticketErr) {
-        console.error('Error approving request:', ticketErr);
-        Alert.alert('Xatolik', 'Arizani tasdiqlashda xatolik: ' + ticketErr.message);
-        return;
-      }
-
-      Alert.alert('Muvaffaqiyatli', "Ariza muvaffaqiyatli tasdiqlandi va o'yinchi ma'lumotlari yangilandi!");
-      fetchProfileUpdateRequests();
+      await updateTicketStatus(reqItem.id, 'approved');
     } catch (err: any) {
       console.error('Error approving request:', err);
-      Alert.alert('Xatolik', 'Xatolik yuz berdi: ' + err.message);
     } finally {
       setProcessingId(null);
     }
   };
 
+  // Reject Request: Instant RAM Caching + Background DB Sync (NO Alerts)
   const handleReject = async (reqItem: any) => {
     setProcessingId(reqItem.id);
+
+    // 1. INSTANT OPTIMISTIC RAM STATE UPDATE (0ms delay)
+    setRequests((prev) =>
+      prev.map((r) => (r.id === reqItem.id ? { ...r, status: 'rejected' } : r))
+    );
+
+    setToastMsg("Ariza rad etildi! ✕");
+    setTimeout(() => setToastMsg(null), 2500);
+
+    // 2. Background DB Update
     try {
-      const error = await updateTicketStatus(reqItem.id, 'rejected');
-      if (error) {
-        Alert.alert('Xatolik', 'Arizani rad etishda xatolik: ' + error.message);
-        return;
-      }
-      Alert.alert('Ma’lumot', 'Ariza rad etildi!');
-      fetchProfileUpdateRequests();
+      await updateTicketStatus(reqItem.id, 'rejected');
     } catch (err: any) {
       console.error('Error rejecting request:', err);
-      Alert.alert('Xatolik', 'Xatolik yuz berdi: ' + err.message);
     } finally {
       setProcessingId(null);
     }
@@ -716,26 +747,27 @@ export const ProfileUpdatesScreen: React.FC = () => {
     setItemToDelete({ ...reqItem, animFunc });
   };
 
+  // Delete Request: Instant RAM Caching + Background DB Sync (NO Alerts)
   const executeDelete = async () => {
     if (!itemToDelete) return;
-    setIsDeleting(true);
-    setProcessingId(itemToDelete.id);
+    const deleteId = itemToDelete.id;
+
+    // 1. INSTANT OPTIMISTIC RAM STATE UPDATE (0ms delay)
+    setRequests((prev) => prev.filter((r) => r.id !== deleteId));
+    setItemToDelete(null);
+
+    setToastMsg("Ariza o'chirildi! 🗑️");
+    setTimeout(() => setToastMsg(null), 2500);
+
+    // 2. Background DB Delete
     try {
       if (itemToDelete.animFunc) {
         await itemToDelete.animFunc();
       }
-      const { error } = await dbClient.from('applications').delete().eq('id', itemToDelete.id);
-      if (error) {
-        Alert.alert('Xatolik', "Arizani o'chirishda xatolik: " + error.message);
-        return;
-      }
-      setItemToDelete(null);
-      fetchProfileUpdateRequests();
+      await dbClient.from('applications').delete().eq('id', deleteId);
     } catch (err: any) {
       console.error('Error deleting request:', err);
-      Alert.alert('Xatolik', 'Xatolik yuz berdi: ' + err.message);
     } finally {
-      setIsDeleting(false);
       setProcessingId(null);
     }
   };
@@ -745,15 +777,11 @@ export const ProfileUpdatesScreen: React.FC = () => {
     const matchesTab = activeTab === 'players' ? (!r.team_id || r.type !== 'team') : (r.team_id || r.type === 'team');
     if (!matchesTab) return false;
 
-    // 2. Status filter
+    // 2. Only show pending requests on main screen
     const statusVal = String(r.status || 'pending').toLowerCase();
     const isApproved = statusVal === 'approved' || statusVal === 'approved_update' || statusVal === 'tasdiqlangan';
     const isRejected = statusVal === 'rejected' || statusVal === 'rejected_update' || statusVal === 'rad_etilgan' || statusVal === 'rad etilgan';
-    const isPending = !isApproved && !isRejected;
-
-    if (statusFilter === 'approved') return isApproved;
-    if (statusFilter === 'rejected') return isRejected;
-    return isPending;
+    return !isApproved && !isRejected;
   });
 
   return (
@@ -771,32 +799,26 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
           <View style={styles.headerStatusFilterContainer}>
             <TouchableOpacity
-              style={[
-                styles.statusFilterIconButton,
-                statusFilter === 'approved' && styles.approvedFilterBtnActive,
-              ]}
-              onPress={() => setStatusFilter(statusFilter === 'approved' ? 'pending' : 'approved')}
+              style={styles.statusFilterIconButton}
+              onPress={() => setShowApprovedModal(true)}
               activeOpacity={0.7}
             >
               <Ionicons
                 name="checkmark-circle"
                 size={22}
-                color={statusFilter === 'approved' ? '#4ADE80' : 'rgba(255, 255, 255, 0.45)'}
+                color="#4ADE80"
               />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[
-                styles.statusFilterIconButton,
-                statusFilter === 'rejected' && styles.rejectedFilterBtnActive,
-              ]}
-              onPress={() => setStatusFilter(statusFilter === 'rejected' ? 'pending' : 'rejected')}
+              style={styles.statusFilterIconButton}
+              onPress={() => setShowRejectedModal(true)}
               activeOpacity={0.7}
             >
               <Ionicons
                 name="close-circle"
                 size={22}
-                color={statusFilter === 'rejected' ? '#F87171' : 'rgba(255, 255, 255, 0.45)'}
+                color="#F87171"
               />
             </TouchableOpacity>
           </View>
@@ -891,8 +913,18 @@ export const ProfileUpdatesScreen: React.FC = () => {
               const statusColor = isApproved ? '#00FF66' : isRejected ? '#EF4444' : '#F59E0B';
               const statusLabel = isApproved ? 'Tasdiqlangan' : isRejected ? 'Rad Etilgan' : 'Kutilmoqda';
 
-              const oldPhoto = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
-              const newPhoto = newData.photoUrl || newData.photo || oldPhoto;
+              const getCleanUrl = (url: any) => {
+                if (!url || typeof url !== 'string') return '';
+                const str = url.trim();
+                if (str.startsWith('file:') || str.startsWith('content:') || str.startsWith('ph:') || str.startsWith('blob:')) return '';
+                if (str.startsWith('http://') || str.startsWith('https://')) return str;
+                return '';
+              };
+
+              const rawOld = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
+              const rawNew = newData.photoUrl || newData.photo || '';
+              const oldPhoto = getCleanUrl(rawOld);
+              const newPhoto = getCleanUrl(rawNew) || oldPhoto;
               const commentMeta = extractMetaFromComment(req.comment);
 
               return (
@@ -997,6 +1029,272 @@ export const ProfileUpdatesScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* FLOATING TOAST NOTIFICATION */}
+      {toastMsg && (
+        <View style={styles.toastBanner}>
+          <Ionicons name="checkmark-circle" size={20} color="#00FF66" />
+          <Text style={styles.toastText}>{toastMsg}</Text>
+        </View>
+      )}
+
+      {/* FULL-PAGE MODAL: APPROVED REQUESTS */}
+      <Modal
+        visible={showApprovedModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowApprovedModal(false)}
+      >
+        <View style={styles.modalPageContainer}>
+          {/* HEADER */}
+          <View style={styles.modalPageHeader}>
+            <TouchableOpacity
+              style={styles.modalPageBackBtn}
+              onPress={() => setShowApprovedModal(false)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalPageTitle}>{"Qabul Qilingan Arizalar"}</Text>
+              <Text style={styles.modalPageSub}>{"Tasdiqlangan va o'zgartirilgan profil arizalari ruyxati"}</Text>
+            </View>
+          </View>
+
+          {/* SEARCH BAR */}
+          <View style={styles.modalSearchBox}>
+            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+            <TextInput
+              style={styles.modalSearchInput}
+              placeholder="F.I.SH yoki Ism bo'yicha qidiruv..."
+              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              value={approvedSearchQuery}
+              onChangeText={setApprovedSearchQuery}
+            />
+            {approvedSearchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setApprovedSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* SUB-TABS */}
+          <View style={[styles.tabContainer, { marginBottom: 14 }]}>
+            <TouchableOpacity
+              style={[styles.tabBtn, approvedTab === 'players' && styles.tabBtnActive]}
+              onPress={() => setApprovedTab('players')}
+            >
+              <Text style={[styles.tabBtnText, approvedTab === 'players' && styles.tabBtnTextActive]}>
+                {"O'yinchilar"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabBtn, approvedTab === 'teams' && styles.tabBtnActive]}
+              onPress={() => setApprovedTab('teams')}
+            >
+              <Text style={[styles.tabBtnText, approvedTab === 'teams' && styles.tabBtnTextActive]}>
+                {"Jamoalar"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* APPROVED CARDS LIST */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 60, gap: 14 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {requests
+              .filter((r) => {
+                const statusVal = String(r.status || '').toLowerCase();
+                const isApproved = statusVal === 'approved' || statusVal === 'approved_update' || statusVal === 'tasdiqlangan';
+                if (!isApproved) return false;
+
+                const matchesTab = approvedTab === 'players' ? (!r.team_id || r.type !== 'team') : (r.team_id || r.type === 'team');
+                if (!matchesTab) return false;
+
+                if (approvedSearchQuery.trim()) {
+                  const q = approvedSearchQuery.toLowerCase();
+                  const nameStr = `${r.first_name || ''} ${r.last_name || ''} ${r.payload?.newData?.firstName || ''} ${r.payload?.newData?.lastName || ''}`.toLowerCase();
+                  return nameStr.includes(q);
+                }
+                return true;
+              })
+              .map((req) => {
+                const oldData = req.payload?.oldData || {};
+                const newData = req.payload?.newData || {};
+                const statusColor = '#00FF66';
+                const statusLabel = '✓ Tasdiqlangan';
+
+                const getCleanUrl = (url: any) => {
+                  if (!url || typeof url !== 'string') return '';
+                  const str = url.trim();
+                  if (str.startsWith('file:') || str.startsWith('content:') || str.startsWith('ph:') || str.startsWith('blob:')) return '';
+                  if (str.startsWith('http://') || str.startsWith('https://')) return str;
+                  return '';
+                };
+
+                const rawOld = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
+                const rawNew = newData.photoUrl || newData.photo || '';
+                const oldPhoto = getCleanUrl(rawOld);
+                const newPhoto = getCleanUrl(rawNew) || oldPhoto;
+                const commentMeta = extractMetaFromComment(req.comment);
+
+                return (
+                  <UpdateCardItem
+                    key={req.id}
+                    req={req}
+                    showOnlyChanged={showOnlyChanged}
+                    isProcessing={false}
+                    statusColor={statusColor}
+                    statusLabel={statusLabel}
+                    isPending={false}
+                    oldData={oldData}
+                    newData={newData}
+                    oldPhoto={oldPhoto}
+                    newPhoto={newPhoto}
+                    commentMeta={commentMeta}
+                    onApprove={() => {}}
+                    onReject={() => {}}
+                    onDeletePress={() => {}}
+                    onStatusClick={() => {}}
+                  />
+                );
+              })}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* FULL-PAGE MODAL: REJECTED REQUESTS */}
+      <Modal
+        visible={showRejectedModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowRejectedModal(false)}
+      >
+        <View style={styles.modalPageContainer}>
+          {/* HEADER */}
+          <View style={styles.modalPageHeader}>
+            <TouchableOpacity
+              style={styles.modalPageBackBtn}
+              onPress={() => setShowRejectedModal(false)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalPageTitle}>{"Rad Etilgan Arizalar"}</Text>
+              <Text style={styles.modalPageSub}>{"Rad etilgan profil almashtirish arizalari ruyxati"}</Text>
+            </View>
+          </View>
+
+          {/* SEARCH BAR */}
+          <View style={styles.modalSearchBox}>
+            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+            <TextInput
+              style={styles.modalSearchInput}
+              placeholder="F.I.SH yoki Ism bo'yicha qidiruv..."
+              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              value={rejectedSearchQuery}
+              onChangeText={setRejectedSearchQuery}
+            />
+            {rejectedSearchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setRejectedSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* SUB-TABS */}
+          <View style={[styles.tabContainer, { marginBottom: 14 }]}>
+            <TouchableOpacity
+              style={[styles.tabBtn, rejectedTab === 'players' && styles.tabBtnActive]}
+              onPress={() => setRejectedTab('players')}
+            >
+              <Text style={[styles.tabBtnText, rejectedTab === 'players' && styles.tabBtnTextActive]}>
+                {"O'yinchilar"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabBtn, rejectedTab === 'teams' && styles.tabBtnActive]}
+              onPress={() => setRejectedTab('teams')}
+            >
+              <Text style={[styles.tabBtnText, rejectedTab === 'teams' && styles.tabBtnTextActive]}>
+                {"Jamoalar"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* REJECTED CARDS LIST */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 60, gap: 14 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {requests
+              .filter((r) => {
+                const statusVal = String(r.status || '').toLowerCase();
+                const isRejected = statusVal === 'rejected' || statusVal === 'rejected_update' || statusVal === 'rad_etilgan' || statusVal === 'rad etilgan';
+                if (!isRejected) return false;
+
+                const matchesTab = rejectedTab === 'players' ? (!r.team_id || r.type !== 'team') : (r.team_id || r.type === 'team');
+                if (!matchesTab) return false;
+
+                if (rejectedSearchQuery.trim()) {
+                  const q = rejectedSearchQuery.toLowerCase();
+                  const nameStr = `${r.first_name || ''} ${r.last_name || ''} ${r.payload?.newData?.firstName || ''} ${r.payload?.newData?.lastName || ''}`.toLowerCase();
+                  return nameStr.includes(q);
+                }
+                return true;
+              })
+              .map((req) => {
+                const oldData = req.payload?.oldData || {};
+                const newData = req.payload?.newData || {};
+                const statusColor = '#EF4444';
+                const statusLabel = '✕ Rad Etilgan';
+
+                const getCleanUrl = (url: any) => {
+                  if (!url || typeof url !== 'string') return '';
+                  const str = url.trim();
+                  if (str.startsWith('file:') || str.startsWith('content:') || str.startsWith('ph:') || str.startsWith('blob:')) return '';
+                  if (str.startsWith('http://') || str.startsWith('https://')) return str;
+                  return '';
+                };
+
+                const rawOld = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
+                const rawNew = newData.photoUrl || newData.photo || '';
+                const oldPhoto = getCleanUrl(rawOld);
+                const newPhoto = getCleanUrl(rawNew) || oldPhoto;
+                const commentMeta = extractMetaFromComment(req.comment);
+
+                return (
+                  <UpdateCardItem
+                    key={req.id}
+                    req={req}
+                    showOnlyChanged={showOnlyChanged}
+                    isProcessing={false}
+                    statusColor={statusColor}
+                    statusLabel={statusLabel}
+                    isPending={false}
+                    oldData={oldData}
+                    newData={newData}
+                    oldPhoto={oldPhoto}
+                    newPhoto={newPhoto}
+                    commentMeta={commentMeta}
+                    onApprove={() => {}}
+                    onReject={() => {}}
+                    onDeletePress={() => {}}
+                    onStatusClick={() => {}}
+                  />
+                );
+              })}
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -1364,5 +1662,93 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 13,
     textAlign: 'center',
+  },
+  toastBanner: {
+    position: 'absolute',
+    top: 14,
+    left: 20,
+    right: 20,
+    zIndex: 9999,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderWidth: 1.2,
+    borderColor: '#00FF66',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '800',
+  },
+  modalPageContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 54 : 20,
+  },
+  modalPageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalPageBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalPageTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  modalPageSub: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 14,
+    gap: 8,
+  },
+  modalSearchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  statusPillBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  statusPillText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
 });

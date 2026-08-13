@@ -113,17 +113,7 @@ const SwipeablePlayerCard = ({
 
         // Full Swipe Trigger (-150px or more)
         if (gestureState.dx < -150) {
-          Animated.timing(panX, {
-            toValue: -380,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            onDelete(item);
-            setTimeout(() => {
-              Animated.spring(panX, { toValue: 0, useNativeDriver: true }).start();
-              onSwipeClose();
-            }, 300);
-          });
+          handleArchiveWithAnim();
         } else if (gestureState.dx < -60) {
           // Snap Open Red Delete Action (-85px)
           Animated.spring(panX, {
@@ -187,16 +177,28 @@ const SwipeablePlayerCard = ({
     extrapolate: 'clamp',
   });
 
+  const animScale = useRef(new Animated.Value(1)).current;
+  const animTranslateY = useRef(new Animated.Value(0)).current;
+  const animOpacity = useRef(new Animated.Value(1)).current;
+
+  const handleArchiveWithAnim = () => {
+    resetSwipe();
+    Animated.parallel([
+      Animated.timing(animScale, { toValue: 0.05, duration: 320, useNativeDriver: true }),
+      Animated.timing(animTranslateY, { toValue: -60, duration: 320, useNativeDriver: true }),
+      Animated.timing(animOpacity, { toValue: 0, duration: 320, useNativeDriver: true }),
+    ]).start(() => {
+      onDelete(item);
+    });
+  };
+
   return (
     <View style={styles.swipeContainer}>
       {/* Hidden Red Delete Action Button behind Card (Fades in ONLY when swiped) */}
       <Animated.View style={[styles.deleteActionBack, { opacity: deleteOpacity }]}>
         <TouchableOpacity
           style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-          onPress={() => {
-            resetSwipe();
-            onDelete(item);
-          }}
+          onPress={handleArchiveWithAnim}
           activeOpacity={0.8}
         >
           <Ionicons name="archive" size={22} color="#FFFFFF" />
@@ -208,7 +210,14 @@ const SwipeablePlayerCard = ({
       <Animated.View
         style={[
           styles.cardItem,
-          { transform: [{ translateX: panX }] }
+          {
+            transform: [
+              { translateX: panX },
+              { translateY: animTranslateY },
+              { scale: animScale },
+            ],
+            opacity: animOpacity,
+          }
         ]}
         {...panResponder.panHandlers}
       >
@@ -325,6 +334,14 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
   const [showArchived, setShowArchived] = useState<boolean>(false);
 
+  // Archive Full-Page Modal State & Tabs
+  const [showArchiveModal, setShowArchiveModal] = useState<boolean>(false);
+  const [archiveTab, setArchiveTab] = useState<'players' | 'teams'>('players');
+  const [archivedPlayers, setArchivedPlayers] = useState<any[]>([]);
+  const [archivedTeams, setArchivedTeams] = useState<any[]>([]);
+  const [loadingArchive, setLoadingArchive] = useState<boolean>(false);
+  const [archiveSearchQuery, setArchiveSearchQuery] = useState<string>('');
+
   // Registration Switch Toggling State
   const [togglingReg, setTogglingReg] = useState(false);
 
@@ -395,6 +412,107 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   useEffect(() => {
     loadInitialData();
   }, [orgId, debouncedSearchQuery]);
+
+  useEffect(() => {
+    if (showArchiveModal) {
+      fetchArchivedData();
+    }
+  }, [showArchiveModal, archiveTab, archiveSearchQuery]);
+
+  const fetchArchivedData = async () => {
+    setLoadingArchive(true);
+    try {
+      const dbClient = supabaseAdmin || supabase;
+
+      if (archiveTab === 'players') {
+        let query = dbClient
+          .from('applications')
+          .select('*')
+          .or('is_archived.eq.true,status.eq.archived')
+          .order('created_at', { ascending: false });
+
+        if (orgId) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        const { data } = await query;
+        let res = data || [];
+        if (archiveSearchQuery.trim()) {
+          const q = archiveSearchQuery.toLowerCase().trim();
+          res = res.filter((p: any) => {
+            const fn = (p.first_name || '').toLowerCase();
+            const ln = (p.last_name || '').toLowerCase();
+            const full = (p.full_name || '').toLowerCase();
+            const phone = (p.phone || '').toLowerCase();
+            return fn.includes(q) || ln.includes(q) || full.includes(q) || phone.includes(q);
+          });
+        }
+        setArchivedPlayers(res);
+      } else {
+        let query = dbClient
+          .from('teams')
+          .select('*')
+          .or('is_archived.eq.true,status.eq.archived')
+          .order('name');
+
+        if (orgId) {
+          query = query.eq('organization_id', orgId);
+        }
+
+        const { data } = await query;
+        let res = data || [];
+        if (archiveSearchQuery.trim()) {
+          const q = archiveSearchQuery.toLowerCase().trim();
+          res = res.filter((t: any) => (t.name || '').toLowerCase().includes(q));
+        }
+        setArchivedTeams(res);
+      }
+    } catch (e) {
+      console.error('Fetch archive error:', e);
+    } finally {
+      setLoadingArchive(false);
+    }
+  };
+
+  const handleRestoreArchivedPlayer = async (playerItem: any) => {
+    try {
+      const dbClient = supabaseAdmin || supabase;
+      setArchivedPlayers((prev) => prev.filter((p) => p.id !== playerItem.id));
+
+      try {
+        await dbClient.from('applications').update({ is_archived: false, status: 'approved' }).eq('id', playerItem.id);
+      } catch (e) {
+        await dbClient.from('applications').update({ status: 'approved' }).eq('id', playerItem.id);
+      }
+
+      try {
+        await dbClient.from('players').update({ is_archived: false }).eq('id', playerItem.id);
+      } catch (e) {}
+
+      setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
+      setTimeout(() => setToastMsg(null), 3000);
+      fetchTotalCounts();
+      fetchPlayers(0, true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRestoreArchivedTeam = async (teamItem: any) => {
+    try {
+      const dbClient = supabaseAdmin || supabase;
+      setArchivedTeams((prev) => prev.filter((t) => t.id !== teamItem.id));
+
+      await dbClient.from('teams').update({ is_archived: false, status: 'approved' }).eq('id', teamItem.id);
+
+      setToastMsg("Jamoa arxivdan qaytarildi! 🔄");
+      setTimeout(() => setToastMsg(null), 3000);
+      fetchTotalCounts();
+      fetchTeams(0, true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -758,82 +876,41 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     });
   };
 
-  // Trigger Delete Item Confirmation Dialog
-  const handlePromptDelete = (item: any) => {
-    setItemToDelete(item);
-    setDeleteCountdown(null);
-    setIsDeleting(false);
-  };
+  // Execute Direct Archiving without warning dialogs
+  const executeDirectArchive = async (itemToArchive: any) => {
+    if (!itemToArchive) return;
+    const isPlayer = activeTab === 'players';
+    const dbClient = supabaseAdmin || supabase;
 
-  // Start 5-Second Countdown Delete Process
-  const handleStartDeleteCountdown = () => {
-    if (deleteCountdown !== null || isDeleting) return;
+    if (isPlayer) {
+      // 1. Remove from active RAM list instantly
+      setPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToArchive.id)));
 
-    setDeleteCountdown(5);
+      // 2. Add to archived list in RAM
+      setArchivedPlayers((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
 
-    let currentSec = 5;
-    deleteTimerRef.current = setInterval(() => {
-      currentSec -= 1;
-      if (currentSec > 0) {
-        setDeleteCountdown(currentSec);
-      } else {
-        clearInterval(deleteTimerRef.current);
-        deleteTimerRef.current = null;
-        setDeleteCountdown(0);
-        executeActualDelete();
-      }
-    }, 1000);
-  };
-
-  // Cancel Delete Process
-  const handleCancelDelete = () => {
-    if (deleteTimerRef.current) {
-      clearInterval(deleteTimerRef.current);
-      deleteTimerRef.current = null;
-    }
-    setDeleteCountdown(null);
-    setItemToDelete(null);
-    setIsDeleting(false);
-  };
-
-  // Execute Soft Delete (Archiving) after 5-Second Countdown
-  const executeActualDelete = async () => {
-    if (!itemToDelete) return;
-    setIsDeleting(true);
-
-    try {
-      const dbClient = supabaseAdmin || supabase;
-      const isPlayer = activeTab === 'players';
-
-      if (isPlayer) {
-        setPlayers((prev) => prev.filter((p) => p.id !== itemToDelete.id));
-
-        try {
-          await dbClient.from('applications').update({ is_archived: true, status: 'archived' }).eq('id', itemToDelete.id);
-        } catch (e) {
-          await dbClient.from('applications').update({ status: 'archived' }).eq('id', itemToDelete.id);
-        }
-
-        try {
-          await dbClient.from('players').update({ is_archived: true }).eq('id', itemToDelete.id);
-        } catch (e) {}
-      } else {
-        setTeams((prev) => prev.filter((t) => t.id !== itemToDelete.id));
-
-        try {
-          await dbClient.from('teams').update({ is_archived: true }).eq('id', itemToDelete.id);
-        } catch (e) {}
+      // 3. Update DB in background
+      try {
+        await dbClient.from('applications').update({ is_archived: true, status: 'archived' }).eq('id', itemToArchive.id);
+      } catch (e) {
+        await dbClient.from('applications').update({ status: 'archived' }).eq('id', itemToArchive.id);
       }
 
-      setToastMsg("Muvaffaqiyatli arxivlandi! 📦");
-      setTimeout(() => setToastMsg(null), 3000);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsDeleting(false);
-      setDeleteCountdown(null);
-      setItemToDelete(null);
+      try {
+        await dbClient.from('players').update({ is_archived: true }).eq('id', itemToArchive.id);
+      } catch (e) {}
+    } else {
+      setTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToArchive.id)));
+      setArchivedTeams((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
+
+      try {
+        await dbClient.from('teams').update({ is_archived: true, status: 'archived' }).eq('id', itemToArchive.id);
+      } catch (e) {}
     }
+
+    setToastMsg("Muvaffaqiyatli arxivlandi! 📦");
+    setTimeout(() => setToastMsg(null), 2500);
+    fetchTotalCounts();
   };
 
   // Restore Archived Player Back to Active
@@ -1022,41 +1099,36 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           )}
         </View>
 
-        {/* ARCHIVE ICON BUTTON */}
-        <TouchableOpacity
-          style={{
-            height: 48,
-            paddingHorizontal: 14,
-            borderRadius: 14,
-            backgroundColor: showArchived ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-            borderWidth: 1.2,
-            borderColor: showArchived ? '#F59E0B' : 'rgba(255, 255, 255, 0.15)',
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            overflow: 'hidden',
-          }}
-          onPress={() => {
-            const nextVal = !showArchived;
-            setShowArchived(nextVal);
-            setPlayerPage(0);
-            fetchPlayers(0, true, nextVal);
-          }}
-          activeOpacity={0.7}
-        >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-          <Ionicons
-            name={showArchived ? "archive" : "archive-outline"}
-            size={20}
-            color={showArchived ? "#F59E0B" : "rgba(255,255,255,0.75)"}
-          />
-          {showArchived && (
-            <Text style={{ color: '#F59E0B', fontSize: 12, fontWeight: '900' }}>
+        {/* ARCHIVE ICON BUTTON (Only for Admins / Organizators) */}
+        {!isReadOnlyUser && (
+          <TouchableOpacity
+            style={{
+              height: 48,
+              paddingHorizontal: 14,
+              borderRadius: 14,
+              backgroundColor: showArchiveModal ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+              borderWidth: 1.2,
+              borderColor: showArchiveModal ? '#F59E0B' : 'rgba(255, 255, 255, 0.15)',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              overflow: 'hidden',
+            }}
+            onPress={() => setShowArchiveModal(true)}
+            activeOpacity={0.7}
+          >
+            <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            <Ionicons
+              name="archive-outline"
+              size={20}
+              color={showArchiveModal ? "#F59E0B" : "rgba(255,255,255,0.85)"}
+            />
+            <Text style={{ color: showArchiveModal ? '#F59E0B' : 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '800' }}>
               {"Arxiv"}
             </Text>
-          )}
-        </TouchableOpacity>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Segment Sub-Tabs (O'yinchilar vs Jamoalar) */}
@@ -1180,7 +1252,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 if (openSwipeableId === item.id) setOpenSwipeableId(null);
               }}
               onOpen={handleOpenItem}
-              onDelete={handlePromptDelete}
+              onDelete={executeDirectArchive}
               onRestore={(player: any) => handleRestorePlayer(player)}
               isArchived={showArchived}
               onImagePress={(imgUrl: string) => setFullImagePreview(imgUrl)}
@@ -1677,6 +1749,152 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 resizeMode="contain"
               />
             </ScrollView>
+          )}
+        </View>
+      </Modal>
+
+      {/* DEDICATED FULLSCREEN ARCHIVE MODAL PAGE */}
+      <Modal
+        visible={showArchiveModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowArchiveModal(false)}
+      >
+        <View style={styles.archiveModalContainer}>
+          {/* Header */}
+          <View style={styles.archiveHeader}>
+            <TouchableOpacity
+              style={styles.archiveCloseBtn}
+              onPress={() => setShowArchiveModal(false)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.archiveHeaderTitle}>{"📦 Arxivlangan Ma'lumotlar"}</Text>
+              <Text style={styles.archiveHeaderSub}>{"Arxivdagi o'yinchilar va jamoalar ro'yxati"}</Text>
+            </View>
+          </View>
+
+          {/* Sub-tabs: O'yinchilar vs Jamoalar */}
+          <View style={styles.archiveSegmentContainer}>
+            <TouchableOpacity
+              style={[styles.archiveSegmentBtn, archiveTab === 'players' && styles.activeArchiveSegmentBtn]}
+              onPress={() => setArchiveTab('players')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="person" size={15} color={archiveTab === 'players' ? '#000000' : 'rgba(255,255,255,0.7)'} />
+              <Text style={[styles.archiveSegmentText, archiveTab === 'players' && styles.activeArchiveSegmentText]}>
+                {`O'yinchilar (${archivedPlayers.length})`}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.archiveSegmentBtn, archiveTab === 'teams' && styles.activeArchiveSegmentBtn]}
+              onPress={() => setArchiveTab('teams')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="shield" size={15} color={archiveTab === 'teams' ? '#000000' : 'rgba(255,255,255,0.7)'} />
+              <Text style={[styles.archiveSegmentText, archiveTab === 'teams' && styles.activeArchiveSegmentText]}>
+                {`Jamoalar (${archivedTeams.length})`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Archive Search Bar */}
+          <View style={styles.archiveSearchContainer}>
+            <Ionicons name="search" size={18} color="rgba(255,255,255,0.5)" />
+            <TextInput
+              style={styles.archiveSearchInput}
+              placeholder={archiveTab === 'players' ? "Arxivdagi o'yinchini qidirish..." : "Arxivdagi jamoani qidirish..."}
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              value={archiveSearchQuery}
+              onChangeText={setArchiveSearchQuery}
+            />
+            {archiveSearchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setArchiveSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Content List */}
+          {loadingArchive ? (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator size="large" color="#F59E0B" />
+              <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 10, fontSize: 13 }}>
+                {"Arxiv ma'lumotlari yuklanmoqda..."}
+              </Text>
+            </View>
+          ) : archiveTab === 'players' ? (
+            <FlatList
+              data={archivedPlayers}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ paddingBottom: 40, gap: 10 }}
+              renderItem={({ item }) => {
+                const name = item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.name;
+                const avatar = item.avatar_url || item.photo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop';
+                return (
+                  <View style={styles.archiveCardRow}>
+                    <ExpoImage source={{ uri: avatar }} style={styles.archiveAvatar} />
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.archiveItemTitle}>{name}</Text>
+                      <Text style={styles.archiveItemSub}>
+                        {item.team_name ? `Jamoa: ${item.team_name}` : (item.phone || "Telefon yo'q")}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.restoreBtn}
+                      onPress={() => handleRestoreArchivedPlayer(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="refresh-outline" size={15} color="#4ADE80" />
+                      <Text style={styles.restoreBtnText}>{"QAYTARISH"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={() => (
+                <View style={styles.archiveEmptyBox}>
+                  <Ionicons name="archive-outline" size={42} color="rgba(255,255,255,0.2)" />
+                  <Text style={styles.archiveEmptyText}>{"Arxivlangan o'yinchilar topilmadi"}</Text>
+                </View>
+              )}
+            />
+          ) : (
+            <FlatList
+              data={archivedTeams}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ paddingBottom: 40, gap: 10 }}
+              renderItem={({ item }) => {
+                const logo = item.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop';
+                return (
+                  <View style={styles.archiveCardRow}>
+                    <ExpoImage source={{ uri: logo }} style={styles.archiveAvatar} />
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.archiveItemTitle}>{item.name}</Text>
+                      <Text style={styles.archiveItemSub}>
+                        {item.league ? `Liga: ${item.league}` : (item.city || "Shahari ko'rsatilmagan")}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.restoreBtn}
+                      onPress={() => handleRestoreArchivedTeam(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="refresh-outline" size={15} color="#4ADE80" />
+                      <Text style={styles.restoreBtnText}>{"QAYTARISH"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={() => (
+                <View style={styles.archiveEmptyBox}>
+                  <Ionicons name="shield-outline" size={42} color="rgba(255,255,255,0.2)" />
+                  <Text style={styles.archiveEmptyText}>{"Arxivlangan jamoalar topilmadi"}</Text>
+                </View>
+              )}
+            />
           )}
         </View>
       </Modal>
@@ -2239,5 +2457,139 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
+  },
+
+  // Archive Fullscreen Modal Page Styles
+  archiveModalContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 54 : 20,
+  },
+  archiveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  archiveCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  archiveHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  archiveHeaderSub: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  archiveSegmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  archiveSegmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  activeArchiveSegmentBtn: {
+    backgroundColor: '#F59E0B',
+  },
+  archiveSegmentText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  activeArchiveSegmentText: {
+    color: '#000000',
+    fontWeight: '900',
+  },
+  archiveSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 14,
+    gap: 8,
+  },
+  archiveSearchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  archiveCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 12,
+  },
+  archiveAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  archiveItemTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  archiveItemSub: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  restoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(74, 222, 128, 0.18)',
+    borderWidth: 1,
+    borderColor: '#4ADE80',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+  },
+  restoreBtnText: {
+    color: '#4ADE80',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  archiveEmptyBox: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  archiveEmptyText: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

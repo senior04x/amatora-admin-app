@@ -248,26 +248,38 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         timerSponsors.forEach((sp: any) => {
           try {
             const matchIdFromKey = sp.name.replace('MATCH_TIMER_', '');
-            const parsed = JSON.parse(sp.logo_url);
-            timerMap.set(String(matchIdFromKey), parsed);
+            const jsonStr = sp.logo_url || sp.image_url || sp.url;
+            if (jsonStr) {
+              const parsed = JSON.parse(jsonStr);
+              timerMap.set(String(matchIdFromKey), parsed);
+            }
           } catch (e) {}
         });
       }
 
       const enrichedMatches = rawMatches.map((m: any) => {
         const livePayload = timerMap.get(String(m.id));
-        if (livePayload) {
-          return {
-            ...m,
-            timer_seconds: livePayload.timer_seconds ?? m.timer_seconds,
-            timer_started_at: livePayload.timer_started_at ?? m.timer_started_at,
-            is_timer_running: livePayload.is_timer_running ?? m.is_timer_running,
-            status: livePayload.status || m.status,
-            home_score: livePayload.home_score ?? m.home_score,
-            away_score: livePayload.away_score ?? m.away_score,
-          };
-        }
-        return m;
+        const isLive = m.status === 'first_half' || m.status === 'second_half' || m.status === 'live';
+
+        const baseSec = livePayload?.timer_seconds !== undefined && livePayload?.timer_seconds !== null
+          ? Number(livePayload.timer_seconds)
+          : (m.timer_seconds !== undefined && m.timer_seconds !== null ? Number(m.timer_seconds) : 0);
+
+        const isRunning = livePayload?.is_timer_running !== undefined && livePayload?.is_timer_running !== null
+          ? (String(livePayload.is_timer_running) === 'true' || livePayload.is_timer_running === true)
+          : (m.is_timer_running !== undefined && m.is_timer_running !== null ? (String(m.is_timer_running) === 'true' || m.is_timer_running === true) : isLive);
+
+        const startedAt = livePayload?.timer_started_at || m.timer_started_at || null;
+
+        return {
+          ...m,
+          timer_seconds: baseSec,
+          timer_started_at: startedAt,
+          is_timer_running: isRunning,
+          status: livePayload?.status || m.status,
+          home_score: livePayload?.home_score ?? m.home_score,
+          away_score: livePayload?.away_score ?? m.away_score,
+        };
       });
 
       setMatches(enrichedMatches as Match[]);
@@ -413,7 +425,10 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       if (isRunning && startedAt) {
         const ms = new Date(startedAt).getTime();
         if (!isNaN(ms)) {
-          sec += Math.max(0, Math.floor((Date.now() - ms) / 1000));
+          const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+          if (elapsed < 14400) {
+            sec += elapsed;
+          }
         }
       }
       const min = Math.max(1, Math.floor(sec / 60) + 1);
@@ -450,7 +465,10 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     if (isRunning && startedAt) {
       const ms = new Date(startedAt).getTime();
       if (!isNaN(ms)) {
-        sec += Math.max(0, Math.floor((Date.now() - ms) / 1000));
+        const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+        if (elapsed < 14400) {
+          sec += elapsed;
+        }
       }
     }
     const mins = Math.floor(sec / 60);

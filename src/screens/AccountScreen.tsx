@@ -322,6 +322,63 @@ export const AccountScreen: React.FC<{
     }
   };
 
+  // Handle User Avatar Photo Upload (For Regular User / Organizator)
+  const handlePickUserAvatar = async () => {
+    try {
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
+        return;
+      }
+
+      setIsUploadingLogo(true);
+      const asset = pickerResult.assets[0];
+      const dbClient = supabaseAdmin || supabase;
+      const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'png';
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData?.session?.user?.email;
+
+      const fileName = `user_avatar_${Date.now()}.${fileExt}`;
+
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const arrayBuffer = await new Response(blob).arrayBuffer();
+
+      const { error: uploadErr } = await dbClient.storage
+        .from('player-photos')
+        .upload(`avatars/${fileName}`, arrayBuffer, { contentType: `image/${fileExt}`, upsert: true });
+
+      if (uploadErr) {
+        throw new Error(uploadErr.message);
+      }
+
+      const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(`avatars/${fileName}`);
+      const publicUrl = urlData?.publicUrl || '';
+
+      if (publicUrl) {
+        setUserAvatarUrl(publicUrl);
+        if (sessionEmail) {
+          await dbClient
+            .from('organization_users')
+            .update({ avatar_url: publicUrl })
+            .ilike('email', sessionEmail);
+        }
+        Alert.alert('Muvaffaqiyatli', 'Profillaringiz logotipi (rasmingiz) yangilandi!');
+      }
+    } catch (err: any) {
+      console.error('Error uploading user avatar:', err);
+      Alert.alert('Xatolik', err.message || 'Rasm yuklashda xatolik yuz berdi');
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
   // 1-to-1 SuperAdmin Organization Save Handler
   const handleSaveAdminInfo = async () => {
     if (!editName.trim()) {
@@ -468,8 +525,8 @@ export const AccountScreen: React.FC<{
           <TouchableOpacity
             style={styles.logoWrapper}
             activeOpacity={0.8}
-            onPress={handlePickLogo}
-            disabled={isUploadingLogo || userRole === 'user'}
+            onPress={userRole === 'user' ? handlePickUserAvatar : handlePickLogo}
+            disabled={isUploadingLogo}
           >
             {isUploadingLogo ? (
               <ActivityIndicator size="small" color="#00FF87" />
@@ -479,16 +536,14 @@ export const AccountScreen: React.FC<{
                   source={{
                     uri:
                       userRole === 'user'
-                        ? (userAvatarUrl || currentOrg?.logo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop')
+                        ? (userAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop')
                         : (currentOrg?.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=120&auto=format&fit=crop'),
                   }}
                   style={styles.orgLogo}
                 />
-                {userRole !== 'user' && (
-                  <View style={styles.logoEditBadge}>
-                    <Ionicons name="camera" size={12} color="#000000" />
-                  </View>
-                )}
+                <View style={styles.logoEditBadge}>
+                  <Ionicons name="camera" size={12} color="#000000" />
+                </View>
               </>
             )}
           </TouchableOpacity>
@@ -509,7 +564,9 @@ export const AccountScreen: React.FC<{
                       {userRole === 'user' ? "ORGANIZATOR" : "BOSH ADMIN"}
                     </Text>
                   </View>
-                  <Text style={styles.orgIdText}>{`Tashkilot: ${currentOrg?.name || 'Amatora'}`}</Text>
+                  {userRole !== 'user' && (
+                    <Text style={styles.orgIdText}>{`Tashkilot: ${currentOrg?.name || 'Amatora'}`}</Text>
+                  )}
                 </View>
               </>
             )}
@@ -581,8 +638,10 @@ export const AccountScreen: React.FC<{
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
                 activeOpacity={0.8}
                 onPress={() => {
-                  const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
-                  Alert.alert("Sayt havolasi", url);
+                  const url = `https://amatora.uz/${currentOrg?.slug || 'hfl'}`;
+                  Linking.openURL(url).catch(() => {
+                    Alert.alert("Sayt havolasi", url);
+                  });
                 }}
               >
                 <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(0, 255, 135, 0.15)' }]}>
@@ -591,7 +650,7 @@ export const AccountScreen: React.FC<{
                 <View style={{ flex: 1 }}>
                   <Text style={styles.toggleTitle}>{"Ro'yxatdan o'tkazish sayti"}</Text>
                   <Text style={[styles.toggleSub, { color: '#00FF87', textDecorationLine: 'underline' }]} numberOfLines={1}>
-                    {`https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`}
+                    {`https://amatora.uz/${currentOrg?.slug || 'hfl'}`}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -607,7 +666,7 @@ export const AccountScreen: React.FC<{
                 }}
                 activeOpacity={0.7}
                 onPress={() => {
-                  const url = `https://amatora.vercel.app/${currentOrg?.slug || 'llf'}`;
+                  const url = `https://amatora.uz/${currentOrg?.slug || 'hfl'}`;
                   Alert.alert(
                     "Nusxalandi!",
                     `Sayt havolasi:\n\n${url}\n\nUshbu havolani ishtirokchilar va jamoalarga yuboring.`
@@ -809,12 +868,6 @@ export const AccountScreen: React.FC<{
                   <Text style={styles.infoLabel}>{"Parol:"}</Text>
                   <Text style={styles.infoValue}>{"••••••••"}</Text>
                 </View>
-
-                <View style={styles.infoRow}>
-                  <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Tashkilot:"}</Text>
-                  <Text style={styles.infoValue}>{currentOrg?.name || 'Amatora'}</Text>
-                </View>
               </>
             ) : (
               <>
@@ -922,6 +975,25 @@ export const AccountScreen: React.FC<{
           <Text style={styles.logoutBtnText}>{"Tizimdan Chiqish"}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Sleek single-row Organization Info Badge at the VERY BOTTOM for Regular User */}
+      {userRole === 'user' && currentOrg && (
+        <View style={styles.userOrgBottomCard}>
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Image
+            source={{ uri: currentOrg.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop' }}
+            style={styles.userOrgBottomLogo}
+          />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={styles.userOrgBottomLabel}>{"Biriktirilgan Tashkilot"}</Text>
+            <Text style={styles.userOrgBottomName}>{currentOrg.name || 'Amatora'}</Text>
+          </View>
+          <View style={styles.userOrgStatusPill}>
+            <View style={styles.greenDot} />
+            <Text style={styles.userOrgStatusText}>{"FAOL"}</Text>
+          </View>
+        </View>
+      )}
 
       {/* Organizers (User Roles) Management Modal */}
       <Modal
@@ -1589,6 +1661,62 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+
+  // User Role Bottom Organization Badge Styles
+  userOrgBottomCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 12,
+    overflow: 'hidden',
+  },
+  userOrgBottomLogo: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  userOrgBottomLabel: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 10.5,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  userOrgBottomName: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '900',
+  },
+  userOrgStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  greenDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+  },
+  userOrgStatusText: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '900',
     letterSpacing: 0.5,
   },
 });
