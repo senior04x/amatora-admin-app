@@ -231,20 +231,28 @@ const TransferCardItem: React.FC<{
 
         {/* Card Top Action Bar */}
         <View style={styles.cardHeader}>
-          {/* Clickable Status Pill for Testing */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => onStatusClick(item)}
-            style={[styles.statusPill, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}
-          >
-            <Ionicons
-              name={isApproved ? "checkmark-circle" : isRejected ? "close-circle" : "time-outline"}
-              size={14}
-              color={statusColor}
-            />
-            <Text style={[styles.statusPillText, { color: statusColor }]}>{statusLabel}</Text>
-            <Ionicons name="options-outline" size={12} color={statusColor} style={{ marginLeft: 4 }} />
-          </TouchableOpacity>
+          {/* Status Pill (Disabled for approved transfers) */}
+          {isApproved ? (
+            <View style={[styles.statusPill, { backgroundColor: 'rgba(0, 255, 102, 0.12)', borderColor: 'rgba(0, 255, 102, 0.35)' }]}>
+              <Ionicons name="checkmark-circle" size={14} color="#00FF66" />
+              <Text style={[styles.statusPillText, { color: '#00FF66' }]}>{statusLabel}</Text>
+              <Ionicons name="lock-closed" size={11} color="#00FF66" style={{ marginLeft: 4, opacity: 0.8 }} />
+            </View>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => onStatusClick(item)}
+              style={[styles.statusPill, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}
+            >
+              <Ionicons
+                name={isRejected ? "close-circle" : "time-outline"}
+                size={14}
+                color={statusColor}
+              />
+              <Text style={[styles.statusPillText, { color: statusColor }]}>{statusLabel}</Text>
+              <Ionicons name="options-outline" size={12} color={statusColor} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          )}
 
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity style={styles.iconActionBtn} onPress={() => onEditPress(item)}>
@@ -1101,30 +1109,42 @@ export const TransfersScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
 
-              {/* Field 5: Status Selection (Interactive Select) */}
+              {/* Field 5: Status Selection */}
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>{"Status"}</Text>
-                <TouchableOpacity
-                  style={styles.pickerSelectBtn}
-                  activeOpacity={0.7}
-                  onPress={() => setActivePicker('status')}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Ionicons
-                      name={editForm.status === 'approved' ? "checkmark-circle" : editForm.status === 'rejected' ? "close-circle" : "time-outline"}
-                      size={18}
-                      color={editForm.status === 'approved' ? "#00FF66" : editForm.status === 'rejected' ? "#EF4444" : "#F59E0B"}
-                    />
-                    <Text style={styles.pickerSelectText}>
-                      {editForm.status === 'approved'
-                        ? 'Tasdiqlangan (Approved)'
-                        : editForm.status === 'rejected'
-                        ? 'Rad etilgan (Rejected)'
-                        : 'Kutilmoqda (Pending)'}
-                    </Text>
+                {editingTransfer?.status === 'approved' ? (
+                  <View style={[styles.pickerSelectBtn, { backgroundColor: 'rgba(0, 255, 102, 0.08)', borderColor: 'rgba(0, 255, 102, 0.3)' }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
+                      <Text style={[styles.pickerSelectText, { color: '#00FF66' }]}>
+                        {"Tasdiqlangan (O'zgartirib bo'lmaydi)"}
+                      </Text>
+                    </View>
+                    <Ionicons name="lock-closed" size={16} color="#00FF66" />
                   </View>
-                  <Ionicons name="chevron-down" size={18} color="#94A3B8" />
-                </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.pickerSelectBtn}
+                    activeOpacity={0.7}
+                    onPress={() => setActivePicker('status')}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons
+                        name={editForm.status === 'approved' ? "checkmark-circle" : editForm.status === 'rejected' ? "close-circle" : "time-outline"}
+                        size={18}
+                        color={editForm.status === 'approved' ? "#00FF66" : editForm.status === 'rejected' ? "#EF4444" : "#F59E0B"}
+                      />
+                      <Text style={styles.pickerSelectText}>
+                        {editForm.status === 'approved'
+                          ? 'Tasdiqlangan (Approved)'
+                          : editForm.status === 'rejected'
+                          ? 'Rad etilgan (Rejected)'
+                          : 'Kutilmoqda (Pending)'}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Field 6: Reason */}
