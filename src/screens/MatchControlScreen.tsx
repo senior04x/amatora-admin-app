@@ -482,6 +482,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     } else if (newStatus === 'finished') {
       title = "O'yinni Yakunlash 🏁";
       message = `Uchrashuvni rasman yakunlashni tasdiqlaysizmi?`;
+    } else if (newStatus === 'scheduled') {
+      title = "Holatga Qaytarish (1-Taym Boshlashga) 🔄";
+      message = "Uchrashuvni boshlang'ich (Rejalashtirilgan) holatiga qaytarishni va taymerni 00:00 qilishni tasdiqlaysizmi?";
     }
 
     setStatusConfirmModal({
@@ -514,6 +517,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       newRunning = true;
       nowIso = new Date().toISOString();
     } else if (newStatus === 'finished') {
+      newRunning = false;
+      nowIso = null;
+    } else if (newStatus === 'scheduled') {
+      newBaseSec = 0;
       newRunning = false;
       nowIso = null;
     }
@@ -947,9 +954,28 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           )}
 
           {matchStatus === 'finished' && (
-            <TouchableOpacity style={styles.bigFinishedBtn} disabled>
-              <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
-              <Text style={styles.bigFinishedBtnText}>{"Uchrashuv Yakunlandi"}</Text>
+            <View style={{ width: '100%', gap: 8 }}>
+              <TouchableOpacity style={styles.bigFinishedBtn} disabled>
+                <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
+                <Text style={styles.bigFinishedBtnText}>{"Uchrashuv Yakunlandi"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.resetStatusBtn}
+                onPress={() => promptStatusChange('scheduled')}
+              >
+                <Ionicons name="refresh" size={16} color="#F59E0B" />
+                <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {matchStatus !== 'scheduled' && matchStatus !== 'finished' && (
+            <TouchableOpacity
+              style={styles.resetStatusBtn}
+              onPress={() => promptStatusChange('scheduled')}
+            >
+              <Ionicons name="refresh" size={14} color="#F59E0B" />
+              <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlashga Qaytarish"}</Text>
             </TouchableOpacity>
           )}
 
@@ -2093,5 +2119,24 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 15,
     fontWeight: '900',
+  },
+  resetStatusBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+    marginTop: 6,
+    width: '100%',
+  },
+  resetStatusBtnText: {
+    color: '#F59E0B',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
