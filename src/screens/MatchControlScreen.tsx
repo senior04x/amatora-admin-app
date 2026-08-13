@@ -227,7 +227,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (payload: any) => {
         setMatch((prev: any) => ({ ...prev, ...payload.new }));
-        if (payload.new?.timer_started_at !== undefined && payload.new?.timer_started_at !== null) {
+        if (
+          payload.new?.timer_seconds !== undefined ||
+          payload.new?.is_timer_running !== undefined ||
+          payload.new?.timer_started_at !== undefined
+        ) {
           applyTimerPayload(payload.new);
         }
       })
@@ -492,10 +496,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     const newStatus = statusConfirmModal.targetStatus;
     setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
 
-    let updateData: any = { status: newStatus };
     let newBaseSec = timerSeconds;
     let newRunning = isTimerRunning;
-    let nowIso = new Date().toISOString();
+    let nowIso: string | null = new Date().toISOString();
 
     if (newStatus === 'first_half') {
       newBaseSec = 0;
@@ -513,6 +516,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       newRunning = false;
       nowIso = null;
     }
+
+    const updateData: any = {
+      status: newStatus,
+      timer_seconds: newBaseSec,
+      timer_started_at: nowIso,
+      is_timer_running: newRunning,
+    };
 
     updateTimerDBAndState(newBaseSec, nowIso, newRunning);
     setMatch((prev: any) => ({ ...prev, ...updateData }));
