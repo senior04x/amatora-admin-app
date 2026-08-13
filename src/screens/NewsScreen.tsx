@@ -239,12 +239,14 @@ export const NewsScreen: React.FC = () => {
   // Upload image to Supabase Storage
   const uploadNewsImage = async (): Promise<string> => {
     if (!imageUri) return '';
-    if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-      return imageUri; // Already public URL
+    if (imageUri.startsWith('https://') && imageUri.includes('supabase.co/storage')) {
+      return imageUri; // Already public Supabase URL
     }
 
     const dbClient = supabaseAdmin || supabase;
-    const fileExt = imageUri.split('.').pop()?.toLowerCase() || 'png';
+    const fileExt = imageUri.includes('data:image/')
+      ? (imageUri.split(';')[0].split('/')[1] || 'png')
+      : (imageUri.split('?')[0].split('.').pop()?.toLowerCase() || 'png');
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
     const filePath = `news/${fileName}`;
 
@@ -293,7 +295,8 @@ export const NewsScreen: React.FC = () => {
       const dbClient = supabaseAdmin || supabase;
       let finalImageUrl = imageUri || '';
 
-      if (imageUri && (imageUri.startsWith('file:') || imageUri.startsWith('content:') || imageUri.startsWith('ph:'))) {
+      // Upload if it's not already a public Supabase Storage URL
+      if (imageUri && (!imageUri.startsWith('http') || imageUri.startsWith('blob:') || imageUri.startsWith('data:'))) {
         finalImageUrl = await uploadNewsImage();
       }
 
