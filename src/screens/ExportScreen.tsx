@@ -932,14 +932,17 @@ export const ExportScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* Header Selector Card */}
-      <View style={styles.headerCard}>
-        <View style={styles.dropdownsRow}>
+      <View style={[styles.headerCard, (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }]}>
+        <View style={[styles.dropdownsRow, (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }]}>
           {/* League Dropdown */}
-          <View style={styles.dropdownWrapper}>
+          <View style={[styles.dropdownWrapper, showLeagueDropdown && { zIndex: 10000, elevation: 25 }]}>
             <Text style={styles.dropdownLabel}>{"Liga:"}</Text>
             <TouchableOpacity
               style={styles.dropdownBtn}
-              onPress={() => setShowLeagueDropdown(!showLeagueDropdown)}
+              onPress={() => {
+                setShowLeagueDropdown(!showLeagueDropdown);
+                setShowRoundDropdown(false);
+              }}
               activeOpacity={0.8}
             >
               <Text style={styles.dropdownBtnText} numberOfLines={1}>
@@ -950,7 +953,7 @@ export const ExportScreen: React.FC = () => {
 
             {showLeagueDropdown && (
               <View style={styles.dropdownMenu}>
-                <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
+                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
                   {leagues.map((lg) => (
                     <TouchableOpacity
                       key={lg.id}
@@ -979,11 +982,14 @@ export const ExportScreen: React.FC = () => {
           </View>
 
           {/* Round Dropdown */}
-          <View style={styles.dropdownWrapper}>
+          <View style={[styles.dropdownWrapper, showRoundDropdown && { zIndex: 10000, elevation: 25 }]}>
             <Text style={styles.dropdownLabel}>{"Tur (Round):"}</Text>
             <TouchableOpacity
               style={styles.dropdownBtn}
-              onPress={() => setShowRoundDropdown(!showRoundDropdown)}
+              onPress={() => {
+                setShowRoundDropdown(!showRoundDropdown);
+                setShowLeagueDropdown(false);
+              }}
               activeOpacity={0.8}
             >
               <Text style={styles.dropdownBtnText}>
@@ -994,7 +1000,7 @@ export const ExportScreen: React.FC = () => {
 
             {showRoundDropdown && (
               <View style={styles.dropdownMenu}>
-                <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
+                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
                   {availableRounds.map((r) => (
                     <TouchableOpacity
                       key={r}
@@ -2199,21 +2205,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerCard: {
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'rgba(10, 15, 29, 0.95)',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1.2,
     borderBottomColor: 'rgba(255, 255, 255, 0.18)',
-    zIndex: 10,
-    overflow: 'hidden',
+    zIndex: 999,
+    elevation: 15,
   },
   dropdownsRow: {
     flexDirection: 'row',
     gap: 12,
+    zIndex: 999,
   },
   dropdownWrapper: {
     flex: 1,
     position: 'relative',
+    zIndex: 999,
   },
   dropdownLabel: {
     color: '#94A3B8',
@@ -2225,9 +2233,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -2240,15 +2248,19 @@ const styles = StyleSheet.create({
   },
   dropdownMenu: {
     position: 'absolute',
-    top: 66,
+    top: 68,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
-    borderRadius: 10,
-    zIndex: 100,
-    elevation: 10,
+    backgroundColor: '#0F172A',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 255, 102, 0.3)',
+    borderRadius: 12,
+    zIndex: 10000,
+    elevation: 30,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
     overflow: 'hidden',
   },
   dropdownItem: {
