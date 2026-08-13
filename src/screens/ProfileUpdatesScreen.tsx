@@ -845,7 +845,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
         {/* TABS & FILTER BAR */}
         <View style={styles.filterRow}>
-          <View style={styles.tabContainer}>
+          <View style={[styles.tabContainer, { flex: 1 }]}>
             <TouchableOpacity
               style={[styles.tabBtn, activeTab === 'players' && styles.tabBtnActive]}
               onPress={() => setActiveTab('players')}
@@ -1381,18 +1381,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   tabContainer: {
-    flex: 1,
     flexDirection: 'row',
     backgroundColor: '#1E293B',
     borderRadius: 12,
     padding: 3,
+    height: 40,
+    alignItems: 'center',
   },
   tabBtn: {
     flex: 1,
-    paddingVertical: 8,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: 9,
   },
   tabBtnActive: {
     backgroundColor: '#00FF66',
