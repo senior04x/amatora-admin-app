@@ -913,6 +913,56 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     fetchTotalCounts();
   };
 
+  // Delete Handlers for Countdown Modal
+  const handleCancelDelete = () => {
+    if (deleteTimerRef.current) clearInterval(deleteTimerRef.current);
+    setDeleteCountdown(null);
+    setItemToDelete(null);
+    setIsDeleting(false);
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!itemToDelete) return;
+    setIsDeleting(true);
+    try {
+      const dbClient = supabaseAdmin || supabase;
+      const isPlayer = activeTab === 'players' || !itemToDelete.isTeam;
+      if (isPlayer) {
+        setPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
+        setArchivedPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
+        await dbClient.from('applications').delete().eq('id', itemToDelete.id);
+        await dbClient.from('players').delete().eq('id', itemToDelete.id);
+      } else {
+        setTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
+        setArchivedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
+        await dbClient.from('teams').delete().eq('id', itemToDelete.id);
+      }
+      setItemToDelete(null);
+      setToastMsg("Muvaffaqiyatli o'chirildi! 🗑️");
+      setTimeout(() => setToastMsg(null), 2500);
+      fetchTotalCounts();
+    } catch (e) {
+      console.error('Delete error:', e);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleStartDeleteCountdown = () => {
+    if (!itemToDelete) return;
+    setDeleteCountdown(5);
+    deleteTimerRef.current = setInterval(async () => {
+      setDeleteCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(deleteTimerRef.current);
+          handleExecuteDelete();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
   // Restore Archived Player Back to Active
   const handleRestorePlayer = async (playerItem: any) => {
     try {
