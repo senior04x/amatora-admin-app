@@ -347,8 +347,11 @@ export const TransfersScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [windowLoading, setWindowLoading] = useState(false);
-  const [windowToggling, setWindowToggling] = useState(false);
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [showApprovedModal, setShowApprovedModal] = useState(false);
+  const [showRejectedModal, setShowRejectedModal] = useState(false);
+  const [approvedSearchQuery, setApprovedSearchQuery] = useState('');
+  const [rejectedSearchQuery, setRejectedSearchQuery] = useState('');
 
   // Edit Modal State
   const [editingTransfer, setEditingTransfer] = useState<any | null>(null);
@@ -807,32 +810,26 @@ export const TransfersScreen: React.FC = () => {
 
           <View style={styles.headerStatusFilterContainer}>
             <TouchableOpacity
-              style={[
-                styles.statusFilterIconButton,
-                filter === 'approved' && styles.approvedFilterBtnActive,
-              ]}
-              onPress={() => setFilter(filter === 'approved' ? 'pending' : 'approved')}
+              style={styles.statusFilterIconButton}
+              onPress={() => setShowApprovedModal(true)}
               activeOpacity={0.7}
             >
               <Ionicons
                 name="checkmark-circle"
                 size={22}
-                color={filter === 'approved' ? '#4ADE80' : 'rgba(255, 255, 255, 0.45)'}
+                color="#4ADE80"
               />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[
-                styles.statusFilterIconButton,
-                filter === 'rejected' && styles.rejectedFilterBtnActive,
-              ]}
-              onPress={() => setFilter(filter === 'rejected' ? 'pending' : 'rejected')}
+              style={styles.statusFilterIconButton}
+              onPress={() => setShowRejectedModal(true)}
               activeOpacity={0.7}
             >
               <Ionicons
                 name="close-circle"
                 size={22}
-                color={filter === 'rejected' ? '#F87171' : 'rgba(255, 255, 255, 0.45)'}
+                color="#F87171"
               />
             </TouchableOpacity>
           </View>
@@ -1313,6 +1310,160 @@ export const TransfersScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* FULL-PAGE MODAL: APPROVED TRANSFERS */}
+      <Modal
+        visible={showApprovedModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowApprovedModal(false)}
+      >
+        <View style={styles.modalPageContainer}>
+          {/* HEADER */}
+          <View style={styles.modalPageHeader}>
+            <TouchableOpacity
+              style={styles.modalPageBackBtn}
+              onPress={() => setShowApprovedModal(false)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalPageTitle}>{"Qabul Qilingan Transferlar"}</Text>
+              <Text style={styles.modalPageSub}>{"Tasdiqlangan barcha transfer arizalari ro'yxati"}</Text>
+            </View>
+          </View>
+
+          {/* SEARCH BAR */}
+          <View style={styles.modalSearchBox}>
+            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+            <TextInput
+              style={styles.modalSearchInput}
+              placeholder="O'yinchi yoki Jamoa bo'yicha qidiruv..."
+              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              value={approvedSearchQuery}
+              onChangeText={setApprovedSearchQuery}
+            />
+            {approvedSearchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setApprovedSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* APPROVED CARDS LIST */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 60, gap: 14 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {transfers
+              .filter((t) => {
+                if (t.status !== 'approved') return false;
+                if (approvedSearchQuery.trim()) {
+                  const q = approvedSearchQuery.toLowerCase();
+                  const nameStr = `${t.player_name || ''} ${t.old_team_name || ''} ${t.new_team_name || ''} ${t.league_name || ''}`.toLowerCase();
+                  return nameStr.includes(q);
+                }
+                return true;
+              })
+              .map((item) => (
+                <TransferCardItem
+                  key={item.id}
+                  item={item}
+                  statusColor="#00FF66"
+                  statusLabel="✓ Tasdiqlangan"
+                  isPending={false}
+                  isApproved={true}
+                  isRejected={false}
+                  onApprove={() => {}}
+                  onReject={() => {}}
+                  onDeletePress={(t, anim) => handleDeleteWithAnim(t, anim)}
+                  onEditPress={(t) => handleOpenEdit(t)}
+                  onStatusClick={(t) => setStatusModalItem(t)}
+                />
+              ))}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* FULL-PAGE MODAL: REJECTED TRANSFERS */}
+      <Modal
+        visible={showRejectedModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowRejectedModal(false)}
+      >
+        <View style={styles.modalPageContainer}>
+          {/* HEADER */}
+          <View style={styles.modalPageHeader}>
+            <TouchableOpacity
+              style={styles.modalPageBackBtn}
+              onPress={() => setShowRejectedModal(false)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalPageTitle}>{"Rad Etilgan Transferlar"}</Text>
+              <Text style={styles.modalPageSub}>{"Rad etilgan barcha transfer arizalari ro'yxati"}</Text>
+            </View>
+          </View>
+
+          {/* SEARCH BAR */}
+          <View style={styles.modalSearchBox}>
+            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+            <TextInput
+              style={styles.modalSearchInput}
+              placeholder="O'yinchi yoki Jamoa bo'yicha qidiruv..."
+              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              value={rejectedSearchQuery}
+              onChangeText={setRejectedSearchQuery}
+            />
+            {rejectedSearchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setRejectedSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* REJECTED CARDS LIST */}
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 60, gap: 14 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {transfers
+              .filter((t) => {
+                if (t.status !== 'rejected') return false;
+                if (rejectedSearchQuery.trim()) {
+                  const q = rejectedSearchQuery.toLowerCase();
+                  const nameStr = `${t.player_name || ''} ${t.old_team_name || ''} ${t.new_team_name || ''} ${t.league_name || ''}`.toLowerCase();
+                  return nameStr.includes(q);
+                }
+                return true;
+              })
+              .map((item) => (
+                <TransferCardItem
+                  key={item.id}
+                  item={item}
+                  statusColor="#EF4444"
+                  statusLabel="✕ Rad etilgan"
+                  isPending={false}
+                  isApproved={false}
+                  isRejected={true}
+                  onApprove={() => {}}
+                  onReject={() => {}}
+                  onDeletePress={(t, anim) => handleDeleteWithAnim(t, anim)}
+                  onEditPress={(t) => handleOpenEdit(t)}
+                  onStatusClick={(t) => setStatusModalItem(t)}
+                />
+              ))}
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -1814,6 +1965,54 @@ const styles = StyleSheet.create({
   pickerOptionText: {
     color: '#FFFFFF',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  modalPageContainer: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 54 : 20,
+  },
+  modalPageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalPageBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalPageTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  modalPageSub: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 14,
+    gap: 8,
+  },
+  modalSearchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
   },
 });
