@@ -22,6 +22,7 @@ import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { SwipeRow } from '../components/SwipeRow';
 import { MatchControlScreen } from './MatchControlScreen';
+import { adminNotificationService } from '../utils/adminNotificationService';
 
 interface Match {
   id: string | number;
@@ -357,6 +358,20 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         let { error: err2 } = await dbClient.from('matches').update(baseUpdatePayload).eq('id', editingMatch.id);
         if (err2) throw err2;
       }
+
+      // Notify both teams of updated/rescheduled match
+      adminNotificationService.notifyMatchScheduled({
+        homeTeamId: editingMatch.home_team_id,
+        awayTeamId: editingMatch.away_team_id,
+        homeTeamName: (editingMatch as any).home_team?.name || 'Jamoa 1',
+        awayTeamName: (editingMatch as any).away_team?.name || 'Jamoa 2',
+        matchDate: editDate,
+        matchTime: editTime,
+        stadium: editStadiumName || (editingMatch as any).stadium,
+        matchId: String(editingMatch.id),
+        organizationId: (editingMatch as any).organization_id || orgId || 1,
+      });
+
       setEditingMatch(null);
       fetchMatches();
     } catch (e: any) {

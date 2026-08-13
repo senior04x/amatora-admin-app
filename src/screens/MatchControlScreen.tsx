@@ -176,48 +176,66 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }
   };
 
+  // Maps app-level status to DB enum ('scheduled' | 'live' | 'finished')
+  const mapStatusToDB = (appStatus: string): string => {
+    if (['first_half', 'half_time', 'second_half'].includes(appStatus)) return 'live';
+    return appStatus; // 'scheduled' | 'finished' map 1:1
+  };
+
   // INSTANT OPTIMISTIC TIMER UPDATE (RAM update first 0ms, DB sync in background)
-  const updateTimerDBAndState = (baseSec: number, startedAtIso: string | null, isRunning: boolean) => {
+  const updateTimerDBAndState = async (baseSec: number, startedAtIso: string | null, isRunning: boolean, newStatus?: string) => {
     // 1. INSTANT RAM state update (0ms latency for mobile responsiveness)
     setTimerSeconds(baseSec);
     setIsTimerRunning(isRunning);
     baseTimerSecondsRef.current = baseSec;
     timerStartedAtRef.current = startedAtIso;
 
-    const timerPayload = {
+    const timerPayload: any = {
       timer_seconds: baseSec,
       timer_started_at: startedAtIso,
       is_timer_running: isRunning,
       updated_at: new Date().toISOString(),
     };
+    if (newStatus) {
+      timerPayload.status = newStatus;
+    }
 
     const payloadStr = JSON.stringify(timerPayload);
 
-    // 2. Background DB Async Sync
-    setTimeout(async () => {
-      try {
-        const nameKey = `MATCH_TIMER_${matchId}`;
-        const targetOrgId = match?.organization_id || orgId || null;
-        const { data: existing } = await dbClient.from('sponsors').select('id').eq('name', nameKey).maybeSingle();
-        if (existing) {
-          await dbClient.from('sponsors').update({ logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId }).eq('id', existing.id);
-        } else {
-          await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId });
-        }
-      } catch (e) {}
+    // 2. DB Sync for sponsors table
+    try {
+      const nameKey = `MATCH_TIMER_${matchId}`;
+      const targetOrgId = match?.organization_id || orgId || null;
+      const { data: existing } = await dbClient.from('sponsors').select('id').eq('name', nameKey).maybeSingle();
+      if (existing) {
+        await dbClient.from('sponsors').update({ logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId }).eq('id', existing.id);
+      } else {
+        await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId });
+      }
+    } catch (e) {}
 
+    // 3. DB Sync for matches table — only update status (mapped to DB enum)
+    // Timer columns (timer_seconds, timer_started_at, is_timer_running) do NOT exist
+    // in the matches table schema, so we must NOT include them or PostgreSQL will
+    // reject the entire update and status won't be saved either.
+    if (newStatus) {
+      const dbStatus = mapStatusToDB(newStatus);
       try {
-        const timerFields = {
-          timer_seconds: baseSec,
-          timer_started_at: startedAtIso,
-          is_timer_running: isRunning,
-        };
-        let { data: updatedRows } = await supabaseAdmin.from('matches').update(timerFields).eq('id', matchId).select();
+        let { data: updatedRows } = await supabaseAdmin.from('matches').update({ status: dbStatus }).eq('id', matchId).select();
         if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-          await supabaseAdmin.from('matches').update(timerFields).eq('id', Number(matchId)).select();
+          const res = await supabaseAdmin.from('matches').update({ status: dbStatus }).eq('id', Number(matchId)).select();
+          updatedRows = res.data;
         }
-      } catch (e) {}
-    }, 0);
+        if (!updatedRows || updatedRows.length === 0) {
+          let res = await supabase.from('matches').update({ status: dbStatus }).eq('id', matchId).select();
+          if ((!res.data || res.data.length === 0) && !isNaN(Number(matchId))) {
+            await supabase.from('matches').update({ status: dbStatus }).eq('id', Number(matchId)).select();
+          }
+        }
+      } catch (e) {
+        console.error('Match status DB update error:', e);
+      }
+    }
   };
 
   // 1:1 Realtime Channel Subscription for live cross-device sync
@@ -429,7 +447,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   };
 
   // Instant Optimistic Score Adjuster (+1 / -1)
-  const adjustScore = (teamType: 'home' | 'away', delta: number) => {
+  const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
     if (!match) return;
     const isHome = teamType === 'home';
     const currentScore = isHome ? match.home_score || 0 : match.away_score || 0;
@@ -443,16 +461,16 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       [isHome ? 'home_score' : 'away_score']: newScore,
     }));
 
-    // Background DB sync
-    setTimeout(async () => {
-      try {
-        await dbClient.from('matches').update(updatePayload).eq('id', matchId);
-      } catch (e) {}
-    }, 0);
+    try {
+      let { data: updatedRows } = await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId).select();
+      if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
+        await supabaseAdmin.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
+      }
+    } catch (e) {}
   };
 
   // Instant Optimistic Penalty Score Adjuster (+1 / -1)
-  const adjustPenaltyScore = (teamType: 'home' | 'away', delta: number) => {
+  const adjustPenaltyScore = async (teamType: 'home' | 'away', delta: number) => {
     if (!match) return;
     const isHome = teamType === 'home';
     const currentPen = isHome ? homePenalties : awayPenalties;
@@ -462,11 +480,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     else setAwayPenalties(newPen);
 
     const updatePayload = isHome ? { home_penalty_score: newPen } : { away_penalty_score: newPen };
-    setTimeout(async () => {
-      try {
-        await dbClient.from('matches').update(updatePayload).eq('id', matchId);
-      } catch (e) {}
-    }, 0);
+    try {
+      let { data: updatedRows } = await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId).select();
+      if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
+        await supabaseAdmin.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
+      }
+    } catch (e) {}
   };
 
   // Open Sleek Uzbek Confirmation Modal for Match Status Changes
@@ -501,8 +520,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
 
   // Execute Status Change
   const executeStatusChange = async (overrideStatus?: string) => {
-    const newStatus = overrideStatus || statusConfirmModal.targetStatus;
-    if (!newStatus) return;
+    const newStatus = typeof overrideStatus === 'string' ? overrideStatus : statusConfirmModal.targetStatus;
+    if (!newStatus || typeof newStatus !== 'string') return;
     setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
 
     let newBaseSec = timerSeconds;
@@ -530,15 +549,17 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       nowIso = null;
     }
 
-    const updateData: any = {
+    // Local state keeps app-level status (first_half/half_time/second_half) for timer logic
+    const localUpdateData: any = {
       status: newStatus,
       timer_seconds: newBaseSec,
       timer_started_at: nowIso,
       is_timer_running: newRunning,
     };
 
-    updateTimerDBAndState(newBaseSec, nowIso, newRunning);
-    setMatch((prev: any) => ({ ...prev, ...updateData }));
+    // updateTimerDBAndState handles: 1) local timer state, 2) sponsors table sync, 3) matches.status DB update
+    await updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus);
+    setMatch((prev: any) => ({ ...prev, ...localUpdateData }));
 
     showToast(
       newStatus === 'first_half'
@@ -552,39 +573,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
         : "Boshlang'ich Holatga Qaytildi 🔄"
     );
 
-    try {
-      let { data: updatedRows } = await supabaseAdmin
-        .from('matches')
-        .update(updateData)
-        .eq('id', matchId)
-        .select();
-
-      if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-        const res = await supabaseAdmin
-          .from('matches')
-          .update(updateData)
-          .eq('id', Number(matchId))
-          .select();
-        updatedRows = res.data;
-      }
-
-      if (!updatedRows || updatedRows.length === 0) {
-        let res = await supabase
-          .from('matches')
-          .update(updateData)
-          .eq('id', matchId)
-          .select();
-        if ((!res.data || res.data.length === 0) && !isNaN(Number(matchId))) {
-          await supabase
-            .from('matches')
-            .update(updateData)
-            .eq('id', Number(matchId))
-            .select();
-        }
-      }
-    } catch (e) {
-      console.error('Match status update catch:', e);
-    }
+    // NOTE: DB status update is already handled inside updateTimerDBAndState above.
+    // We do NOT send a separate matches.update here to avoid duplicating the call
+    // and to prevent sending timer columns that don't exist in the DB schema.
   };
 
   // Open Event Modal prefilled
@@ -963,7 +954,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'scheduled' && (
             <TouchableOpacity
               style={styles.bigGreenActionBtn}
-              onPress={() => executeStatusChange('first_half')}
+              onPress={() => promptStatusChange('first_half')}
             >
               <Ionicons name="play" size={18} color="#000000" />
               <Text style={styles.bigGreenBtnText}>{"1-Taym Boshlash"}</Text>
@@ -973,7 +964,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'first_half' && (
             <TouchableOpacity
               style={styles.bigOrangeActionBtn}
-              onPress={() => executeStatusChange('half_time')}
+              onPress={() => promptStatusChange('half_time')}
             >
               <Ionicons name="pause" size={18} color="#000000" />
               <Text style={styles.bigGreenBtnText}>{"Tanaffus e'lon qilish"}</Text>
@@ -983,7 +974,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'half_time' && (
             <TouchableOpacity
               style={styles.bigGreenActionBtn}
-              onPress={() => executeStatusChange('second_half')}
+              onPress={() => promptStatusChange('second_half')}
             >
               <Ionicons name="play" size={18} color="#000000" />
               <Text style={styles.bigGreenBtnText}>{"2-Taym Boshlash"}</Text>
@@ -993,7 +984,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'second_half' && (
             <TouchableOpacity
               style={styles.bigRedActionBtn}
-              onPress={() => executeStatusChange('finished')}
+              onPress={() => promptStatusChange('finished')}
             >
               <Ionicons name="flag" size={18} color="#FFFFFF" />
               <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
@@ -1008,7 +999,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.resetStatusBtn}
-                onPress={() => executeStatusChange('scheduled')}
+                onPress={() => promptStatusChange('scheduled')}
               >
                 <Ionicons name="refresh" size={16} color="#F59E0B" />
                 <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
@@ -1231,7 +1222,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
               >
                 <Text style={styles.confirmCancelText}>Bekor qilish</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmOkBtn} onPress={executeStatusChange}>
+              <TouchableOpacity style={styles.confirmOkBtn} onPress={() => executeStatusChange()}>
                 <Text style={styles.confirmOkText}>Tasdiqlash • Ha</Text>
               </TouchableOpacity>
             </View>

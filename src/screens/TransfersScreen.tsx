@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { adminNotificationService } from '../utils/adminNotificationService';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -590,6 +591,17 @@ export const TransfersScreen: React.FC = () => {
             .eq('id', transfer.player_id);
         }
       }
+
+      // Trigger push notification to player and involved teams
+      adminNotificationService.notifyTransferStatus({
+        playerId: transfer.player_id || transfer.playerId,
+        playerName: transfer.player_name || transfer.playerName || 'Futbolchi',
+        oldTeamId: transfer.old_team_id,
+        newTeamId: transfer.new_team_id,
+        oldTeamName: transfer.old_team_name || transfer.oldTeamName,
+        newTeamName: transfer.new_team_name || transfer.newTeamName,
+        status: newStatus,
+      });
 
       fetchTransfers();
     } catch (err: any) {

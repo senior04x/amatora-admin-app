@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { adminNotificationService } from '../utils/adminNotificationService';
 
 // Helper functions for parsing instagram & metadata from comments
 const getInstaUser = (val: any) => {
@@ -704,6 +705,15 @@ export const ProfileUpdatesScreen: React.FC = () => {
       }
 
       await updateTicketStatus(reqItem.id, 'approved');
+
+      // Trigger push notification to player
+      const targetPlayerIdForNotif = reqItem.payload?.playerId || reqItem.player_id || reqItem.id;
+      adminNotificationService.notifyProfileUpdateStatus({
+        playerId: targetPlayerIdForNotif,
+        phone: reqItem.phone || reqItem.payload?.newData?.phone,
+        playerName: `${reqItem.first_name || ''} ${reqItem.last_name || ''}`.trim() || 'Futbolchi',
+        status: 'approved',
+      });
     } catch (err: any) {
       console.error('Error approving request:', err);
     } finally {
@@ -726,6 +736,15 @@ export const ProfileUpdatesScreen: React.FC = () => {
     // 2. Background DB Update
     try {
       await updateTicketStatus(reqItem.id, 'rejected');
+
+      // Trigger push notification to player
+      const targetPlayerId = reqItem.payload?.playerId || reqItem.player_id || reqItem.id;
+      adminNotificationService.notifyProfileUpdateStatus({
+        playerId: targetPlayerId,
+        phone: reqItem.phone,
+        playerName: `${reqItem.first_name || ''} ${reqItem.last_name || ''}`.trim() || 'Futbolchi',
+        status: 'rejected',
+      });
     } catch (err: any) {
       console.error('Error rejecting request:', err);
     } finally {

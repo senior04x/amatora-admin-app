@@ -18,6 +18,7 @@ import { BlurView } from 'expo-blur';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
+import { adminNotificationService } from '../utils/adminNotificationService';
 
 interface Props {
   onBack?: () => void;
@@ -217,6 +218,21 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           throw err2;
         }
       }
+
+      // Trigger push notification to both teams
+      const homeTeamObj = teams.find((t) => t.id === homeTeamId);
+      const awayTeamObj = teams.find((t) => t.id === awayTeamId);
+
+      adminNotificationService.notifyMatchScheduled({
+        homeTeamId,
+        awayTeamId,
+        homeTeamName: homeTeamObj?.name || 'Jamoa 1',
+        awayTeamName: awayTeamObj?.name || 'Jamoa 2',
+        matchDate,
+        matchTime,
+        stadium: stadiumName || selectedField,
+        organizationId: orgId || 1,
+      });
 
       Alert.alert("Muvaffaqiyatli", "Yangi o'yin jadvalga kiritildi!", [
         {

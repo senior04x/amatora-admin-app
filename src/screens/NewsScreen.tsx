@@ -18,6 +18,7 @@ import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { adminNotificationService } from '../utils/adminNotificationService';
 
 const { width } = Dimensions.get('window');
 
@@ -314,8 +315,16 @@ export const NewsScreen: React.FC = () => {
         payload.organization_id = orgId || null;
         payload.views = 0;
 
-        const { error } = await dbClient.from('news').insert([payload]);
+        const { data: createdNews, error } = await dbClient.from('news').insert([payload]).select().single();
         if (error) throw error;
+
+        // Trigger push notification to all organization members
+        adminNotificationService.notifyNewsPublished({
+          title: title.trim(),
+          summary: content.trim().slice(0, 120),
+          newsId: createdNews?.id,
+          organizationId: orgId || 1,
+        });
 
         Alert.alert('Muvaffaqiyatli', 'Yangilik muvaffaqiyatli chop etildi!');
       }
