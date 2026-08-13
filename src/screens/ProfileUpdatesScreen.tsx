@@ -748,9 +748,8 @@ export const ProfileUpdatesScreen: React.FC = () => {
       }
 
       // Trigger push notification to player
-      const targetPlayerId = reqItem.payload?.playerId || reqItem.player_id || reqItem.id;
       adminNotificationService.notifyProfileUpdateStatus({
-        playerId: targetPlayerId,
+        playerId: targetPlayerId || reqItem.id,
         phone: reqItem.phone,
         playerName: `${reqItem.first_name || ''} ${reqItem.last_name || ''}`.trim() || 'Futbolchi',
         status: 'rejected',
