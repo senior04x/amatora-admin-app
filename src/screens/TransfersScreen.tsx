@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   TextInput,
   Alert,
   Animated,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -55,6 +56,286 @@ const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
   );
 };
 
+// Animated Card Component for Transfer Requests with Paper Flying, Red Overlay & Particle Shatter
+const TransferCardItem: React.FC<{
+  item: any;
+  statusColor: string;
+  statusLabel: string;
+  isPending: boolean;
+  isApproved: boolean;
+  isRejected: boolean;
+  onApprove: (item: any, startAnim: () => Promise<void>) => void;
+  onReject: (item: any, startAnim: () => Promise<void>) => void;
+  onDeletePress: (item: any, startAnim: () => Promise<void>) => void;
+  onEditPress: (item: any) => void;
+  onStatusClick: (item: any) => void;
+}> = ({
+  item,
+  statusColor,
+  statusLabel,
+  isPending,
+  isApproved,
+  isRejected,
+  onApprove,
+  onReject,
+  onDeletePress,
+  onEditPress,
+  onStatusClick,
+}) => {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(1)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+  const redOverlay = useRef(new Animated.Value(0)).current;
+
+  // Particle explosion state
+  const [particlesActive, setParticlesActive] = useState(false);
+  const particles = useRef(
+    Array.from({ length: 16 }, (_, i) => {
+      const angle = (i / 16) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
+      const dist = 60 + Math.random() * 90;
+      return {
+        x: new Animated.Value(0),
+        y: new Animated.Value(0),
+        scale: new Animated.Value(1),
+        opacity: new Animated.Value(1),
+        targetX: Math.cos(angle) * dist,
+        targetY: Math.sin(angle) * dist,
+        color: ['#00FF66', '#EF4444', '#38BDF8', '#FBBF24', '#FFFFFF', '#A855F7'][i % 6],
+        size: 8 + Math.floor(Math.random() * 8),
+      };
+    })
+  ).current;
+
+  // Paper Fly Animation for Approval
+  const runApproveAnim = (): Promise<void> => {
+    return new Promise((resolve) => {
+      Animated.parallel([
+        Animated.timing(translateY, { toValue: -280, duration: 550, useNativeDriver: true }),
+        Animated.timing(translateX, { toValue: 120, duration: 550, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 0.05, duration: 550, useNativeDriver: true }),
+        Animated.timing(rotate, { toValue: 1, duration: 550, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 550, useNativeDriver: true }),
+      ]).start(() => resolve());
+    });
+  };
+
+  // Red Overlay + Fly Animation for Rejection
+  const runRejectAnim = (): Promise<void> => {
+    return new Promise((resolve) => {
+      Animated.timing(redOverlay, { toValue: 1, duration: 220, useNativeDriver: true }).start(() => {
+        Animated.parallel([
+          Animated.timing(translateY, { toValue: -280, duration: 500, useNativeDriver: true }),
+          Animated.timing(translateX, { toValue: 160, duration: 500, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 0.05, duration: 500, useNativeDriver: true }),
+          Animated.timing(rotate, { toValue: -1, duration: 500, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+        ]).start(() => resolve());
+      });
+    });
+  };
+
+  // Particle Burst Animation for Deletion
+  const runDeleteAnim = (): Promise<void> => {
+    return new Promise((resolve) => {
+      setParticlesActive(true);
+      const particleAnimations = particles.map((p) =>
+        Animated.parallel([
+          Animated.timing(p.x, { toValue: p.targetX, duration: 500, useNativeDriver: true }),
+          Animated.timing(p.y, { toValue: p.targetY, duration: 500, useNativeDriver: true }),
+          Animated.timing(p.scale, { toValue: 0.1, duration: 500, useNativeDriver: true }),
+          Animated.timing(p.opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+        ])
+      );
+
+      Animated.parallel([
+        ...particleAnimations,
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.05, duration: 150, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 0, duration: 350, useNativeDriver: true }),
+        ]),
+        Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+      ]).start(() => resolve());
+    });
+  };
+
+  const spin = rotate.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-18deg', '0deg', '18deg'],
+  });
+
+  return (
+    <View style={{ position: 'relative' }}>
+      {/* Particle Shatter Layer */}
+      {particlesActive && (
+        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          {particles.map((p, idx) => (
+            <Animated.View
+              key={idx}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                width: p.size,
+                height: p.size,
+                borderRadius: p.size / 2,
+                backgroundColor: p.color,
+                transform: [
+                  { translateX: p.x },
+                  { translateY: p.y },
+                  { scale: p.scale },
+                ],
+                opacity: p.opacity,
+                zIndex: 99,
+              }}
+            />
+          ))}
+        </View>
+      )}
+
+      <Animated.View
+        style={[
+          styles.transferCard,
+          { borderColor: `${statusColor}33` },
+          {
+            transform: [
+              { translateY },
+              { translateX },
+              { scale },
+              { rotate: spin },
+            ],
+            opacity,
+          },
+        ]}
+      >
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+
+        {/* Animated Red Overlay Filter for Rejection */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              backgroundColor: 'rgba(239, 68, 68, 0.35)',
+              borderRadius: 18,
+              borderWidth: 2,
+              borderColor: '#EF4444',
+              opacity: redOverlay,
+              zIndex: 10,
+            },
+          ]}
+        />
+
+        {/* Card Top Action Bar */}
+        <View style={styles.cardHeader}>
+          {/* Clickable Status Pill for Testing */}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => onStatusClick(item)}
+            style={[styles.statusPill, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}
+          >
+            <Ionicons
+              name={isApproved ? "checkmark-circle" : isRejected ? "close-circle" : "time-outline"}
+              size={14}
+              color={statusColor}
+            />
+            <Text style={[styles.statusPillText, { color: statusColor }]}>{statusLabel}</Text>
+            <Ionicons name="options-outline" size={12} color={statusColor} style={{ marginLeft: 4 }} />
+          </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity style={styles.iconActionBtn} onPress={() => onEditPress(item)}>
+              <Ionicons name="pencil" size={16} color="#94A3B8" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconActionBtn, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}
+              onPress={() => onDeletePress(item, runDeleteAnim)}
+            >
+              <Ionicons name="trash-outline" size={16} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Player Profile Header */}
+        <View style={styles.playerRow}>
+          {item.player_photo ? (
+            <Image source={{ uri: item.player_photo }} style={styles.playerAvatar} />
+          ) : (
+            <View style={styles.playerAvatarFallback}>
+              <Text style={styles.playerAvatarInitial}>{(item.player_name || '?')[0]}</Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.playerName}>{item.player_name || "O'yinchi"}</Text>
+            <Text style={styles.transferReason}>
+              {item.reason ? `"${item.reason}"` : "Transfer so'rovi"}
+            </Text>
+          </View>
+        </View>
+
+        {/* Teams Movement Flow Box */}
+        <View style={styles.teamsFlowBox}>
+          {/* Old Team */}
+          <View style={styles.teamSide}>
+            {item.old_team_logo ? (
+              <Image source={{ uri: item.old_team_logo }} style={styles.teamLogo} />
+            ) : (
+              <View style={styles.teamLogoFallback}>
+                <Ionicons name="shield-outline" size={18} color="rgba(255,255,255,0.4)" />
+              </View>
+            )}
+            <Text style={styles.teamName} numberOfLines={1}>
+              {item.old_team_name || 'Eski jamoasi'}
+            </Text>
+          </View>
+
+          {/* Swap Arrow Icon */}
+          <View style={styles.swapCircle}>
+            <Ionicons name="arrow-forward" size={18} color="#00FF66" />
+          </View>
+
+          {/* New Team */}
+          <View style={styles.teamSide}>
+            {item.new_team_logo ? (
+              <Image source={{ uri: item.new_team_logo }} style={styles.teamLogo} />
+            ) : (
+              <View style={styles.teamLogoFallback}>
+                <Ionicons name="shield-outline" size={18} color="rgba(255,255,255,0.4)" />
+              </View>
+            )}
+            <Text style={[styles.teamName, { color: '#00FF66' }]} numberOfLines={1}>
+              {item.new_team_name || 'Yangi jamoasi'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Card Action Buttons (Icon-only buttons matching ProfileUpdatesScreen) */}
+        <View style={styles.cardActionsRow}>
+          {isPending && (
+            <>
+              <TouchableOpacity
+                style={[styles.btnAction, styles.btnReject]}
+                onPress={() => onReject(item, runRejectAnim)}
+              >
+                <Ionicons name="close" size={20} color="#EF4444" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.btnAction, styles.btnApprove]}
+                onPress={() => onApprove(item, runApproveAnim)}
+              >
+                <Ionicons name="checkmark" size={20} color="#000000" />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </Animated.View>
+    </View>
+  );
+};
+
 export const TransfersScreen: React.FC = () => {
   const { orgId, currentOrg, transferWindowOpen, setTransferWindowOpen } = useOrg();
 
@@ -63,6 +344,7 @@ export const TransfersScreen: React.FC = () => {
   const [allTeams, setAllTeams] = useState<any[]>([]);
   const [leagues, setLeagues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [windowLoading, setWindowLoading] = useState(false);
   const [windowToggling, setWindowToggling] = useState(false);
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
@@ -92,12 +374,36 @@ export const TransfersScreen: React.FC = () => {
   const [transferToDelete, setTransferToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Testing status change modal state
+  const [statusModalItem, setStatusModalItem] = useState<any | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
   useEffect(() => {
     fetchTransfers();
     fetchWindowStatus();
   }, [orgId]);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchTransfers(true);
+    await fetchWindowStatus();
+    setRefreshing(false);
+  }, [orgId]);
+
   const dbClient = supabaseAdmin || supabase;
+
+  const handleQuickStatusChange = async (newStatus: string) => {
+    if (!statusModalItem) return;
+    setUpdatingStatus(true);
+    try {
+      await handleUpdateTransferStatus(statusModalItem, newStatus);
+      setStatusModalItem(null);
+    } catch (e: any) {
+      Alert.alert('Xatolik', e.message);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
 
   // 1. Fetch Transfer Window Status
   const fetchWindowStatus = async () => {
@@ -120,8 +426,8 @@ export const TransfersScreen: React.FC = () => {
   };
 
   // 2. Fetch Transfers, Teams, and Leagues
-  const fetchTransfers = async () => {
-    setLoading(true);
+  const fetchTransfers = async (isRefreshing = false) => {
+    if (!isRefreshing) setLoading(true);
     try {
       // Fetch Teams
       const { data: orgTeams } = await dbClient
@@ -292,11 +598,28 @@ export const TransfersScreen: React.FC = () => {
     }
   };
 
+  const handleApproveWithAnim = async (item: any, animFunc: () => Promise<void>) => {
+    if (animFunc) await animFunc();
+    await handleUpdateTransferStatus(item, 'approved');
+  };
+
+  const handleRejectWithAnim = async (item: any, animFunc: () => Promise<void>) => {
+    if (animFunc) await animFunc();
+    await handleUpdateTransferStatus(item, 'rejected');
+  };
+
+  const handleDeleteWithAnim = async (item: any, animFunc: () => Promise<void>) => {
+    setTransferToDelete({ ...item, animFunc });
+  };
+
   // 5. Delete Transfer
   const executeDeleteTransfer = async () => {
     if (!transferToDelete) return;
     setIsDeleting(true);
     try {
+      if (transferToDelete.animFunc) {
+        await transferToDelete.animFunc();
+      }
       const { error } = await dbClient
         .from('transfers')
         .delete()
@@ -455,249 +778,198 @@ export const TransfersScreen: React.FC = () => {
   ];
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
-      {/* Header Title Section */}
-      <View style={styles.headerRow}>
-        <View style={styles.headerIconBox}>
-          <Ionicons name="swap-horizontal" size={24} color="#00FF66" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.screenTitle}>{"Transferlar Boshqaruvi"}</Text>
-          <Text style={styles.screenSub}>{"Jamoalar o'rtasidagi o'yinchilar o'tish so'rovlari"}</Text>
-        </View>
-      </View>
+    <View style={styles.container}>
+      {/* FIXED TOP HEADER (Title, status filter icons) */}
+      <View style={styles.fixedHeaderContainer}>
+        <BlurView intensity={50} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
 
-      {/* 1. Transfer Window Toggle Switch Card */}
-      <View style={[styles.windowCard, { borderColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.4)' : 'rgba(239, 68, 68, 0.4)' }]}>
-        <View style={styles.windowLeft}>
-          <View style={[styles.windowIcon, { backgroundColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.15)' : 'rgba(239, 68, 68, 0.15)' }]}>
-            <Ionicons
-              name={transferWindowOpen ? "flash" : "lock-closed"}
-              size={24}
-              color={transferWindowOpen ? "#00FF66" : "#EF4444"}
-            />
+        {/* HEADER ROW */}
+        <View style={styles.headerRow}>
+          <View style={styles.headerIconBox}>
+            <Ionicons name="swap-horizontal" size={24} color="#00FF66" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.windowTitle}>{"Transfer Oynasi Holati"}</Text>
-            <Text style={[styles.windowStatus, { color: transferWindowOpen ? '#00FF66' : 'rgba(255,255,255,0.6)' }]}>
-              {transferWindowOpen
-                ? "Transfer oynasi OCHIQ — o'yinchilar so'rov yuborishi mumkin"
-                : "Transfer oynasi YOPIQ — o'yinchilar so'rov yuborolmaydi"}
-            </Text>
+            <Text style={styles.screenTitle}>{"Transferlar Boshqaruvi"}</Text>
+            <Text style={styles.screenSub}>{"Jamoalar o'rtasidagi o'yinchilar o'tish so'rovlari"}</Text>
+          </View>
+
+          <View style={styles.headerStatusFilterContainer}>
+            <TouchableOpacity
+              style={[
+                styles.statusFilterIconButton,
+                filter === 'approved' && styles.approvedFilterBtnActive,
+              ]}
+              onPress={() => setFilter(filter === 'approved' ? 'pending' : 'approved')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={22}
+                color={filter === 'approved' ? '#4ADE80' : 'rgba(255, 255, 255, 0.45)'}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.statusFilterIconButton,
+                filter === 'rejected' && styles.rejectedFilterBtnActive,
+              ]}
+              onPress={() => setFilter(filter === 'rejected' ? 'pending' : 'rejected')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="close-circle"
+                size={22}
+                color={filter === 'rejected' ? '#F87171' : 'rgba(255, 255, 255, 0.45)'}
+              />
+            </TouchableOpacity>
           </View>
         </View>
-        {windowLoading || windowToggling ? (
-          <ActivityIndicator size="small" color={transferWindowOpen ? "#00FF66" : "#EF4444"} />
-        ) : (
-          <Switch
-            value={transferWindowOpen}
-            onValueChange={handleToggleTransferWindow}
-            trackColor={{ false: '#334155', true: '#059669' }}
-            thumbColor={transferWindowOpen ? '#00FF66' : '#94A3B8'}
-          />
-        )}
       </View>
 
-      {/* 2. Filter Tabs Row */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={{ gap: 8 }}>
-        {filterTabs.map((tab) => {
-          const isActive = filter === tab.key;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={[
-                styles.filterTab,
-                isActive && { backgroundColor: `${tab.color}20`, borderColor: tab.color },
-              ]}
-              onPress={() => setFilter(tab.key as any)}
-            >
-              <View style={[styles.filterDot, { backgroundColor: tab.color }]} />
-              <Text style={[styles.filterLabel, isActive && { color: tab.color, fontWeight: '900' }]}>
-                {tab.label}
+      {/* SCROLLABLE CARDS CONTENT BELOW BUTTONS WITH PULL DOWN RELOAD */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 140 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#00FF66"
+            colors={['#00FF66']}
+          />
+        }
+      >
+        {/* 1. Transfer Window Toggle Switch Card */}
+        <View style={[styles.windowCard, { borderColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.4)' : 'rgba(239, 68, 68, 0.4)' }]}>
+          <View style={styles.windowLeft}>
+            <View style={[styles.windowIcon, { backgroundColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.15)' : 'rgba(239, 68, 68, 0.15)' }]}>
+              <Ionicons
+                name={transferWindowOpen ? "flash" : "lock-closed"}
+                size={24}
+                color={transferWindowOpen ? "#00FF66" : "#EF4444"}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.windowTitle}>{"Transfer Oynasi Holati"}</Text>
+              <Text style={[styles.windowStatus, { color: transferWindowOpen ? '#00FF66' : 'rgba(255,255,255,0.6)' }]}>
+                {transferWindowOpen
+                  ? "Transfer oynasi OCHIQ — o'yinchilar so'rov yuborishi mumkin"
+                  : "Transfer oynasi YOPIQ — o'yinchilar so'rov yuborolmaydi"}
               </Text>
-              {tab.count > 0 && (
-                <View style={[styles.filterBadge, { backgroundColor: `${tab.color}30` }]}>
-                  <Text style={[styles.filterBadgeText, { color: tab.color }]}>{tab.count}</Text>
+            </View>
+          </View>
+          {windowLoading || windowToggling ? (
+            <ActivityIndicator size="small" color={transferWindowOpen ? "#00FF66" : "#EF4444"} />
+          ) : (
+            <Switch
+              value={transferWindowOpen}
+              onValueChange={handleToggleTransferWindow}
+              trackColor={{ false: '#334155', true: '#059669' }}
+              thumbColor={transferWindowOpen ? '#00FF66' : '#94A3B8'}
+            />
+          )}
+        </View>
+
+        {/* 2. Transfers List Section */}
+        {loading ? (
+          <View style={{ gap: 14 }}>
+            {[1, 2, 3].map((k) => (
+              <View key={k} style={styles.cardSkeleton}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <SkeletonItem style={{ width: 44, height: 44, borderRadius: 22 }} />
+                  <View style={{ flex: 1, gap: 6 }}>
+                    <SkeletonItem style={{ width: 140, height: 18, borderRadius: 4 }} />
+                    <SkeletonItem style={{ width: 100, height: 12, borderRadius: 4 }} />
+                  </View>
                 </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
+              </View>
+            ))}
+          </View>
+        ) : filteredTransfers.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="swap-horizontal-outline" size={48} color="rgba(255,255,255,0.2)" />
+            <Text style={styles.emptyTitle}>{"Transfer so'rovlari topilmadi"}</Text>
+            <Text style={styles.emptyText}>{"Ushbu bo'limda mos keladigan transfer arizalari mavjud emas."}</Text>
+          </View>
+        ) : (
+          <View style={{ gap: 14 }}>
+            {filteredTransfers.map((item) => {
+              const isApproved = item.status === 'approved';
+              const isRejected = item.status === 'rejected';
+              const isPending = item.status === 'pending';
+
+              const statusColor = isApproved ? '#00FF66' : isRejected ? '#EF4444' : '#F59E0B';
+              const statusLabel = isApproved ? 'Tasdiqlangan' : isRejected ? 'Rad etilgan' : 'Kutilmoqda';
+
+              return (
+                <TransferCardItem
+                  key={item.id}
+                  item={item}
+                  statusColor={statusColor}
+                  statusLabel={statusLabel}
+                  isPending={isPending}
+                  isApproved={isApproved}
+                  isRejected={isRejected}
+                  onApprove={(t, anim) => handleApproveWithAnim(t, anim)}
+                  onReject={(t, anim) => handleRejectWithAnim(t, anim)}
+                  onDeletePress={(t, anim) => handleDeleteWithAnim(t, anim)}
+                  onEditPress={(t) => handleOpenEdit(t)}
+                  onStatusClick={(t) => setStatusModalItem(t)}
+                />
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
 
-      {/* 3. Transfers List */}
-      {loading ? (
-        <View style={{ gap: 14 }}>
-          {[1, 2, 3].map((k) => (
-            <View key={k} style={styles.cardSkeleton}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <SkeletonItem style={{ width: 44, height: 44, borderRadius: 22 }} />
-                <View style={{ flex: 1, gap: 6 }}>
-                  <SkeletonItem style={{ width: 140, height: 18, borderRadius: 4 }} />
-                  <SkeletonItem style={{ width: 100, height: 12, borderRadius: 4 }} />
-                </View>
-              </View>
+      {/* STATUS CHANGE TEST MODAL */}
+      <Modal visible={!!statusModalItem} transparent animationType="fade" onRequestClose={() => setStatusModalItem(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxWidth: 360, padding: 22 }]}>
+            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 6, textAlign: 'center' }}>
+              {"Transfer Holatini O'zgartirish"}
+            </Text>
+            <Text style={{ color: '#94A3B8', fontSize: 12, marginBottom: 18, textAlign: 'center' }}>
+              {"Animatsiyalarni va sahifani qayta-qayta sinash uchun holatni tanlang:"}
+            </Text>
+
+            <View style={{ gap: 10 }}>
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => handleQuickStatusChange('pending')}
+                disabled={updatingStatus}
+              >
+                <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 13 }}>{"KUTILMOQDA (Pending)"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(74, 222, 128, 0.15)', borderWidth: 1, borderColor: '#4ADE80', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => handleQuickStatusChange('approved')}
+                disabled={updatingStatus}
+              >
+                <Text style={{ color: '#4ADE80', fontWeight: '900', fontSize: 13 }}>{"TASDIQLANGAN (Approved)"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: '#EF4444', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => handleQuickStatusChange('rejected')}
+                disabled={updatingStatus}
+              >
+                <Text style={{ color: '#EF4444', fontWeight: '900', fontSize: 13 }}>{"RAD ETILGAN (Rejected)"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 }}
+                onPress={() => setStatusModalItem(null)}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>{"Bekor qilish"}</Text>
+              </TouchableOpacity>
             </View>
-          ))}
+          </View>
         </View>
-      ) : filteredTransfers.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Ionicons name="swap-horizontal-outline" size={48} color="rgba(255,255,255,0.2)" />
-          <Text style={styles.emptyTitle}>{"Transfer so'rovlari topilmadi"}</Text>
-          <Text style={styles.emptyText}>{"Ushbu bo'limda mos keladigan transfer arizalari mavjud emas."}</Text>
-        </View>
-      ) : (
-        <View style={{ gap: 14 }}>
-          {filteredTransfers.map((item) => {
-            const isApproved = item.status === 'approved';
-            const isRejected = item.status === 'rejected';
-            const isPending = item.status === 'pending';
-
-            const statusColor = isApproved ? '#00FF66' : isRejected ? '#EF4444' : '#F59E0B';
-            const statusLabel = isApproved ? 'Tasdiqlangan' : isRejected ? 'Rad etilgan' : 'Kutilmoqda';
-
-            return (
-              <View key={item.id} style={[styles.transferCard, { borderColor: `${statusColor}33` }]}>
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-                {/* Card Top Action Bar */}
-                <View style={styles.cardHeader}>
-                  <View style={[styles.statusPill, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}>
-                    <Ionicons
-                      name={isApproved ? "checkmark-circle" : isRejected ? "close-circle" : "time-outline"}
-                      size={14}
-                      color={statusColor}
-                    />
-                    <Text style={[styles.statusPillText, { color: statusColor }]}>{statusLabel}</Text>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TouchableOpacity
-                      style={styles.iconActionBtn}
-                      onPress={() => handleOpenEdit(item)}
-                    >
-                      <Ionicons name="pencil" size={16} color="#94A3B8" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.iconActionBtn, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}
-                      onPress={() => setTransferToDelete(item)}
-                    >
-                      <Ionicons name="trash-outline" size={16} color="#EF4444" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Player Profile Header */}
-                <View style={styles.playerRow}>
-                  {item.player_photo ? (
-                    <Image source={{ uri: item.player_photo }} style={styles.playerAvatar} />
-                  ) : (
-                    <View style={styles.playerAvatarFallback}>
-                      <Text style={styles.playerAvatarInitial}>{(item.player_name || '?')[0]}</Text>
-                    </View>
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.playerName}>{item.player_name || "O'yinchi"}</Text>
-                    <Text style={styles.transferReason}>
-                      {item.reason ? `"${item.reason}"` : "Transfer so'rovi"}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Teams Movement Flow Box */}
-                <View style={styles.teamsFlowBox}>
-                  {/* Old Team */}
-                  <View style={styles.teamSide}>
-                    {item.old_team_logo ? (
-                      <Image source={{ uri: item.old_team_logo }} style={styles.teamLogo} />
-                    ) : (
-                      <View style={styles.teamLogoFallback}>
-                        <Ionicons name="shield-outline" size={18} color="rgba(255,255,255,0.4)" />
-                      </View>
-                    )}
-                    <Text style={styles.teamName} numberOfLines={1}>
-                      {item.old_team_name || 'Eski jamoasi'}
-                    </Text>
-                  </View>
-
-                  {/* Swap Arrow Icon */}
-                  <View style={styles.swapCircle}>
-                    <Ionicons name="arrow-forward" size={18} color="#00FF66" />
-                  </View>
-
-                  {/* New Team */}
-                  <View style={styles.teamSide}>
-                    {item.new_team_logo ? (
-                      <Image source={{ uri: item.new_team_logo }} style={styles.teamLogo} />
-                    ) : (
-                      <View style={styles.teamLogoFallback}>
-                        <Ionicons name="shield-outline" size={18} color="rgba(255,255,255,0.4)" />
-                      </View>
-                    )}
-                    <Text style={[styles.teamName, { color: '#00FF66' }]} numberOfLines={1}>
-                      {item.new_team_name || 'Yangi jamoasi'}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Card Action Buttons */}
-                <View style={styles.cardActionsRow}>
-                  {isPending && (
-                    <>
-                      <TouchableOpacity
-                        style={[styles.btnAction, styles.btnReject]}
-                        onPress={() => handleUpdateTransferStatus(item, 'rejected')}
-                      >
-                        <Ionicons name="close" size={18} color="#EF4444" />
-                        <Text style={[styles.btnActionText, { color: '#EF4444' }]}>{"Rad etish"}</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.btnAction, styles.btnApprove]}
-                        onPress={() => handleUpdateTransferStatus(item, 'approved')}
-                      >
-                        <Ionicons name="checkmark" size={18} color="#000000" />
-                        <Text style={[styles.btnActionText, { color: '#000000', fontWeight: '900' }]}>{"Tasdiqlash"}</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-
-                  {isApproved && (
-                    <TouchableOpacity
-                      style={[styles.btnAction, styles.btnRevert, { width: '100%' }]}
-                      onPress={() => handleUpdateTransferStatus(item, 'pending')}
-                    >
-                      <Ionicons name="refresh-outline" size={16} color="#F59E0B" />
-                      <Text style={[styles.btnActionText, { color: '#F59E0B' }]}>
-                        {"Kutilmoqdaga qaytarish (Eski jamoasiga)"}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {isRejected && (
-                    <>
-                      <TouchableOpacity
-                        style={[styles.btnAction, styles.btnRevert]}
-                        onPress={() => handleUpdateTransferStatus(item, 'pending')}
-                      >
-                        <Ionicons name="time-outline" size={16} color="#F59E0B" />
-                        <Text style={[styles.btnActionText, { color: '#F59E0B' }]}>{"Kutilmoqdaga"}</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={[styles.btnAction, styles.btnApprove]}
-                        onPress={() => handleUpdateTransferStatus(item, 'approved')}
-                      >
-                        <Ionicons name="checkmark" size={18} color="#000000" />
-                        <Text style={[styles.btnActionText, { color: '#000000', fontWeight: '900' }]}>{"Tasdiqlash"}</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      )}
+      </Modal>
 
       {/* Edit Transfer Modal */}
       <Modal visible={!!editingTransfer} transparent animationType="slide" onRequestClose={() => setEditingTransfer(null)}>
@@ -1031,7 +1303,7 @@ export const TransfersScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 };
 
@@ -1039,14 +1311,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  fixedHeaderContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    zIndex: 100,
+    overflow: 'hidden',
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 16,
   },
   headerIconBox: {
     width: 44,
@@ -1067,6 +1346,29 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
     marginTop: 2,
+  },
+  headerStatusFilterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusFilterIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  approvedFilterBtnActive: {
+    backgroundColor: 'rgba(74, 222, 128, 0.18)',
+    borderColor: 'rgba(74, 222, 128, 0.5)',
+  },
+  rejectedFilterBtnActive: {
+    backgroundColor: 'rgba(248, 113, 113, 0.18)',
+    borderColor: 'rgba(248, 113, 113, 0.5)',
   },
   windowCard: {
     flexDirection: 'row',

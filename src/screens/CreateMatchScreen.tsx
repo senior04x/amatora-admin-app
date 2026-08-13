@@ -103,9 +103,9 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
     }
   };
 
-  // Filter teams by chosen league
+  // Filter teams by chosen league (excluding archived teams)
   const filteredTeams = teams.filter(
-    (t) => !selectedLeague || !t.league || t.league.split(',').map((s: string) => s.trim()).includes(selectedLeague)
+    (t) => !t.is_archived && (!selectedLeague || !t.league || t.league.split(',').map((s: string) => s.trim()).includes(selectedLeague))
   );
 
   const homeTeam = teams.find((t) => t.id === homeTeamId);

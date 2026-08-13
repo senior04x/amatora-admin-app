@@ -7,7 +7,7 @@ if (typeof global !== 'undefined' && (global as any).ErrorUtils) {
 }
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 
@@ -215,31 +215,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={styles.segmentDivider} />
 
-          {/* Segment 3: Ma'lumot Almashinuvi (Refresh with RED BADGE COUNT) */}
-          <TouchableOpacity
-            style={styles.segmentItem}
-            onPress={() => setActiveTab('updates')}
-            activeOpacity={0.7}
-          >
-            <View style={{ position: 'relative' }}>
-              <Ionicons
-                name="refresh-outline"
-                size={22}
-                color={activeTab === 'updates' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
-                style={activeTab === 'updates' && styles.glowingIcon}
-              />
-              {pendingCount > 0 && (
-                <View style={styles.badgeCircle}>
-                  <Text style={styles.badgeText}>{pendingCount > 99 ? '99+' : pendingCount}</Text>
-                </View>
-              )}
-            </View>
-            <View style={[styles.activeDot, activeTab === 'updates' && styles.activeDotGlow]} />
-          </TouchableOpacity>
-
-          <View style={styles.segmentDivider} />
-
-          {/* Segment 4: CENTER '+' QUICK ADD MATCH BUTTON */}
+          {/* Segment 3: CENTER '+' QUICK ADD MATCH BUTTON */}
           <TouchableOpacity
             style={styles.segmentItem}
             onPress={() => setActiveTab('create-match')}

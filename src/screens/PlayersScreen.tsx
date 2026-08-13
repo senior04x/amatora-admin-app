@@ -54,6 +54,8 @@ const SwipeablePlayerCard = ({
   onSwipeClose,
   onOpen,
   onDelete,
+  onRestore,
+  isArchived,
   onImagePress,
   isReadOnlyUser,
 }: any) => {
@@ -118,11 +120,11 @@ const SwipeablePlayerCard = ({
           }).start(() => {
             onDelete(item);
             setTimeout(() => {
-              panX.setValue(0);
+              Animated.spring(panX, { toValue: 0, useNativeDriver: true }).start();
               onSwipeClose();
             }, 300);
           });
-        } else if (gestureState.dx < -45) {
+        } else if (gestureState.dx < -60) {
           // Snap Open Red Delete Action (-85px)
           Animated.spring(panX, {
             toValue: -85,
@@ -197,8 +199,8 @@ const SwipeablePlayerCard = ({
           }}
           activeOpacity={0.8}
         >
-          <Ionicons name="trash-bin" size={22} color="#FFFFFF" />
-          <Text style={styles.deleteActionText}>{"O'chirish"}</Text>
+          <Ionicons name="archive" size={22} color="#FFFFFF" />
+          <Text style={styles.deleteActionText}>{"Arxivlash"}</Text>
         </TouchableOpacity>
       </Animated.View>
 
@@ -248,7 +250,28 @@ const SwipeablePlayerCard = ({
                 </Text>
               ) : null}
             </View>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+
+            {isArchived ? (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: 'rgba(74, 222, 128, 0.18)',
+                  borderColor: '#4ADE80',
+                  borderWidth: 1,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 10,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+                onPress={() => onRestore && onRestore(item)}
+              >
+                <Ionicons name="refresh-outline" size={14} color="#4ADE80" />
+                <Text style={{ color: '#4ADE80', fontSize: 11, fontWeight: '800' }}>{"Qaytarish"}</Text>
+              </TouchableOpacity>
+            ) : (
+              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+            )}
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -299,6 +322,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const [teams, setTeams] = useState<any[]>([]);
   const [leagues, setLeagues] = useState<any[]>([]);
   const [allTeamsList, setAllTeamsList] = useState<any[]>([]);
+
+  const [showArchived, setShowArchived] = useState<boolean>(false);
 
   // Registration Switch Toggling State
   const [togglingReg, setTogglingReg] = useState(false);
@@ -487,8 +512,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     }
   };
 
-  // Fetch Approved Players Page with Deduplication
-  const fetchPlayers = async (pageIdx: number, isReset = false) => {
+  // Fetch Approved Players Page with Deduplication & Archive Filter
+  const fetchPlayers = async (pageIdx: number, isReset = false, isArchivedMode = showArchived) => {
     try {
       const from = pageIdx * PLAYER_PAGE_SIZE;
       const to = from + PLAYER_PAGE_SIZE - 1;
@@ -497,9 +522,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       let query = dbClient
         .from('applications')
         .select('*')
-        .or('status.eq.approved,status.eq.tasdiqlangan')
         .order('created_at', { ascending: false })
         .range(from, to);
+
+      if (!isArchivedMode) {
+        query = query.or('status.eq.approved,status.eq.tasdiqlangan');
+      }
 
       if (orgId) {
         query = query.eq('organization_id', orgId);
@@ -515,9 +543,14 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       const { data: appData } = await query;
 
       if (appData && appData.length > 0) {
-        const filtered = appData.filter(
-          (app: any) => !app.comment || !app.comment.includes('[PROFILE_UPDATE]')
-        );
+        const filtered = appData.filter((app: any) => {
+          if (app.comment && app.comment.includes('[PROFILE_UPDATE]')) return false;
+          if (isArchivedMode) {
+            return app.is_archived === true || app.status === 'archived';
+          } else {
+            return !app.is_archived && app.status !== 'archived';
+          }
+        });
 
         if (isReset) {
           setPlayers(filtered);
@@ -535,6 +568,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           setHasMorePlayers(true);
         }
       } else {
+        if (isReset) setPlayers([]);
         setHasMorePlayers(false);
       }
     } catch (e) {
@@ -762,7 +796,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     setIsDeleting(false);
   };
 
-  // Execute Supabase Deletion after 5-Second Countdown
+  // Execute Soft Delete (Archiving) after 5-Second Countdown
   const executeActualDelete = async () => {
     if (!itemToDelete) return;
     setIsDeleting(true);
@@ -774,15 +808,24 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       if (isPlayer) {
         setPlayers((prev) => prev.filter((p) => p.id !== itemToDelete.id));
 
-        await dbClient.from('applications').delete().eq('id', itemToDelete.id);
-        await dbClient.from('players').delete().eq('id', itemToDelete.id);
+        try {
+          await dbClient.from('applications').update({ is_archived: true, status: 'archived' }).eq('id', itemToDelete.id);
+        } catch (e) {
+          await dbClient.from('applications').update({ status: 'archived' }).eq('id', itemToDelete.id);
+        }
+
+        try {
+          await dbClient.from('players').update({ is_archived: true }).eq('id', itemToDelete.id);
+        } catch (e) {}
       } else {
         setTeams((prev) => prev.filter((t) => t.id !== itemToDelete.id));
 
-        await dbClient.from('teams').delete().eq('id', itemToDelete.id);
+        try {
+          await dbClient.from('teams').update({ is_archived: true }).eq('id', itemToDelete.id);
+        } catch (e) {}
       }
 
-      setToastMsg("Muvaffaqiyatli o'chirildi! 🗑️");
+      setToastMsg("Muvaffaqiyatli arxivlandi! 📦");
       setTimeout(() => setToastMsg(null), 3000);
     } catch (e) {
       console.error(e);
@@ -790,6 +833,30 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       setIsDeleting(false);
       setDeleteCountdown(null);
       setItemToDelete(null);
+    }
+  };
+
+  // Restore Archived Player Back to Active
+  const handleRestorePlayer = async (playerItem: any) => {
+    try {
+      const dbClient = supabaseAdmin || supabase;
+      setPlayers((prev) => prev.filter((p) => p.id !== playerItem.id));
+
+      try {
+        await dbClient.from('applications').update({ is_archived: false, status: 'approved' }).eq('id', playerItem.id);
+      } catch (e) {
+        await dbClient.from('applications').update({ status: 'approved' }).eq('id', playerItem.id);
+      }
+
+      try {
+        await dbClient.from('players').update({ is_archived: false }).eq('id', playerItem.id);
+      } catch (e) {}
+
+      setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
+      setTimeout(() => setToastMsg(null), 3000);
+      fetchPlayers(0, true, showArchived);
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -934,24 +1001,62 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         />
       </View>
 
-      {/* Global Search Input */}
-      <View style={styles.searchContainer}>
-        <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-        <Ionicons name="search" size={20} color="rgba(255,255,255,0.5)" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder={activeTab === 'players' ? "O'yinchini qidirish (ism, tel, pasport)..." : "Jamoani qidirish..."}
-          placeholderTextColor="rgba(255,255,255,0.4)"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
-          </TouchableOpacity>
-        )}
+      {/* Global Search Input & Archive Icon Button */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <View style={[styles.searchContainer, { flex: 1, marginBottom: 0 }]}>
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons name="search" size={20} color="rgba(255,255,255,0.5)" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={activeTab === 'players' ? "O'yinchini qidirish (ism, tel, pasport)..." : "Jamoani qidirish..."}
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* ARCHIVE ICON BUTTON */}
+        <TouchableOpacity
+          style={{
+            height: 48,
+            paddingHorizontal: 14,
+            borderRadius: 14,
+            backgroundColor: showArchived ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+            borderWidth: 1.2,
+            borderColor: showArchived ? '#F59E0B' : 'rgba(255, 255, 255, 0.15)',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            overflow: 'hidden',
+          }}
+          onPress={() => {
+            const nextVal = !showArchived;
+            setShowArchived(nextVal);
+            setPlayerPage(0);
+            fetchPlayers(0, true, nextVal);
+          }}
+          activeOpacity={0.7}
+        >
+          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <Ionicons
+            name={showArchived ? "archive" : "archive-outline"}
+            size={20}
+            color={showArchived ? "#F59E0B" : "rgba(255,255,255,0.75)"}
+          />
+          {showArchived && (
+            <Text style={{ color: '#F59E0B', fontSize: 12, fontWeight: '900' }}>
+              {"Arxiv"}
+            </Text>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* Segment Sub-Tabs (O'yinchilar vs Jamoalar) */}
@@ -1076,6 +1181,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               }}
               onOpen={handleOpenItem}
               onDelete={handlePromptDelete}
+              onRestore={(player: any) => handleRestorePlayer(player)}
+              isArchived={showArchived}
               onImagePress={(imgUrl: string) => setFullImagePreview(imgUrl)}
               isReadOnlyUser={isReadOnlyUser}
             />

@@ -238,11 +238,55 @@ export const StandingsScreen: React.FC = () => {
         }
       });
 
-      // Calculate goalDiff and sort
-      const list = Array.from(map.values()).map((item) => ({
-        ...item,
-        goalDiff: item.goalsFor - item.goalsAgainst,
-      }));
+      // Fetch Standings Overrides from sponsors table
+      const dbClientFetch = supabaseAdmin || supabase;
+      const { data: sponsorData } = await dbClientFetch
+        .from('sponsors')
+        .select('*');
+
+      const overridesMap: Record<string, any> = {};
+      (sponsorData || []).forEach((s: any) => {
+        if (s.name && s.name.startsWith('STANDINGS_OVERRIDE_')) {
+          const teamId = s.name.replace('STANDINGS_OVERRIDE_', '');
+          try {
+            overridesMap[teamId] = JSON.parse(s.logo_url);
+          } catch (e) {}
+        }
+      });
+
+      // Calculate goalDiff, apply overrides and sort
+      const list = Array.from(map.values())
+        .filter((item: any) => !item.is_archived)
+        .map((item: any) => {
+          const ovr = overridesMap[String(item.id)] || {};
+          const played_offset = Number(ovr.played_offset || 0);
+          const won_offset = Number(ovr.won_offset || 0);
+          const draw_offset = Number(ovr.draw_offset || 0);
+          const lost_offset = Number(ovr.lost_offset || 0);
+          const gf_offset = Number(ovr.gf_offset || 0);
+          const ga_offset = Number(ovr.ga_offset || 0);
+          const pts_offset = Number(ovr.pts_offset || 0);
+
+          const finalPlayed = Math.max(0, item.played + played_offset);
+          const finalWon = Math.max(0, item.won + won_offset);
+          const finalDrawn = Math.max(0, item.drawn + draw_offset);
+          const finalLost = Math.max(0, item.lost + lost_offset);
+          const finalGf = Math.max(0, item.goalsFor + gf_offset);
+          const finalGa = Math.max(0, item.goalsAgainst + ga_offset);
+          const finalPts = item.points + pts_offset;
+
+          return {
+            ...item,
+            played: finalPlayed,
+            won: finalWon,
+            drawn: finalDrawn,
+            lost: finalLost,
+            goalsFor: finalGf,
+            goalsAgainst: finalGa,
+            goalDiff: finalGf - finalGa,
+            points: finalPts,
+          };
+        });
 
       list.sort((a, b) => {
         if (b.points !== a.points) return b.points - a.points;

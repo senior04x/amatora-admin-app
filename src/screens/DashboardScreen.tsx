@@ -48,7 +48,7 @@ const SkeletonLoader: React.FC<{ width?: number; height?: number }> = ({ width =
 
 export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
   const { orgId, userRole } = useOrg();
-  const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0 });
+  const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0, pendingUpdates: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -127,13 +127,22 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         pendingTeamsQuery = pendingTeamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
       }
 
-      const [playersRes, leaguesRes, teamsRes, approvedAppsRes, pendingAppsRes, pendingTeamsRes] = await Promise.all([
+      let pendingUpdatesQuery = supabase
+        .from('applications')
+        .select('id', { count: 'exact', head: true })
+        .ilike('comment', '%[PROFILE_UPDATE]%');
+      if (orgId) {
+        pendingUpdatesQuery = pendingUpdatesQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+      }
+
+      const [playersRes, leaguesRes, teamsRes, approvedAppsRes, pendingAppsRes, pendingTeamsRes, pendingUpdatesRes] = await Promise.all([
         playersQuery,
         leaguesQuery,
         teamsQuery,
         approvedAppsQuery,
         pendingAppsQuery,
         pendingTeamsQuery,
+        pendingUpdatesQuery,
       ]);
 
       let pCount = playersRes.count || 0;
@@ -147,6 +156,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         teams: teamsRes.count || 0,
         applications: pendingAppsRes.count || 0,
         pendingTeams: pendingTeamsRes.count || 0,
+        pendingUpdates: pendingUpdatesRes.count || 0,
       });
     } catch (e) {
       console.error('Fetch dashboard counts error:', e);
@@ -337,7 +347,16 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
             onPress={item.action}
           >
             <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-            <Ionicons name={item.icon as any} size={28} color={item.color} style={{ marginBottom: 8 }} />
+            <View style={{ position: 'relative' }}>
+              <Ionicons name={item.icon as any} size={28} color={item.color} style={{ marginBottom: 8 }} />
+              {item.id === 'updates' && counts.pendingUpdates > 0 && (
+                <View style={styles.badgeCircle}>
+                  <Text style={styles.badgeText}>
+                    {counts.pendingUpdates > 99 ? '99+' : counts.pendingUpdates}
+                  </Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.gridCardTitle} numberOfLines={1}>
               {item.title}
             </Text>
@@ -428,5 +447,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  badgeCircle: {
+    position: 'absolute',
+    top: -6,
+    right: -10,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#0F172A',
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
   },
 });

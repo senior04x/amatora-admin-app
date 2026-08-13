@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Alert,
   Animated,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -164,11 +165,346 @@ const DiffRow: React.FC<{
   );
 };
 
+// Animated Card Component with Paper Flying, Red Overlay & Particle Shatter
+const UpdateCardItem: React.FC<{
+  req: any;
+  showOnlyChanged: boolean;
+  isProcessing: boolean;
+  statusColor: string;
+  statusLabel: string;
+  isPending: boolean;
+  oldData: any;
+  newData: any;
+  oldPhoto: string;
+  newPhoto: string;
+  commentMeta: any;
+  onApprove: (req: any, startAnim: () => Promise<void>) => void;
+  onReject: (req: any, startAnim: () => Promise<void>) => void;
+  onDeletePress: (req: any, startAnim: () => Promise<void>) => void;
+  onStatusClick: (req: any) => void;
+}> = ({
+  req,
+  showOnlyChanged,
+  isProcessing,
+  statusColor,
+  statusLabel,
+  isPending,
+  oldData,
+  newData,
+  oldPhoto,
+  newPhoto,
+  commentMeta,
+  onApprove,
+  onReject,
+  onDeletePress,
+  onStatusClick,
+}) => {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(1)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+  const redOverlay = useRef(new Animated.Value(0)).current;
+
+  // Particle explosion state
+  const [particlesActive, setParticlesActive] = useState(false);
+  const particles = useRef(
+    Array.from({ length: 16 }, (_, i) => {
+      const angle = (i / 16) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
+      const dist = 60 + Math.random() * 90;
+      return {
+        x: new Animated.Value(0),
+        y: new Animated.Value(0),
+        scale: new Animated.Value(1),
+        opacity: new Animated.Value(1),
+        targetX: Math.cos(angle) * dist,
+        targetY: Math.sin(angle) * dist,
+        color: ['#00FF66', '#EF4444', '#38BDF8', '#FBBF24', '#FFFFFF', '#A855F7'][i % 6],
+        size: 8 + Math.floor(Math.random() * 8),
+      };
+    })
+  ).current;
+
+  // Paper Fly Animation for Approval
+  const runApproveAnim = (): Promise<void> => {
+    return new Promise((resolve) => {
+      Animated.parallel([
+        Animated.timing(translateY, { toValue: -280, duration: 550, useNativeDriver: true }),
+        Animated.timing(translateX, { toValue: 120, duration: 550, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 0.05, duration: 550, useNativeDriver: true }),
+        Animated.timing(rotate, { toValue: 1, duration: 550, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 550, useNativeDriver: true }),
+      ]).start(() => resolve());
+    });
+  };
+
+  // Red Overlay + Fly Animation for Rejection
+  const runRejectAnim = (): Promise<void> => {
+    return new Promise((resolve) => {
+      Animated.timing(redOverlay, { toValue: 1, duration: 220, useNativeDriver: true }).start(() => {
+        Animated.parallel([
+          Animated.timing(translateY, { toValue: -280, duration: 500, useNativeDriver: true }),
+          Animated.timing(translateX, { toValue: 160, duration: 500, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 0.05, duration: 500, useNativeDriver: true }),
+          Animated.timing(rotate, { toValue: -1, duration: 500, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+        ]).start(() => resolve());
+      });
+    });
+  };
+
+  // Particle Burst Animation for Deletion
+  const runDeleteAnim = (): Promise<void> => {
+    return new Promise((resolve) => {
+      setParticlesActive(true);
+      const particleAnimations = particles.map((p) =>
+        Animated.parallel([
+          Animated.timing(p.x, { toValue: p.targetX, duration: 500, useNativeDriver: true }),
+          Animated.timing(p.y, { toValue: p.targetY, duration: 500, useNativeDriver: true }),
+          Animated.timing(p.scale, { toValue: 0.1, duration: 500, useNativeDriver: true }),
+          Animated.timing(p.opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+        ])
+      );
+
+      Animated.parallel([
+        ...particleAnimations,
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.05, duration: 150, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 0, duration: 350, useNativeDriver: true }),
+        ]),
+        Animated.timing(opacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+      ]).start(() => resolve());
+    });
+  };
+
+  const spin = rotate.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-18deg', '0deg', '18deg'],
+  });
+
+  const oldFirstName = oldData.firstName || oldData.first_name || req.first_name || '';
+  const oldLastName = oldData.lastName || oldData.last_name || req.last_name || '';
+  const oldName = `${oldFirstName} ${oldLastName}`.trim() || '—';
+
+  const newFirstName = newData.firstName || req.first_name || '';
+  const newLastName = newData.lastName || req.last_name || '';
+  const newName = `${newFirstName} ${newLastName}`.trim() || '—';
+
+  const oldFatherName = oldData.fatherName || oldData.father_name || req.father_name || '—';
+  const newFatherName = newData.fatherName || req.father_name || '—';
+
+  const oldPhone = oldData.phone || req.phone || '—';
+  const newPhone = newData.phone || req.phone || '—';
+
+  const oldPassport = `${oldData.passportSeries || oldData.passport_series || req.passport_series || ''} ${oldData.passportNumber || oldData.passport_number || req.passport_number || ''}`.trim() || '—';
+  const newPassport = `${newData.passportSeries || req.passport_series || ''} ${newData.passportNumber || req.passport_number || ''}`.trim() || '—';
+
+  const oldPosition = oldData.position || req.position || '—';
+  const newPosition = newData.position || req.position || '—';
+
+  const oldPlayerNumber = oldData.playerNumber ? `#${oldData.playerNumber}` : oldData.player_number ? `#${oldData.player_number}` : req.player_number ? `#${req.player_number}` : '—';
+  const newPlayerNumber = newData.playerNumber ? `#${newData.playerNumber}` : req.player_number ? `#${req.player_number}` : '—';
+
+  const oldCitizenship = oldData.citizenship || commentMeta.citizenship || req.citizenship || '—';
+  const newCitizenship = newData.citizenship || oldCitizenship;
+
+  const oldHeight = oldData.height || commentMeta.height || req.height || '';
+  const oldWeight = oldData.weight || commentMeta.weight || req.weight || '';
+  const oldHW = oldHeight || oldWeight ? `${oldHeight ? `${oldHeight} SM` : '—'} / ${oldWeight ? `${oldWeight} KG` : '—'}` : '— / —';
+
+  const newHeight = newData.height || oldHeight;
+  const newWeight = newData.weight || oldWeight;
+  const newHW = newHeight || newWeight ? `${newHeight ? `${newHeight} SM` : '—'} / ${newWeight ? `${newWeight} KG` : '—'}` : '— / —';
+
+  const oldBirthDate = oldData.birthDate || oldData.birth_date || req.birth_date || '—';
+  const newBirthDate = newData.birthDate || req.birth_date || '—';
+
+  const oldInsta =
+    getInstaUser(oldData.instagramUsername) ||
+    getInstaUser(oldData.instagram_username) ||
+    getInstaUser(oldData.instagramUrl) ||
+    extractInstaFromComment(req.comment) ||
+    '—';
+  const newInsta =
+    getInstaUser(newData.instagramUsername) ||
+    getInstaUser(newData.instagram_username) ||
+    getInstaUser(newData.instagramUrl) ||
+    extractInstaFromComment(req.comment) ||
+    '—';
+
+  return (
+    <View style={{ position: 'relative' }}>
+      {/* Particle Shatter Layer */}
+      {particlesActive && (
+        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          {particles.map((p, idx) => (
+            <Animated.View
+              key={idx}
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                width: p.size,
+                height: p.size,
+                borderRadius: p.size / 2,
+                backgroundColor: p.color,
+                transform: [
+                  { translateX: p.x },
+                  { translateY: p.y },
+                  { scale: p.scale },
+                ],
+                opacity: p.opacity,
+                zIndex: 99,
+              }}
+            />
+          ))}
+        </View>
+      )}
+
+      <Animated.View
+        style={[
+          styles.updateCard,
+          { borderColor: `${statusColor}33` },
+          {
+            transform: [
+              { translateY },
+              { translateX },
+              { scale },
+              { rotate: spin },
+            ],
+            opacity,
+          },
+        ]}
+      >
+        <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
+
+        {/* Animated Red Overlay Filter for Rejection */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              backgroundColor: 'rgba(239, 68, 68, 0.35)',
+              borderRadius: 18,
+              borderWidth: 2,
+              borderColor: '#EF4444',
+              opacity: redOverlay,
+              zIndex: 10,
+            },
+          ]}
+        />
+
+        {/* CARD HEADER */}
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardDate}>
+            {new Date(req.created_at).toLocaleString('uz-UZ', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </Text>
+
+          {/* Clickable Status Badge for Testing Status Changes */}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => onStatusClick(req)}
+            style={[styles.statusBadge, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}
+          >
+            <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusLabel}</Text>
+            <Ionicons name="options-outline" size={12} color={statusColor} style={{ marginLeft: 4 }} />
+          </TouchableOpacity>
+        </View>
+
+        {/* PHOTO COMPARISON BOX */}
+        <View style={styles.photoCompareBox}>
+          <View style={styles.photoSide}>
+            {oldPhoto ? (
+              <Image source={{ uri: oldPhoto }} style={styles.avatarImg} />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarFallbackText}>{"Yo'q"}</Text>
+              </View>
+            )}
+            <Text style={styles.photoLabel}>{"ESKI RASM"}</Text>
+          </View>
+
+          <Ionicons name="arrow-forward" size={18} color="#00FF66" />
+
+          <View style={styles.photoSide}>
+            {newPhoto ? (
+              <Image source={{ uri: newPhoto }} style={[styles.avatarImg, { borderColor: '#00FF66', borderWidth: 2 }]} />
+            ) : (
+              <View style={[styles.avatarFallback, { backgroundColor: 'rgba(0, 255, 102, 0.1)' }]}>
+                <Text style={[styles.avatarFallbackText, { color: '#00FF66' }]}>{"Bir xil"}</Text>
+              </View>
+            )}
+            <Text style={[styles.photoLabel, { color: '#00FF66' }]}>{"YANGI RASM"}</Text>
+          </View>
+        </View>
+
+        {/* DIFF ROWS COMPARISON */}
+        <View style={{ gap: 8 }}>
+          <DiffRow label="Ism-Familiya" oldVal={oldName} newVal={newName} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Otasining Ismi" oldVal={oldFatherName} newVal={newFatherName} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Telefon Raqami" oldVal={oldPhone} newVal={newPhone} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Pasport Seriya / Raqam" oldVal={oldPassport} newVal={newPassport} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Pozitsiya" oldVal={oldPosition} newVal={newPosition} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Forma Raqami" oldVal={oldPlayerNumber} newVal={newPlayerNumber} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Millati" oldVal={oldCitizenship} newVal={newCitizenship} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Bo'yi / Vazni" oldVal={oldHW} newVal={newHW} showOnlyChanged={showOnlyChanged} />
+          <DiffRow label="Tug'ilgan Sana" oldVal={oldBirthDate} newVal={newBirthDate} showOnlyChanged={showOnlyChanged} />
+          <DiffRow
+            label="Instagram Username"
+            oldVal={oldInsta !== '—' ? `@${oldInsta}` : '—'}
+            newVal={newInsta !== '—' ? `@${newInsta}` : '—'}
+            showOnlyChanged={showOnlyChanged}
+          />
+        </View>
+
+        {/* CARD ACTION BUTTONS */}
+        <View style={styles.cardActionsRow}>
+          <TouchableOpacity
+            style={[styles.actionIconBtn, styles.rejectIconBtn]}
+            onPress={() => onReject(req, runRejectAnim)}
+            disabled={isProcessing}
+          >
+            <Ionicons name="close" size={20} color="#EF4444" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionIconBtn, styles.deleteIconBtn]}
+            onPress={() => onDeletePress(req, runDeleteAnim)}
+            disabled={isProcessing}
+          >
+            <Ionicons name="trash-outline" size={20} color="#EF4444" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionIconBtn, styles.approveIconBtn]}
+            onPress={() => onApprove(req, runApproveAnim)}
+            disabled={isProcessing}
+          >
+            {isProcessing ? (
+              <ActivityIndicator size="small" color="#000000" />
+            ) : (
+              <Ionicons name="checkmark" size={20} color="#000000" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
+  );
+};
+
 export const ProfileUpdatesScreen: React.FC = () => {
   const { orgId } = useOrg();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>('players');
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [showOnlyChanged, setShowOnlyChanged] = useState(false);
 
@@ -176,14 +512,42 @@ export const ProfileUpdatesScreen: React.FC = () => {
   const [itemToDelete, setItemToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Testing status change modal state
+  const [statusModalItem, setStatusModalItem] = useState<any | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
   useEffect(() => {
     fetchProfileUpdateRequests();
   }, [orgId]);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchProfileUpdateRequests(true);
+    setRefreshing(false);
+  }, [orgId]);
+
   const dbClient = supabaseAdmin || supabase;
 
-  const fetchProfileUpdateRequests = async () => {
-    setLoading(true);
+  const handleQuickStatusChange = async (newStatus: string) => {
+    if (!statusModalItem) return;
+    setUpdatingStatus(true);
+    try {
+      const err = await updateTicketStatus(statusModalItem.id, newStatus);
+      if (err) {
+        Alert.alert('Xatolik', err.message);
+      } else {
+        setStatusModalItem(null);
+        await fetchProfileUpdateRequests();
+      }
+    } catch (e: any) {
+      Alert.alert('Xatolik', e.message);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const fetchProfileUpdateRequests = async (isRefreshing = false) => {
+    if (!isRefreshing) setLoading(true);
     try {
       let query = dbClient
         .from('applications')
@@ -338,11 +702,28 @@ export const ProfileUpdatesScreen: React.FC = () => {
     }
   };
 
+  const handleApproveWithAnim = async (reqItem: any, animFunc: () => Promise<void>) => {
+    if (animFunc) await animFunc();
+    await handleApprove(reqItem);
+  };
+
+  const handleRejectWithAnim = async (reqItem: any, animFunc: () => Promise<void>) => {
+    if (animFunc) await animFunc();
+    await handleReject(reqItem);
+  };
+
+  const handleDeleteWithAnim = async (reqItem: any, animFunc: () => Promise<void>) => {
+    setItemToDelete({ ...reqItem, animFunc });
+  };
+
   const executeDelete = async () => {
     if (!itemToDelete) return;
     setIsDeleting(true);
     setProcessingId(itemToDelete.id);
     try {
+      if (itemToDelete.animFunc) {
+        await itemToDelete.animFunc();
+      }
       const { error } = await dbClient.from('applications').delete().eq('id', itemToDelete.id);
       if (error) {
         Alert.alert('Xatolik', "Arizani o'chirishda xatolik: " + error.message);
@@ -360,261 +741,231 @@ export const ProfileUpdatesScreen: React.FC = () => {
   };
 
   const filteredRequests = requests.filter((r) => {
-    if (activeTab === 'players') return !r.team_id || r.type !== 'team';
-    return r.team_id || r.type === 'team';
+    // 1. Tab filter (players vs teams)
+    const matchesTab = activeTab === 'players' ? (!r.team_id || r.type !== 'team') : (r.team_id || r.type === 'team');
+    if (!matchesTab) return false;
+
+    // 2. Status filter
+    const statusVal = String(r.status || 'pending').toLowerCase();
+    const isApproved = statusVal === 'approved' || statusVal === 'approved_update' || statusVal === 'tasdiqlangan';
+    const isRejected = statusVal === 'rejected' || statusVal === 'rejected_update' || statusVal === 'rad_etilgan' || statusVal === 'rad etilgan';
+    const isPending = !isApproved && !isRejected;
+
+    if (statusFilter === 'approved') return isApproved;
+    if (statusFilter === 'rejected') return isRejected;
+    return isPending;
   });
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
-      {/* HEADER ROW */}
-      <View style={styles.headerRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.screenTitle}>{"Ma'lumotlar Almashinuvi"}</Text>
-          <Text style={styles.screenSub}>{"O'yinchilar ma'lumotlarini tahrirlash arizalari"}</Text>
-        </View>
+    <View style={styles.container}>
+      {/* FIXED TOP HEADER (Title, status icons, tabs, filters) */}
+      <View style={styles.fixedHeaderContainer}>
+        <BlurView intensity={50} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
 
-        <TouchableOpacity style={styles.refreshBtn} onPress={fetchProfileUpdateRequests}>
-          <Ionicons name="refresh" size={16} color="#FFFFFF" />
-          <Text style={styles.refreshBtnText}>{"Yangilash"}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* TABS & FILTER BAR */}
-      <View style={styles.filterRow}>
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'players' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('players')}
-          >
-            <Text style={[styles.tabBtnText, activeTab === 'players' && styles.tabBtnTextActive]}>
-              {"O'yinchilar"}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabBtn, activeTab === 'teams' && styles.tabBtnActive]}
-            onPress={() => setActiveTab('teams')}
-          >
-            <Text style={[styles.tabBtnText, activeTab === 'teams' && styles.tabBtnTextActive]}>
-              {"Jamoalar"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.toggleChangedBtn, showOnlyChanged && styles.toggleChangedBtnActive]}
-          onPress={() => setShowOnlyChanged(!showOnlyChanged)}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.checkbox, showOnlyChanged && styles.checkboxActive]}>
-            {showOnlyChanged && <Ionicons name="checkmark" size={12} color="#000000" />}
+        {/* HEADER ROW */}
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.screenTitle}>{"Ma'lumotlar Almashinuvi"}</Text>
+            <Text style={styles.screenSub}>{"O'yinchilar ma'lumotlarini tahrirlash arizalari"}</Text>
           </View>
-          <Text style={[styles.toggleChangedText, showOnlyChanged && { color: '#00FF66' }]}>
-            {"Faqat o'zgarganlar"}
-          </Text>
-        </TouchableOpacity>
+
+          <View style={styles.headerStatusFilterContainer}>
+            <TouchableOpacity
+              style={[
+                styles.statusFilterIconButton,
+                statusFilter === 'approved' && styles.approvedFilterBtnActive,
+              ]}
+              onPress={() => setStatusFilter(statusFilter === 'approved' ? 'pending' : 'approved')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={22}
+                color={statusFilter === 'approved' ? '#4ADE80' : 'rgba(255, 255, 255, 0.45)'}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.statusFilterIconButton,
+                statusFilter === 'rejected' && styles.rejectedFilterBtnActive,
+              ]}
+              onPress={() => setStatusFilter(statusFilter === 'rejected' ? 'pending' : 'rejected')}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="close-circle"
+                size={22}
+                color={statusFilter === 'rejected' ? '#F87171' : 'rgba(255, 255, 255, 0.45)'}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* TABS & FILTER BAR */}
+        <View style={styles.filterRow}>
+          <View style={styles.tabContainer}>
+            <TouchableOpacity
+              style={[styles.tabBtn, activeTab === 'players' && styles.tabBtnActive]}
+              onPress={() => setActiveTab('players')}
+            >
+              <Text style={[styles.tabBtnText, activeTab === 'players' && styles.tabBtnTextActive]}>
+                {"O'yinchilar"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabBtn, activeTab === 'teams' && styles.tabBtnActive]}
+              onPress={() => setActiveTab('teams')}
+            >
+              <Text style={[styles.tabBtnText, activeTab === 'teams' && styles.tabBtnTextActive]}>
+                {"Jamoalar"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.toggleChangedBtn, showOnlyChanged && styles.toggleChangedBtnActive]}
+            onPress={() => setShowOnlyChanged(!showOnlyChanged)}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.checkbox, showOnlyChanged && styles.checkboxActive]}>
+              {showOnlyChanged && <Ionicons name="checkmark" size={12} color="#000000" />}
+            </View>
+            <Text style={[styles.toggleChangedText, showOnlyChanged && { color: '#00FF66' }]}>
+              {"Faqat o'zgarganlar"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* LIST SECTION */}
-      {loading ? (
-        <View style={{ gap: 16 }}>
-          {[1, 2, 3].map((k) => (
-            <View key={k} style={styles.cardSkeleton}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <SkeletonItem style={{ width: 120, height: 16, borderRadius: 4 }} />
-                <SkeletonItem style={{ width: 90, height: 20, borderRadius: 6 }} />
-              </View>
-              <SkeletonItem style={{ width: '100%', height: 60, borderRadius: 12, marginVertical: 14 }} />
-              <View style={{ gap: 8 }}>
-                <SkeletonItem style={{ width: '100%', height: 32, borderRadius: 8 }} />
-                <SkeletonItem style={{ width: '100%', height: 32, borderRadius: 8 }} />
-              </View>
-            </View>
-          ))}
-        </View>
-      ) : filteredRequests.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-          <Ionicons name="document-text-outline" size={48} color="rgba(255,255,255,0.2)" />
-          <Text style={styles.emptyTitle}>{"Arizalar topilmadi"}</Text>
-          <Text style={styles.emptyText}>
-            {"Hozircha ma'lumotlarni almashtirish bo'yicha arizalar mavjud emas."}
-          </Text>
-        </View>
-      ) : (
-        <View style={{ gap: 16 }}>
-          {filteredRequests.map((req) => {
-            const oldData = req.payload?.oldData || {};
-            const newData = req.payload?.newData || {};
-            const isPending = req.status === 'pending' || !req.status;
-            const isApproved = req.status === 'approved' || req.status === 'approved_update';
-            const isRejected = req.status === 'rejected' || req.status === 'rejected_update';
-
-            const statusColor = isApproved ? '#00FF66' : isRejected ? '#EF4444' : '#F59E0B';
-            const statusLabel = isApproved ? 'Tasdiqlangan' : isRejected ? 'Rad Etilgan' : 'Kutilmoqda';
-
-            const oldPhoto = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
-            const newPhoto = newData.photoUrl || newData.photo || oldPhoto;
-
-            const commentMeta = extractMetaFromComment(req.comment);
-
-            const oldFirstName = oldData.firstName || oldData.first_name || req.first_name || '';
-            const oldLastName = oldData.lastName || oldData.last_name || req.last_name || '';
-            const oldName = `${oldFirstName} ${oldLastName}`.trim() || '—';
-
-            const newFirstName = newData.firstName || req.first_name || '';
-            const newLastName = newData.lastName || req.last_name || '';
-            const newName = `${newFirstName} ${newLastName}`.trim() || '—';
-
-            const oldFatherName = oldData.fatherName || oldData.father_name || req.father_name || '—';
-            const newFatherName = newData.fatherName || req.father_name || '—';
-
-            const oldPhone = oldData.phone || req.phone || '—';
-            const newPhone = newData.phone || req.phone || '—';
-
-            const oldPassport = `${oldData.passportSeries || oldData.passport_series || req.passport_series || ''} ${oldData.passportNumber || oldData.passport_number || req.passport_number || ''}`.trim() || '—';
-            const newPassport = `${newData.passportSeries || req.passport_series || ''} ${newData.passportNumber || req.passport_number || ''}`.trim() || '—';
-
-            const oldPosition = oldData.position || req.position || '—';
-            const newPosition = newData.position || req.position || '—';
-
-            const oldPlayerNumber = oldData.playerNumber ? `#${oldData.playerNumber}` : oldData.player_number ? `#${oldData.player_number}` : req.player_number ? `#${req.player_number}` : '—';
-            const newPlayerNumber = newData.playerNumber ? `#${newData.playerNumber}` : req.player_number ? `#${req.player_number}` : '—';
-
-            const oldCitizenship = oldData.citizenship || commentMeta.citizenship || req.citizenship || '—';
-            const newCitizenship = newData.citizenship || oldCitizenship;
-
-            const oldHeight = oldData.height || commentMeta.height || req.height || '';
-            const oldWeight = oldData.weight || commentMeta.weight || req.weight || '';
-            const oldHW = oldHeight || oldWeight ? `${oldHeight ? `${oldHeight} SM` : '—'} / ${oldWeight ? `${oldWeight} KG` : '—'}` : '— / —';
-
-            const newHeight = newData.height || oldHeight;
-            const newWeight = newData.weight || oldWeight;
-            const newHW = newHeight || newWeight ? `${newHeight ? `${newHeight} SM` : '—'} / ${newWeight ? `${newWeight} KG` : '—'}` : '— / —';
-
-            const oldBirthDate = oldData.birthDate || oldData.birth_date || req.birth_date || '—';
-            const newBirthDate = newData.birthDate || req.birth_date || '—';
-
-            const oldInsta =
-              getInstaUser(oldData.instagramUsername) ||
-              getInstaUser(oldData.instagram_username) ||
-              getInstaUser(oldData.instagramUrl) ||
-              extractInstaFromComment(req.comment) ||
-              '—';
-            const newInsta =
-              getInstaUser(newData.instagramUsername) ||
-              getInstaUser(newData.instagram_username) ||
-              getInstaUser(newData.instagramUrl) ||
-              extractInstaFromComment(req.comment) ||
-              '—';
-
-            const isProcessing = processingId === req.id;
-
-            return (
-              <View key={req.id} style={[styles.updateCard, { borderColor: `${statusColor}33` }]}>
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-                {/* CARD HEADER */}
-                <View style={styles.cardHeader}>
-                  <Text style={styles.cardDate}>
-                    {new Date(req.created_at).toLocaleString('uz-UZ', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-
-                  <View style={[styles.statusBadge, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}>
-                    <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusLabel}</Text>
-                  </View>
+      {/* SCROLLABLE CARDS CONTENT BELOW BUTTONS WITH PULL DOWN RELOAD */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 140 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#00FF66"
+            colors={['#00FF66']}
+          />
+        }
+      >
+        {/* LIST SECTION */}
+        {loading ? (
+          <View style={{ gap: 16 }}>
+            {[1, 2, 3].map((k) => (
+              <View key={k} style={styles.cardSkeleton}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <SkeletonItem style={{ width: 120, height: 16, borderRadius: 4 }} />
+                  <SkeletonItem style={{ width: 90, height: 20, borderRadius: 6 }} />
                 </View>
-
-                {/* PHOTO COMPARISON BOX */}
-                <View style={styles.photoCompareBox}>
-                  <View style={styles.photoSide}>
-                    {oldPhoto ? (
-                      <Image source={{ uri: oldPhoto }} style={styles.avatarImg} />
-                    ) : (
-                      <View style={styles.avatarFallback}>
-                        <Text style={styles.avatarFallbackText}>{"Yo'q"}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.photoLabel}>{"ESKI RASM"}</Text>
-                  </View>
-
-                  <Ionicons name="arrow-forward" size={18} color="#00FF66" />
-
-                  <View style={styles.photoSide}>
-                    {newPhoto ? (
-                      <Image source={{ uri: newPhoto }} style={[styles.avatarImg, { borderColor: '#00FF66', borderWidth: 2 }]} />
-                    ) : (
-                      <View style={[styles.avatarFallback, { backgroundColor: 'rgba(0, 255, 102, 0.1)' }]}>
-                        <Text style={[styles.avatarFallbackText, { color: '#00FF66' }]}>{"Bir xil"}</Text>
-                      </View>
-                    )}
-                    <Text style={[styles.photoLabel, { color: '#00FF66' }]}>{"YANGI RASM"}</Text>
-                  </View>
-                </View>
-
-                {/* DIFF ROWS COMPARISON */}
+                <SkeletonItem style={{ width: '100%', height: 60, borderRadius: 12, marginVertical: 14 }} />
                 <View style={{ gap: 8 }}>
-                  <DiffRow label="Ism-Familiya" oldVal={oldName} newVal={newName} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Otasining Ismi" oldVal={oldFatherName} newVal={newFatherName} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Telefon Raqami" oldVal={oldPhone} newVal={newPhone} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Pasport Seriya / Raqam" oldVal={oldPassport} newVal={newPassport} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Pozitsiya" oldVal={oldPosition} newVal={newPosition} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Forma Raqami" oldVal={oldPlayerNumber} newVal={newPlayerNumber} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Millati" oldVal={oldCitizenship} newVal={newCitizenship} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Bo'yi / Vazni" oldVal={oldHW} newVal={newHW} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow label="Tug'ilgan Sana" oldVal={oldBirthDate} newVal={newBirthDate} showOnlyChanged={showOnlyChanged} />
-                  <DiffRow
-                    label="Instagram Username"
-                    oldVal={oldInsta !== '—' ? `@${oldInsta}` : '—'}
-                    newVal={newInsta !== '—' ? `@${newInsta}` : '—'}
-                    showOnlyChanged={showOnlyChanged}
-                  />
-                </View>
-
-                {/* CARD ACTION BUTTONS */}
-                <View style={styles.cardActionsRow}>
-                  {isPending && (
-                    <TouchableOpacity
-                      style={[styles.actionIconBtn, styles.rejectIconBtn]}
-                      onPress={() => handleReject(req)}
-                      disabled={isProcessing}
-                    >
-                      <Ionicons name="close" size={20} color="#EF4444" />
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    style={[styles.actionIconBtn, styles.deleteIconBtn]}
-                    onPress={() => setItemToDelete(req)}
-                    disabled={isProcessing}
-                  >
-                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                  </TouchableOpacity>
-
-                  {isPending && (
-                    <TouchableOpacity
-                      style={[styles.actionIconBtn, styles.approveIconBtn]}
-                      onPress={() => handleApprove(req)}
-                      disabled={isProcessing}
-                    >
-                      {isProcessing ? (
-                        <ActivityIndicator size="small" color="#000000" />
-                      ) : (
-                        <Ionicons name="checkmark" size={20} color="#000000" />
-                      )}
-                    </TouchableOpacity>
-                  )}
+                  <SkeletonItem style={{ width: '100%', height: 32, borderRadius: 8 }} />
+                  <SkeletonItem style={{ width: '100%', height: 32, borderRadius: 8 }} />
                 </View>
               </View>
-            );
-          })}
+            ))}
+          </View>
+        ) : filteredRequests.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
+            <Ionicons name="document-text-outline" size={48} color="rgba(255,255,255,0.2)" />
+            <Text style={styles.emptyTitle}>{"Arizalar topilmadi"}</Text>
+            <Text style={styles.emptyText}>
+              {"Hozircha ma'lumotlarni almashtirish bo'yicha arizalar mavjud emas."}
+            </Text>
+          </View>
+        ) : (
+          <View style={{ gap: 16 }}>
+            {filteredRequests.map((req) => {
+              const oldData = req.payload?.oldData || {};
+              const newData = req.payload?.newData || {};
+              const isPending = req.status === 'pending' || !req.status;
+              const isApproved = req.status === 'approved' || req.status === 'approved_update';
+              const isRejected = req.status === 'rejected' || req.status === 'rejected_update';
+
+              const statusColor = isApproved ? '#00FF66' : isRejected ? '#EF4444' : '#F59E0B';
+              const statusLabel = isApproved ? 'Tasdiqlangan' : isRejected ? 'Rad Etilgan' : 'Kutilmoqda';
+
+              const oldPhoto = oldData.photoUrl || oldData.photo || req.photo_url || req.photo || req.avatar || '';
+              const newPhoto = newData.photoUrl || newData.photo || oldPhoto;
+              const commentMeta = extractMetaFromComment(req.comment);
+
+              return (
+                <UpdateCardItem
+                  key={req.id}
+                  req={req}
+                  showOnlyChanged={showOnlyChanged}
+                  isProcessing={processingId === req.id}
+                  statusColor={statusColor}
+                  statusLabel={statusLabel}
+                  isPending={isPending}
+                  oldData={oldData}
+                  newData={newData}
+                  oldPhoto={oldPhoto}
+                  newPhoto={newPhoto}
+                  commentMeta={commentMeta}
+                  onApprove={(item, anim) => handleApproveWithAnim(item, anim)}
+                  onReject={(item, anim) => handleRejectWithAnim(item, anim)}
+                  onDeletePress={(item, anim) => handleDeleteWithAnim(item, anim)}
+                  onStatusClick={(item) => setStatusModalItem(item)}
+                />
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* STATUS CHANGE TEST MODAL */}
+      <Modal visible={!!statusModalItem} transparent animationType="fade" onRequestClose={() => setStatusModalItem(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxWidth: 360, padding: 22 }]}>
+            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 6, textAlign: 'center' }}>
+              {"Arizaning Holatini O'zgartirish"}
+            </Text>
+            <Text style={{ color: '#94A3B8', fontSize: 12, marginBottom: 18, textAlign: 'center' }}>
+              {"Animatsiyalarni va sahifani qayta-qayta sinash uchun holatni tanlang:"}
+            </Text>
+
+            <View style={{ gap: 10 }}>
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => handleQuickStatusChange('pending')}
+                disabled={updatingStatus}
+              >
+                <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 13 }}>{"KUTILMOQDA (Pending)"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(74, 222, 128, 0.15)', borderWidth: 1, borderColor: '#4ADE80', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => handleQuickStatusChange('approved')}
+                disabled={updatingStatus}
+              >
+                <Text style={{ color: '#4ADE80', fontWeight: '900', fontSize: 13 }}>{"TASDIQLANGAN (Approved)"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: '#EF4444', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => handleQuickStatusChange('rejected')}
+                disabled={updatingStatus}
+              >
+                <Text style={{ color: '#EF4444', fontWeight: '900', fontSize: 13 }}>{"RAD ETILGAN (Rejected)"}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 }}
+                onPress={() => setStatusModalItem(null)}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>{"Bekor qilish"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      )}
+      </Modal>
 
       {/* DELETE CONFIRMATION MODAL */}
       <Modal visible={!!itemToDelete} transparent animationType="fade" onRequestClose={() => setItemToDelete(null)}>
@@ -648,7 +999,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 };
 
@@ -656,14 +1007,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  fixedHeaderContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    zIndex: 100,
+    overflow: 'hidden',
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   screenTitle: {
     color: '#FFFFFF',
@@ -675,28 +1034,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  refreshBtn: {
+  headerStatusFilterContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(0, 255, 102, 0.1)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 102, 0.3)',
+    gap: 8,
   },
-  refreshBtnText: {
-    color: '#00FF66',
-    fontSize: 12,
-    fontWeight: '700',
+  statusFilterIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  approvedFilterBtnActive: {
+    backgroundColor: 'rgba(74, 222, 128, 0.18)',
+    borderColor: 'rgba(74, 222, 128, 0.5)',
+  },
+  rejectedFilterBtnActive: {
+    backgroundColor: 'rgba(248, 113, 113, 0.18)',
+    borderColor: 'rgba(248, 113, 113, 0.5)',
   },
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 18,
   },
   tabContainer: {
     flex: 1,
