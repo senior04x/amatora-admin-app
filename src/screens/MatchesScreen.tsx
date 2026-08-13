@@ -361,12 +361,12 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
       // Notify both teams of updated/rescheduled match
       adminNotificationService.notifyMatchScheduled({
-        homeTeamId: editingMatch.home_team_id,
-        awayTeamId: editingMatch.away_team_id,
+        homeTeamId: String(editHomeTeamId || editingMatch.home_team_id || ''),
+        awayTeamId: String(editAwayTeamId || editingMatch.away_team_id || ''),
         homeTeamName: (editingMatch as any).home_team?.name || 'Jamoa 1',
         awayTeamName: (editingMatch as any).away_team?.name || 'Jamoa 2',
-        matchDate: editDate,
-        matchTime: editTime,
+        matchDate: editMatchDate,
+        matchTime: editMatchTime,
         stadium: editStadiumName || (editingMatch as any).stadium,
         matchId: String(editingMatch.id),
         organizationId: (editingMatch as any).organization_id || orgId || 1,
