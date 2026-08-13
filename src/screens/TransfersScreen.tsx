@@ -387,6 +387,22 @@ export const TransfersScreen: React.FC = () => {
   useEffect(() => {
     fetchTransfers();
     fetchWindowStatus();
+
+    // Supabase Realtime subscription for transfers
+    const channel = supabase
+      .channel('admin_transfers_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'transfers' },
+        () => {
+          fetchTransfers(true);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [orgId]);
 
   const onRefresh = useCallback(async () => {
@@ -431,15 +447,17 @@ export const TransfersScreen: React.FC = () => {
     }
   };
 
-  // 2. Fetch Transfers, Teams, and Leagues
+  // 2. Fetch Transfers, Teams, and Leagues (Matching amatora-organization logic)
   const fetchTransfers = async (isRefreshing = false) => {
     if (!isRefreshing) setLoading(true);
     try {
+      const targetOrgId = orgId || 1;
+
       // Fetch Teams
       const { data: orgTeams } = await dbClient
         .from('teams')
         .select('id, name, logo_url, league, league_id, league_name')
-        .eq('organization_id', orgId || 1)
+        .eq('organization_id', targetOrgId)
         .order('name');
 
       if (orgTeams) {
@@ -450,14 +468,14 @@ export const TransfersScreen: React.FC = () => {
       const { data: orgLeagues } = await dbClient
         .from('leagues')
         .select('id, name')
-        .eq('organization_id', orgId || 1)
+        .eq('organization_id', targetOrgId)
         .order('name');
 
       if (orgLeagues) {
         setLeagues(orgLeagues);
       }
 
-      const teamIdSet = new Set((orgTeams || []).map((t) => t.id));
+      const teamIdSet = new Set((orgTeams || []).map((t) => String(t.id)));
 
       const { data, error } = await dbClient
         .from('transfers')
@@ -468,17 +486,22 @@ export const TransfersScreen: React.FC = () => {
         console.error('Error fetching transfers:', error);
         setTransfers([]);
       } else {
-        const orgTransfers = (data || []).filter(
-          (t: any) =>
-            t.organization_id === orgId ||
-            (!t.organization_id && (teamIdSet.has(t.old_team_id) || teamIdSet.has(t.new_team_id)))
-        );
+        const allTransfers = data || [];
+        const orgTransfers = allTransfers.filter((t: any) => {
+          if (t.organization_id && Number(t.organization_id) === Number(targetOrgId)) return true;
+          const oldMatch = t.old_team_id && teamIdSet.has(String(t.old_team_id));
+          const newMatch = t.new_team_id && teamIdSet.has(String(t.new_team_id));
+          if (oldMatch || newMatch) return true;
+          if (!t.organization_id && (Number(targetOrgId) === 1 || teamIdSet.size === 0)) return true;
+          return false;
+        });
         setTransfers(orgTransfers);
       }
     } catch (e) {
       console.error('Fetch transfers error:', e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
