@@ -536,8 +536,26 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     setMatch((prev: any) => ({ ...prev, ...updateData }));
 
     try {
-      await dbClient.from('matches').update(updateData).eq('id', matchId);
-    } catch (e) {}
+      const { error: err1 } = await supabaseAdmin.from('matches').update(updateData).eq('id', matchId);
+      if (err1) {
+        await supabase.from('matches').update(updateData).eq('id', matchId);
+      }
+      showToast(
+        newStatus === 'first_half'
+          ? "1-Taym Boshlandi 🚀"
+          : newStatus === 'half_time'
+          ? "Tanaffus E'lon Qilindi ⏸️"
+          : newStatus === 'second_half'
+          ? "2-Taym Boshlandi 🚀"
+          : newStatus === 'finished'
+          ? "Uchrashuv Yakunlandi 🏁"
+          : "Boshlang'ich Holatga Qaytildi 🔄"
+      );
+    } catch (e) {
+      try {
+        await supabase.from('matches').update(updateData).eq('id', matchId);
+      } catch (e2) {}
+    }
   };
 
   // Open Event Modal prefilled
