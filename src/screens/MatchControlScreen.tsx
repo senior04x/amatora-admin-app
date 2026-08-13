@@ -969,16 +969,6 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
             </View>
           )}
 
-          {matchStatus !== 'scheduled' && matchStatus !== 'finished' && (
-            <TouchableOpacity
-              style={styles.resetStatusBtn}
-              onPress={() => promptStatusChange('scheduled')}
-            >
-              <Ionicons name="refresh" size={14} color="#F59E0B" />
-              <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlashga Qaytarish"}</Text>
-            </TouchableOpacity>
-          )}
-
           {/* Penalty Shootout Dropdown Button */}
           <TouchableOpacity
             style={styles.penaltyDropdownBtn}
