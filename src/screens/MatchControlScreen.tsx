@@ -499,9 +499,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     });
   };
 
-  // Confirm Status Change Execution
-  const executeStatusChange = async () => {
-    const newStatus = statusConfirmModal.targetStatus;
+  // Execute Status Change
+  const executeStatusChange = async (overrideStatus?: string) => {
+    const newStatus = overrideStatus || statusConfirmModal.targetStatus;
+    if (!newStatus) return;
     setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
 
     let newBaseSec = timerSeconds;
@@ -539,6 +540,18 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     updateTimerDBAndState(newBaseSec, nowIso, newRunning);
     setMatch((prev: any) => ({ ...prev, ...updateData }));
 
+    showToast(
+      newStatus === 'first_half'
+        ? "1-Taym Boshlandi 🚀"
+        : newStatus === 'half_time'
+        ? "Tanaffus E'lon Qilindi ⏸️"
+        : newStatus === 'second_half'
+        ? "2-Taym Boshlandi 🚀"
+        : newStatus === 'finished'
+        ? "Uchrashuv Yakunlandi 🏁"
+        : "Boshlang'ich Holatga Qaytildi 🔄"
+    );
+
     try {
       let { data: updatedRows } = await supabaseAdmin
         .from('matches')
@@ -569,18 +582,6 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
             .select();
         }
       }
-
-      showToast(
-        newStatus === 'first_half'
-          ? "1-Taym Boshlandi 🚀"
-          : newStatus === 'half_time'
-          ? "Tanaffus E'lon Qilindi ⏸️"
-          : newStatus === 'second_half'
-          ? "2-Taym Boshlandi 🚀"
-          : newStatus === 'finished'
-          ? "Uchrashuv Yakunlandi 🏁"
-          : "Boshlang'ich Holatga Qaytildi 🔄"
-      );
     } catch (e) {
       console.error('Match status update catch:', e);
     }
@@ -962,7 +963,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'scheduled' && (
             <TouchableOpacity
               style={styles.bigGreenActionBtn}
-              onPress={() => promptStatusChange('first_half')}
+              onPress={() => executeStatusChange('first_half')}
             >
               <Ionicons name="play" size={18} color="#000000" />
               <Text style={styles.bigGreenBtnText}>{"1-Taym Boshlash"}</Text>
@@ -972,7 +973,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'first_half' && (
             <TouchableOpacity
               style={styles.bigOrangeActionBtn}
-              onPress={() => promptStatusChange('half_time')}
+              onPress={() => executeStatusChange('half_time')}
             >
               <Ionicons name="pause" size={18} color="#000000" />
               <Text style={styles.bigGreenBtnText}>{"Tanaffus e'lon qilish"}</Text>
@@ -982,7 +983,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'half_time' && (
             <TouchableOpacity
               style={styles.bigGreenActionBtn}
-              onPress={() => promptStatusChange('second_half')}
+              onPress={() => executeStatusChange('second_half')}
             >
               <Ionicons name="play" size={18} color="#000000" />
               <Text style={styles.bigGreenBtnText}>{"2-Taym Boshlash"}</Text>
@@ -992,7 +993,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           {matchStatus === 'second_half' && (
             <TouchableOpacity
               style={styles.bigRedActionBtn}
-              onPress={() => promptStatusChange('finished')}
+              onPress={() => executeStatusChange('finished')}
             >
               <Ionicons name="flag" size={18} color="#FFFFFF" />
               <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
@@ -1007,7 +1008,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.resetStatusBtn}
-                onPress={() => promptStatusChange('scheduled')}
+                onPress={() => executeStatusChange('scheduled')}
               >
                 <Ionicons name="refresh" size={16} color="#F59E0B" />
                 <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
