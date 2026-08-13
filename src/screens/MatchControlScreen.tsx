@@ -207,11 +207,15 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       } catch (e) {}
 
       try {
-        await dbClient.from('matches').update({
+        const timerFields = {
           timer_seconds: baseSec,
           timer_started_at: startedAtIso,
           is_timer_running: isRunning,
-        }).eq('id', matchId);
+        };
+        let { data: updatedRows } = await supabaseAdmin.from('matches').update(timerFields).eq('id', matchId).select();
+        if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
+          await supabaseAdmin.from('matches').update(timerFields).eq('id', Number(matchId)).select();
+        }
       } catch (e) {}
     }, 0);
   };
@@ -536,10 +540,36 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     setMatch((prev: any) => ({ ...prev, ...updateData }));
 
     try {
-      const { error: err1 } = await supabaseAdmin.from('matches').update(updateData).eq('id', matchId);
-      if (err1) {
-        await supabase.from('matches').update(updateData).eq('id', matchId);
+      let { data: updatedRows } = await supabaseAdmin
+        .from('matches')
+        .update(updateData)
+        .eq('id', matchId)
+        .select();
+
+      if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
+        const res = await supabaseAdmin
+          .from('matches')
+          .update(updateData)
+          .eq('id', Number(matchId))
+          .select();
+        updatedRows = res.data;
       }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        let res = await supabase
+          .from('matches')
+          .update(updateData)
+          .eq('id', matchId)
+          .select();
+        if ((!res.data || res.data.length === 0) && !isNaN(Number(matchId))) {
+          await supabase
+            .from('matches')
+            .update(updateData)
+            .eq('id', Number(matchId))
+            .select();
+        }
+      }
+
       showToast(
         newStatus === 'first_half'
           ? "1-Taym Boshlandi 🚀"
@@ -552,9 +582,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           : "Boshlang'ich Holatga Qaytildi 🔄"
       );
     } catch (e) {
-      try {
-        await supabase.from('matches').update(updateData).eq('id', matchId);
-      } catch (e2) {}
+      console.error('Match status update catch:', e);
     }
   };
 
