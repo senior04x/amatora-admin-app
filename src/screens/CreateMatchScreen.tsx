@@ -188,7 +188,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
       const parsedRound = parseInt(matchRound, 10) || 1;
 
-      // 1:1 Core DB Columns matching Web Admin Schedule.jsx exactly
+      // Clean DB Payload with valid schema columns
       const basePayload: any = {
         organization_id: activeOrgId,
         league: selectedLeague,
@@ -196,55 +196,60 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         away_team_id: awayTeamId,
         match_date: matchDate,
         match_time: matchTime,
-        location: selectedField,
+        location: stadiumName?.trim() || selectedField,
         round: parsedRound,
         youtube_link: enableYtLink ? (youtubeLink.trim() || null) : null,
         status: 'scheduled',
+        importance: importance || 'oddiy',
       };
 
-      const fullPayload = {
-        ...basePayload,
-        importance: importance,
-        is_postponed: isPostponed,
-      };
-
-      let { error } = await dbClient.from('matches').insert([fullPayload]);
+      const { data: insertedData, error } = await dbClient.from('matches').insert([basePayload]).select();
 
       if (error) {
-        // Fallback without optional columns if DB schema doesn't have importance/is_postponed
-        let { error: err2 } = await dbClient.from('matches').insert([basePayload]);
-        if (err2) {
-          console.error('Insert match error:', err2);
-          throw err2;
-        }
+        console.error('Insert match error:', error);
+        throw error;
       }
 
       // Trigger push notification to both teams
-      const homeTeamObj = teams.find((t) => t.id === homeTeamId);
-      const awayTeamObj = teams.find((t) => t.id === awayTeamId);
+      try {
+        const homeTeamObj = teams.find((t) => t.id === homeTeamId);
+        const awayTeamObj = teams.find((t) => t.id === awayTeamId);
 
-      adminNotificationService.notifyMatchScheduled({
-        homeTeamId,
-        awayTeamId,
-        homeTeamName: homeTeamObj?.name || 'Jamoa 1',
-        awayTeamName: awayTeamObj?.name || 'Jamoa 2',
-        matchDate,
-        matchTime,
-        stadium: stadiumName || selectedField,
-        organizationId: orgId || 1,
-      });
+        adminNotificationService.notifyMatchScheduled({
+          homeTeamId,
+          awayTeamId,
+          homeTeamName: homeTeamObj?.name || 'Jamoa 1',
+          awayTeamName: awayTeamObj?.name || 'Jamoa 2',
+          matchDate,
+          matchTime,
+          stadium: stadiumName?.trim() || selectedField,
+          matchId: insertedData?.[0]?.id ? String(insertedData[0].id) : undefined,
+          organizationId: activeOrgId,
+        }).catch((err) => console.warn('Match push error:', err));
+      } catch (pushErr) {
+        console.warn('Push error:', pushErr);
+      }
 
-      Alert.alert("Muvaffaqiyatli", "Yangi o'yin jadvalga kiritildi!", [
-        {
-          text: "OK",
-          onPress: () => {
-            if (onSuccess) onSuccess();
+      if (Platform.OS === 'web') {
+        window.alert("Yangi o'yin jadvalga muvaffaqiyatli kiritildi! ✓");
+        if (onSuccess) onSuccess();
+      } else {
+        Alert.alert("Muvaffaqiyatli", "Yangi o'yin jadvalga kiritildi!", [
+          {
+            text: "OK",
+            onPress: () => {
+              if (onSuccess) onSuccess();
+            },
           },
-        },
-      ]);
+        ]);
+      }
     } catch (e: any) {
-      console.error(e);
-      Alert.alert("Xatolik", e.message || "O'yinni saqlashda xatolik yuz berdi");
+      console.error('Create match error:', e);
+      if (Platform.OS === 'web') {
+        window.alert("Xatolik: " + (e.message || "O'yinni saqlashda xatolik yuz berdi"));
+      } else {
+        Alert.alert("Xatolik", e.message || "O'yinni saqlashda xatolik yuz berdi");
+      }
     } finally {
       setLoading(false);
     }
