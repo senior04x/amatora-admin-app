@@ -6,7 +6,8 @@ import { BlurView } from 'expo-blur';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
 import { useOrg } from '../context/OrgContext';
-import { supabaseAdmin, supabase } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
+import { hasSecurePin, deleteSecurePin } from '../utils/securePin';
 import pkg from '../../package.json';
 
 const APP_VERSION = `v${pkg.version}`;
@@ -18,7 +19,7 @@ interface SettingsScreenProps {
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   const { currentOrg } = useOrg();
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [hasPin, setHasPin] = useState(false);
 
   useEffect(() => {
@@ -45,8 +46,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   };
 
   const checkPin = async () => {
-    const p = await AsyncStorage.getItem('@amatora_pin_code');
-    setHasPin(!!p);
+    const p = await hasSecurePin();
+    setHasPin(p);
   };
 
   const loadBiometricsStatus = async () => {
@@ -147,12 +148,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         if (tokenData?.data) {
           await AsyncStorage.setItem('@amatora_push_token', tokenData.data);
           if (currentOrg?.id) {
-            const dbClient = supabaseAdmin || supabase;
-            dbClient
+            await supabase
               .from('organizations')
               .update({ push_token: tokenData.data })
-              .eq('id', currentOrg.id)
-              .catch(() => {});
+              .eq('id', currentOrg.id);
           }
         }
       } catch (err) {
@@ -179,8 +178,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Delete locally on device
-              await AsyncStorage.removeItem('@amatora_pin_code');
+              // Delete securely on device
+              await deleteSecurePin();
               await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
               setHasPin(false);
               setBiometricsEnabled(false);
@@ -339,6 +338,11 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     textTransform: 'uppercase',
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
   },
   screenSub: {
     color: 'rgba(255, 255, 255, 0.5)',

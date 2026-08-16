@@ -14,7 +14,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 interface OrganizersScreenProps {
   onGoBack?: () => void;
@@ -39,7 +39,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
   const fetchOrganizers = async () => {
     try {
       setLoadingOrganizers(true);
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
 
       const { data, error } = await dbClient
@@ -63,7 +63,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
   const fetchLoginLogs = async () => {
     try {
       setLoadingLogs(true);
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
 
       const { data, error } = await dbClient
@@ -160,7 +160,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
           }
           return output;
         };
-        arrayBuffer = decodeBase64(base64Data).buffer;
+        arrayBuffer = decodeBase64(base64Data).buffer as ArrayBuffer;
       } else {
         const res = await fetch(localUri);
         const blob = await res.blob();
@@ -197,7 +197,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
 
     try {
       setIsCreatingOrgUser(true);
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
 
       // Upload avatar image to Supabase Storage bucket first to get public HTTP URL
@@ -219,18 +219,6 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
 
       if (error) {
         throw new Error(error.message);
-      }
-
-      if (supabaseAdmin && supabaseAdmin.auth && supabaseAdmin.auth.admin) {
-        try {
-          await supabaseAdmin.auth.admin.createUser({
-            email: newOrgEmail.trim().toLowerCase(),
-            password: newOrgPassword.trim(),
-            email_confirm: true,
-          });
-        } catch (authErr) {
-          console.warn('Auth admin create note:', authErr);
-        }
       }
 
       if (showToast) {
@@ -260,7 +248,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
         style: 'destructive',
         onPress: async () => {
           try {
-            const dbClient = supabaseAdmin || supabase;
+            const dbClient = supabase;
             await dbClient.from('organization_users').delete().eq('id', id);
             fetchOrganizers();
             if (showToast) {
@@ -420,7 +408,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
             <Text style={styles.sectionTitle}>{"Mavjud Organizatorlar"}</Text>
 
             {loadingOrganizers ? (
-              <ActivityIndicator size="medium" color="#38BDF8" style={{ marginVertical: 30 }} />
+              <ActivityIndicator size="small" color="#38BDF8" style={{ marginVertical: 30 }} />
             ) : organizersList.length === 0 ? (
               <View style={styles.emptyCard}>
                 <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
@@ -461,7 +449,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
             <Text style={styles.sectionTitle}>{"Foydalanuvchilar Kirish Tarixi va Joylashuvlari"}</Text>
 
             {loadingLogs ? (
-              <ActivityIndicator size="medium" color="#38BDF8" style={{ marginVertical: 30 }} />
+              <ActivityIndicator size="small" color="#38BDF8" style={{ marginVertical: 30 }} />
             ) : loginLogs.length === 0 ? (
               <View style={styles.emptyCard}>
                 <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />

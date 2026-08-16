@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Animated } from 'react
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number; style?: any }> = ({
   width = 100,
@@ -54,7 +54,7 @@ export const Header: React.FC = () => {
     const fetchUserHeader = async () => {
       if (userRole === 'user') {
         try {
-          const dbClient = supabaseAdmin || supabase;
+          const dbClient = supabase;
           const { data: sessionData } = await supabase.auth.getSession();
           const email = sessionData?.session?.user?.email;
           if (email) {

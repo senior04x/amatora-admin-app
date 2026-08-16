@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -118,7 +118,7 @@ export const SponsorsScreen: React.FC = () => {
     fetchLeagues();
   }, [orgId]);
 
-  const dbClient = supabaseAdmin || supabase;
+  const dbClient = supabase;
 
   // 1. Fetch Leagues and Sponsor Visibility Settings
   const fetchLeagues = async () => {
@@ -296,7 +296,7 @@ export const SponsorsScreen: React.FC = () => {
       const selectedAsset = pickerResult.assets[0];
       setUploading(true);
 
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const fileExt = selectedAsset.uri.split('.').pop() || 'png';
       const fileName = `sponsor_${Date.now()}.${fileExt}`;
 

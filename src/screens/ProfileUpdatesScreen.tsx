@@ -18,7 +18,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 
 // Helper functions for parsing instagram & metadata from comments
@@ -560,7 +560,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
     setRefreshing(false);
   }, [orgId]);
 
-  const dbClient = supabaseAdmin || supabase;
+  const dbClient = supabase;
 
   const handleQuickStatusChange = async (newStatus: string) => {
     if (!statusModalItem) return;

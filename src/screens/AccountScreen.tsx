@@ -21,7 +21,7 @@ import { ColorPicker } from '@darthrapid/react-native-color-picker';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
 
 const TextSkeleton: React.FC<{ width?: number | string; height?: number; borderRadius?: number; style?: any }> = ({
@@ -105,7 +105,7 @@ export const AccountScreen: React.FC<{
   const fetchOrganizers = async () => {
     try {
       setLoadingOrganizers(true);
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
 
       const { data, error } = await dbClient
@@ -139,7 +139,7 @@ export const AccountScreen: React.FC<{
 
     try {
       setIsCreatingOrgUser(true);
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
 
       const { error } = await dbClient.from('organization_users').insert([
@@ -154,18 +154,6 @@ export const AccountScreen: React.FC<{
 
       if (error) {
         throw new Error(error.message);
-      }
-
-      if (supabaseAdmin && supabaseAdmin.auth && supabaseAdmin.auth.admin) {
-        try {
-          await supabaseAdmin.auth.admin.createUser({
-            email: newOrgEmail.trim().toLowerCase(),
-            password: newOrgPassword.trim(),
-            email_confirm: true,
-          });
-        } catch (authErr) {
-          console.warn('Auth admin create note:', authErr);
-        }
       }
 
       Alert.alert('Muvaffaqiyatli', 'Yangi organizator (user) saqlandi!');
@@ -189,7 +177,7 @@ export const AccountScreen: React.FC<{
         style: 'destructive',
         onPress: async () => {
           try {
-            const dbClient = supabaseAdmin || supabase;
+            const dbClient = supabase;
             await dbClient.from('organization_users').delete().eq('id', id);
             fetchOrganizers();
           } catch (e) {
@@ -236,7 +224,7 @@ export const AccountScreen: React.FC<{
     const loadData = async () => {
       if (userRole === 'user') {
         try {
-          const dbClient = supabaseAdmin || supabase;
+          const dbClient = supabase;
           const { data: sessionData } = await supabase.auth.getSession();
           const sessionEmail = sessionData?.session?.user?.email;
 
@@ -290,7 +278,7 @@ export const AccountScreen: React.FC<{
 
       setIsUploadingLogo(true);
       const asset = pickerResult.assets[0];
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'png';
       const fileName = `org_logo_${orgId || 1}_${Date.now()}.${fileExt}`;
 
@@ -339,7 +327,7 @@ export const AccountScreen: React.FC<{
 
       setIsUploadingLogo(true);
       const asset = pickerResult.assets[0];
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'png';
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionEmail = sessionData?.session?.user?.email;
@@ -406,7 +394,7 @@ export const AccountScreen: React.FC<{
     // 3. Save to database IN THE BACKGROUND (non-blocking)
     const saveToDB = async () => {
       try {
-        const dbClient = supabaseAdmin || supabase;
+        const dbClient = supabase;
         const targetOrgId = orgId || currentOrg?.id || 1;
 
         const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
@@ -1490,12 +1478,15 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.2)',
     marginTop: 4,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+  inlineInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    color: '#FFFFFF',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   modalContent: {
     width: '100%',

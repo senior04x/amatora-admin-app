@@ -18,7 +18,7 @@ import ViewShot from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 // Helper component for scaling 1080x1080 canvas graphics for device previews
 const ScaledCanvasPreview = ({
@@ -214,7 +214,7 @@ export const ExportScreen: React.FC = () => {
 
   const fetchOrgData = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       if (orgId) {
         const { data } = await dbClient.from('organizations').select('*').eq('id', orgId).single();
         if (data) setOrgData(data);
@@ -236,7 +236,7 @@ export const ExportScreen: React.FC = () => {
   const fetchLeagues = async () => {
     setLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('name');
       if (orgId) {
         if (collabLeagueIds && collabLeagueIds.length > 0) {
@@ -291,7 +291,7 @@ export const ExportScreen: React.FC = () => {
 
   const fetchAllPDFData = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       let appQuery = dbClient.from('applications').select('*').order('created_at', { ascending: false });
       if (orgId) {
@@ -341,7 +341,7 @@ export const ExportScreen: React.FC = () => {
     const leagueName = typeof leagueObj === 'object' ? leagueObj?.name : (selectedLeague?.name || '');
 
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       // 0. Collab Info
       if (leagueId) {

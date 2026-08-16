@@ -3,7 +3,7 @@ import { AppState, Animated, TouchableOpacity, Text, StyleSheet, View } from 're
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
 
 interface ToastOptions {
@@ -94,7 +94,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const fetchOrg = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let targetOrgId = orgId || 1;
 
       // Read stored role & orgId from AsyncStorage
@@ -201,7 +201,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const prev = transferWindowOpen;
     setTransferWindowOpen(val);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const { error } = await dbClient.from('organizations').update({ transfer_window_open: val }).eq('id', orgId || 1);
       if (error) throw error;
 
@@ -225,7 +225,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const currentOrgId = orgId || 1;
 
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       // Primary DB Column: Update organizations.is_registration_open
       const { error } = await dbClient.from('organizations').update({ is_registration_open: val }).eq('id', currentOrgId);

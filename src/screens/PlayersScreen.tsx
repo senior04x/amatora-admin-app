@@ -22,7 +22,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 interface Props {
   onNavigate?: (screen: string) => void;
@@ -422,7 +422,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const fetchArchivedData = async () => {
     setLoadingArchive(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       if (archiveTab === 'players') {
         let query = dbClient
@@ -476,7 +476,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
   const handleRestoreArchivedPlayer = async (playerItem: any) => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       setArchivedPlayers((prev) => prev.filter((p) => p.id !== playerItem.id));
 
       try {
@@ -500,7 +500,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
   const handleRestoreArchivedTeam = async (teamItem: any) => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       setArchivedTeams((prev) => prev.filter((t) => t.id !== teamItem.id));
 
       await dbClient.from('teams').update({ is_archived: false, status: 'approved' }).eq('id', teamItem.id);
@@ -555,7 +555,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   // Fetch All Teams List for Select Dropdown & Name Resolution
   const fetchAllTeamsList = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('teams').select('id, name, league').order('name');
       if (orgId) {
         query = query.eq('organization_id', orgId);
@@ -568,7 +568,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   // Fetch Total Database Counters
   const fetchTotalCounts = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       // Approved Players Total Count
       let pQuery = dbClient
@@ -635,7 +635,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     try {
       const from = pageIdx * PLAYER_PAGE_SIZE;
       const to = from + PLAYER_PAGE_SIZE - 1;
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       let query = dbClient
         .from('applications')
@@ -699,7 +699,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     try {
       const from = pageIdx * TEAM_PAGE_SIZE;
       const to = from + TEAM_PAGE_SIZE - 1;
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       let query = dbClient
         .from('teams')
@@ -880,7 +880,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const executeDirectArchive = async (itemToArchive: any) => {
     if (!itemToArchive) return;
     const isPlayer = activeTab === 'players';
-    const dbClient = supabaseAdmin || supabase;
+    const dbClient = supabase;
 
     if (isPlayer) {
       // 1. Remove from active RAM list instantly
@@ -925,7 +925,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     if (!itemToDelete) return;
     setIsDeleting(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const isPlayer = activeTab === 'players' || !itemToDelete.isTeam;
       if (isPlayer) {
         setPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
@@ -966,7 +966,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   // Restore Archived Player Back to Active
   const handleRestorePlayer = async (playerItem: any) => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       setPlayers((prev) => prev.filter((p) => p.id !== playerItem.id));
 
       try {
@@ -993,7 +993,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     setSaving(true);
 
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const isPlayer = selectedItem.isPlayer;
 
       if (isPlayer) {

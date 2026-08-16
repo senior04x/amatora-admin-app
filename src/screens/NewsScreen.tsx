@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 
 const { width } = Dimensions.get('window');
@@ -138,7 +138,7 @@ export const NewsScreen: React.FC = () => {
   const fetchNews = async () => {
     try {
       setLoading(true);
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient
         .from('news')
         .select('*')
@@ -243,7 +243,7 @@ export const NewsScreen: React.FC = () => {
       return imageUri; // Already public Supabase URL
     }
 
-    const dbClient = supabaseAdmin || supabase;
+    const dbClient = supabase;
     const fileExt = imageUri.includes('data:image/')
       ? (imageUri.split(';')[0].split('/')[1] || 'png')
       : (imageUri.split('?')[0].split('.').pop()?.toLowerCase() || 'png');
@@ -292,7 +292,7 @@ export const NewsScreen: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let finalImageUrl = imageUri || '';
 
       // Upload if it's not already a public Supabase Storage URL
@@ -348,7 +348,7 @@ export const NewsScreen: React.FC = () => {
     if (!newsToDelete) return;
     setIsDeleting(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const imageUrl = newsToDelete.image_url;
 
       if (imageUrl && imageUrl.includes('news-images')) {

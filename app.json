@@ -32,7 +32,8 @@
           "faceIDPermission": "AMATORA Admin ilovasiga kirish uchun Face ID dan foydalaniladi."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-secure-store"
     ]
   }
 }

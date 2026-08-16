@@ -21,7 +21,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 
 const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
@@ -45,7 +45,7 @@ const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
   } catch (xhrErr) {
     console.warn('XHR ArrayBuffer read failed, using FileSystem Base64 fallback...', xhrErr);
     const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64' as any,
     });
     // Native base64 decoding helper
     const decodeBase64 = (b64: string): Uint8Array => {
@@ -66,7 +66,7 @@ const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
       return output;
     };
     const uint8Arr = decodeBase64(base64);
-    return uint8Arr.buffer;
+    return uint8Arr.buffer as ArrayBuffer;
   }
 };
 
@@ -342,7 +342,7 @@ export const LeaguesScreen: React.FC = () => {
     }
     setSendingCollab(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let foundOrgId = null;
       let foundOrgName = '';
 
@@ -432,7 +432,7 @@ export const LeaguesScreen: React.FC = () => {
   const fetchLeagues = async () => {
     setLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('created_at', { ascending: false });
       if (orgId) {
         if (collabLeagueIds && collabLeagueIds.length > 0) {
@@ -551,7 +551,7 @@ export const LeaguesScreen: React.FC = () => {
     }
     setFormSaving(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let finalLogoUrl = formLogo;
       let finalBgUrl = formBgImage;
 
@@ -692,7 +692,7 @@ export const LeaguesScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const dbClient = supabaseAdmin || supabase;
+              const dbClient = supabase;
               const lId = league.id;
               // 1. Delete collabs
               await dbClient.from('league_collabs').delete().eq('league_id', lId);
@@ -726,7 +726,7 @@ export const LeaguesScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              const dbClient = supabaseAdmin || supabase;
+              const dbClient = supabase;
               const { error } = await dbClient.from('league_collabs').delete().eq('id', collabId);
               if (error) throw error;
 
@@ -800,7 +800,7 @@ export const LeaguesScreen: React.FC = () => {
           const filePath = `league-backgrounds/${fileName}`;
           const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
 
-          const dbClient = supabaseAdmin || supabase;
+          const dbClient = supabase;
           const publicUrl = await uploadFileToSupabase(dbClient, 'player-photos', filePath, uri, mimeType);
 
           if (publicUrl) {
@@ -852,7 +852,7 @@ export const LeaguesScreen: React.FC = () => {
         style: 'destructive',
         onPress: async () => {
           try {
-            const dbClient = supabaseAdmin || supabase;
+            const dbClient = supabase;
             try {
               await dbClient.from('leagues').update({
                 export_bg_url: null,
@@ -900,7 +900,7 @@ export const LeaguesScreen: React.FC = () => {
           const filePath = `league-logos/${fileName}`;
           const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
 
-          const dbClient = supabaseAdmin || supabase;
+          const dbClient = supabase;
           const publicUrl = await uploadFileToSupabase(dbClient, 'player-photos', filePath, uri, mimeType);
 
           if (publicUrl) {
@@ -951,7 +951,7 @@ export const LeaguesScreen: React.FC = () => {
             <View style={s.cardCenterContent}>
               {uploadingLogoLeagueId === item.id ? (
                 <View style={s.freeLogoWrap}>
-                  <ActivityIndicator size="medium" color="#00FF66" />
+                  <ActivityIndicator size="small" color="#00FF66" />
                   <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, marginTop: 4, fontWeight: '700' }}>{"Yuklanmoqda..."}</Text>
                 </View>
               ) : (item.logo_url || item.logo || item.logoUrl) ? (
@@ -1686,20 +1686,6 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '700',
-  },
-
-  /* Collab Badge */
-  collabBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    alignSelf: 'center',
-    marginBottom: 6,
-  },
-  collabBadgeText: {
-    color: '#00FF66',
-    fontSize: 10,
-    fontWeight: '800',
   },
 
   /* Action Tabs (Transparent Container, Glassmorphic Buttons) */

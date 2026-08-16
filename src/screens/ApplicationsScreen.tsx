@@ -17,10 +17,11 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 interface Props {
   initialTab?: 'players' | 'teams';
+  onNavigate?: (tab: any) => void;
 }
 
 // Shimmer Skeleton Loader Component
@@ -195,7 +196,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     setLoadingTeamRoster(true);
     setTeamRosterPlayers([]);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const teamId = teamItem.id;
       const teamName = teamItem.name ? teamItem.name.trim() : '';
 
@@ -375,7 +376,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
   const fetchDbCounts = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const table = activeTab === 'players' ? 'applications' : 'teams';
       
       const baseQuery = dbClient.from(table).select('*', { count: 'exact', head: true });
@@ -456,7 +457,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   // Fetch Leagues
   const fetchLeagues = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('name');
       if (orgId) {
         query = query.eq('organization_id', orgId);
@@ -469,7 +470,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   // Fetch Teams Map
   const fetchTeamsMap = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('teams').select('*').order('name');
       if (orgId) {
         query = query.eq('organization_id', orgId);
@@ -493,7 +494,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const fetchPlayerApplicationsPage = async (pageIdx: number, isReset = false, currentTeamsMap?: Map<any, any>) => {
     try {
       const tMap = currentTeamsMap || teamsMap;
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const from = pageIdx * PLAYER_PAGE_SIZE;
       const to = from + PLAYER_PAGE_SIZE - 1;
 
@@ -556,7 +557,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   // Fetch Team Applications Page (10 items chunk)
   const fetchTeamApplicationsPage = async (pageIdx: number, isReset = false) => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const from = pageIdx * TEAM_PAGE_SIZE;
       const to = from + TEAM_PAGE_SIZE - 1;
 
@@ -612,7 +613,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   // Sync Team Status based on player applications status
   const syncTeamStatusFromPlayers = async (teamId: any, teamName: string) => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('applications').select('id, status, comment, team_id, team_name');
       if (teamId) {
         query = query.or(`team_id.eq.${teamId},team_name.eq.${teamName}`);
@@ -703,33 +704,45 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
     (async () => {
       try {
-        const dbClient = supabaseAdmin || supabase;
-        await dbClient
-          .from('applications')
-          .update({ status: newStatus })
-          .eq('id', item.id);
-
         if (newStatus === 'approved') {
-          const playerName =
-            item.full_name ||
-            `${item.first_name || ''} ${item.last_name || ''}`.trim() ||
-            item.name ||
-            'O\'yinchi';
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc('approve_player_application', {
+            p_application_id: Number(item.id),
+          });
 
-          await dbClient.from('players').upsert([
-            {
-              name: playerName,
-              first_name: item.first_name || '',
-              last_name: item.last_name || '',
-              middle_name: item.middle_name || '',
-              phone: item.phone || '',
-              passport_id: item.passport_id || item.pinfl || '',
-              birth_date: item.birth_date || null,
-              avatar_url: item.photo_url || item.avatar_url || null,
-              status: 'approved',
-              organization_id: orgId || item.organization_id || 1,
-            },
-          ]);
+          if (rpcErr || !rpcRes?.success) {
+            // Fallback for direct update if RPC is pending migration
+            await supabase.from('applications').update({ status: 'approved' }).eq('id', item.id);
+            const playerName =
+              item.full_name ||
+              `${item.first_name || ''} ${item.last_name || ''}`.trim() ||
+              item.name ||
+              'O\'yinchi';
+
+            await supabase.from('players').upsert([
+              {
+                name: playerName,
+                first_name: item.first_name || '',
+                last_name: item.last_name || '',
+                middle_name: item.middle_name || '',
+                phone: item.phone || '',
+                passport_id: item.passport_id || item.pinfl || '',
+                birth_date: item.birth_date || null,
+                avatar_url: item.photo_url || item.avatar_url || null,
+                status: 'approved',
+                organization_id: orgId || item.organization_id || 1,
+              },
+            ]);
+          }
+        } else if (newStatus === 'rejected') {
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc('reject_player_application', {
+            p_application_id: Number(item.id),
+          });
+
+          if (rpcErr || !rpcRes?.success) {
+            await supabase.from('applications').update({ status: 'rejected' }).eq('id', item.id);
+          }
+        } else {
+          await supabase.from('applications').update({ status: newStatus }).eq('id', item.id);
         }
 
         if (item.team_id || item.team_name || item.resolvedTeamName) {
@@ -771,7 +784,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
     (async () => {
       try {
-        const dbClient = supabaseAdmin || supabase;
+        const dbClient = supabase;
         await dbClient.from('teams').update({ status: 'approved' }).eq('id', item.id);
         await dbClient
           .from('applications')
@@ -803,7 +816,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
     (async () => {
       try {
-        const dbClient = supabaseAdmin || supabase;
+        const dbClient = supabase;
         await dbClient.from('teams').update({ status: 'rejected' }).eq('id', item.id);
         await dbClient
           .from('applications')
@@ -831,7 +844,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           style: 'destructive',
           onPress: async () => {
             try {
-              const dbClient = supabaseAdmin || supabase;
+              const dbClient = supabase;
               if (isPlayer) {
                 setPlayerApps((prev) => prev.filter((p) => p.id !== item.id));
                 await dbClient.from('applications').delete().eq('id', item.id);

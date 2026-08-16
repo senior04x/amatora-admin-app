@@ -1,7 +1,7 @@
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
 export interface LocationLogPayload {
   organizationId: number;
@@ -12,7 +12,7 @@ export interface LocationLogPayload {
 
 export const logUserLoginWithLocation = async (payload: LocationLogPayload) => {
   try {
-    const dbClient = supabaseAdmin || supabase;
+    const dbClient = supabase;
     let latitude: number | null = null;
     let longitude: number | null = null;
     let locationAddress: string = "Joylashuv aniqlanmadi";

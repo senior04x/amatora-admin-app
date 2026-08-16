@@ -14,7 +14,8 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import * as Crypto from 'expo-crypto';
+import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 
 interface Props {
@@ -126,7 +127,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   const [eventMinute, setEventMinute] = useState<string>('1');
   const [savingEvent, setSavingEvent] = useState(false);
 
-  const dbClient = supabaseAdmin || supabase;
+  const dbClient = supabase;
 
   // Dynamic Match Duration Calculation (League duration from DB / Settings or default 90 mins)
   const matchDurationMins = Number(match?.match_duration || leagueData?.match_duration || 90);
@@ -221,16 +222,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     if (newStatus) {
       const dbStatus = mapStatusToDB(newStatus);
       try {
-        let { data: updatedRows } = await supabaseAdmin.from('matches').update({ status: dbStatus }).eq('id', matchId).select();
+        let { data: updatedRows } = await supabase.from('matches').update({ status: dbStatus }).eq('id', matchId).select();
         if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-          const res = await supabaseAdmin.from('matches').update({ status: dbStatus }).eq('id', Number(matchId)).select();
-          updatedRows = res.data;
-        }
-        if (!updatedRows || updatedRows.length === 0) {
-          let res = await supabase.from('matches').update({ status: dbStatus }).eq('id', matchId).select();
-          if ((!res.data || res.data.length === 0) && !isNaN(Number(matchId))) {
-            await supabase.from('matches').update({ status: dbStatus }).eq('id', Number(matchId)).select();
-          }
+          await supabase.from('matches').update({ status: dbStatus }).eq('id', Number(matchId)).select();
         }
       } catch (e) {
         console.error('Match status DB update error:', e);
@@ -462,9 +456,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }));
 
     try {
-      let { data: updatedRows } = await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId).select();
+      let { data: updatedRows } = await supabase.from('matches').update(updatePayload).eq('id', matchId).select();
       if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-        await supabaseAdmin.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
+        await supabase.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
       }
     } catch (e) {}
   };
@@ -481,9 +475,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
 
     const updatePayload = isHome ? { home_penalty_score: newPen } : { away_penalty_score: newPen };
     try {
-      let { data: updatedRows } = await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId).select();
+      let { data: updatedRows } = await supabase.from('matches').update(updatePayload).eq('id', matchId).select();
       if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-        await supabaseAdmin.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
+        await supabase.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
       }
     } catch (e) {}
   };
@@ -588,7 +582,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     setShowEventModal(true);
   };
 
-  // Save Event
+  // Save Event with UUID Idempotency and Atomic RPC
   const handleSaveEvent = async () => {
     if (!selectedTeamId || !selectedPlayerId || !eventMinute || savingEvent) {
       Alert.alert("Xatolik", "Iltimos jamoa, o'yinchi va minutni to'liq kiriting");
@@ -598,51 +592,79 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     setSavingEvent(true);
     try {
       const minVal = parseInt(eventMinute, 10) || getCurrentMinute();
+      const eventUuid = Crypto.randomUUID();
 
-      const { data: inserted, error } = await dbClient
-        .from('match_events')
-        .insert([
-          {
-            match_id: matchId,
-            team_id: selectedTeamId,
-            player_id: selectedPlayerId,
-            event_type: eventType,
-            minute: minVal,
-          },
-        ])
-        .select();
+      // 1. Try atomic & idempotent PostgreSQL RPC first
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('record_match_event', {
+        p_event_uuid: eventUuid,
+        p_match_id: Number(matchId),
+        p_team_id: Number(selectedTeamId),
+        p_player_id: Number(selectedPlayerId),
+        p_event_type: eventType,
+        p_minute: minVal,
+        p_sub_in_player_id: eventType === 'substitution' && selectedSubInPlayerId ? Number(selectedSubInPlayerId) : null,
+      });
 
-      if (error) throw error;
+      if (!rpcErr && rpcRes) {
+        if (!rpcRes.success) {
+          Alert.alert("Xatolik", rpcRes.message || "Voqeani saqlashda xatolik");
+          return;
+        }
 
-      // If substitution, record sub-in event if subInPlayerId selected
-      if (eventType === 'substitution' && selectedSubInPlayerId) {
-        await dbClient.from('match_events').insert([
-          {
-            match_id: matchId,
-            team_id: selectedTeamId,
-            player_id: selectedSubInPlayerId,
-            event_type: 'substitution_in',
-            minute: minVal,
-          },
-        ]);
-      }
+        if (eventType === 'goal' && rpcRes.home_score !== undefined && rpcRes.away_score !== undefined) {
+          setMatch((prev: any) => ({
+            ...prev,
+            home_score: rpcRes.home_score,
+            away_score: rpcRes.away_score,
+          }));
+        }
+      } else {
+        // Fallback for direct insert with event_uuid
+        const insertPayload: any = {
+          event_uuid: eventUuid,
+          match_id: matchId,
+          team_id: selectedTeamId,
+          player_id: selectedPlayerId,
+          event_type: eventType,
+          minute: minVal,
+        };
 
-      // If goal, auto increment score
-      if (eventType === 'goal') {
-        const isHome = selectedTeamId === match.home_team_id;
-        const newHomeScore = (match.home_score || 0) + (isHome ? 1 : 0);
-        const newAwayScore = (match.away_score || 0) + (isHome ? 0 : 1);
+        const { error: insErr } = await supabase.from('match_events').insert([insertPayload]);
+        if (insErr) {
+          delete insertPayload.event_uuid;
+          const { error: retryErr } = await supabase.from('match_events').insert([insertPayload]);
+          if (retryErr) throw retryErr;
+        }
 
-        await dbClient
-          .from('matches')
-          .update({ home_score: newHomeScore, away_score: newAwayScore })
-          .eq('id', matchId);
+        if (eventType === 'substitution' && selectedSubInPlayerId) {
+          await supabase.from('match_events').insert([
+            {
+              match_id: matchId,
+              team_id: selectedTeamId,
+              player_id: selectedSubInPlayerId,
+              event_type: 'substitution_in',
+              minute: minVal,
+            },
+          ]);
+        }
 
-        setMatch((prev: any) => ({ ...prev, home_score: newHomeScore, away_score: newAwayScore }));
+        if (eventType === 'goal') {
+          const isHome = selectedTeamId === match.home_team_id;
+          const newHomeScore = (match.home_score || 0) + (isHome ? 1 : 0);
+          const newAwayScore = (match.away_score || 0) + (isHome ? 0 : 1);
+
+          await supabase
+            .from('matches')
+            .update({ home_score: newHomeScore, away_score: newAwayScore })
+            .eq('id', matchId);
+
+          setMatch((prev: any) => ({ ...prev, home_score: newHomeScore, away_score: newAwayScore }));
+        }
       }
 
       await fetchEvents();
       setShowEventModal(false);
+      showToast(eventType === 'goal' ? "Gol saqlandi ⚽" : "Voqea qayd etildi ✅");
     } catch (err: any) {
       Alert.alert("Xatolik", err.message || "Voqeani saqlashda xatolik");
     } finally {
@@ -650,7 +672,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }
   };
 
-  // Delete Event
+  // Delete Event with Atomic Score Decrement RPC
   const handleDeleteEvent = (event: any) => {
     Alert.alert("Voqeani o'chirish", "Ushbu voqeani o'chirishni tasdiqlaysizmi?", [
       { text: "Bekor qilish", style: "cancel" },
@@ -660,21 +682,38 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
         onPress: async () => {
           setEvents((prev) => prev.filter((e) => e.id !== event.id));
           try {
-            await dbClient.from('match_events').delete().eq('id', event.id);
-            if (event.event_type === 'goal') {
-              const isHome = event.team_id === match.home_team_id;
-              const newHomeScore = Math.max(0, (match.home_score || 0) - (isHome ? 1 : 0));
-              const newAwayScore = Math.max(0, (match.away_score || 0) - (isHome ? 0 : 1));
+            const { data: rpcRes, error: rpcErr } = await supabase.rpc('delete_match_event', {
+              p_event_id: Number(event.id),
+            });
 
-              await dbClient
-                .from('matches')
-                .update({ home_score: newHomeScore, away_score: newAwayScore })
-                .eq('id', matchId);
+            if (!rpcErr && rpcRes?.success) {
+              if (rpcRes.home_score !== undefined && rpcRes.away_score !== undefined) {
+                setMatch((prev: any) => ({
+                  ...prev,
+                  home_score: rpcRes.home_score,
+                  away_score: rpcRes.away_score,
+                }));
+              }
+            } else {
+              await supabase.from('match_events').delete().eq('id', event.id);
+              if (event.event_type === 'goal' || event.type === 'goal') {
+                const isHome = event.team_id === match.home_team_id;
+                const newHomeScore = Math.max(0, (match.home_score || 0) - (isHome ? 1 : 0));
+                const newAwayScore = Math.max(0, (match.away_score || 0) - (isHome ? 0 : 1));
 
-              setMatch((prev: any) => ({ ...prev, home_score: newHomeScore, away_score: newAwayScore }));
+                await supabase
+                  .from('matches')
+                  .update({ home_score: newHomeScore, away_score: newAwayScore })
+                  .eq('id', matchId);
+
+                setMatch((prev: any) => ({ ...prev, home_score: newHomeScore, away_score: newAwayScore }));
+              }
             }
             fetchEvents();
-          } catch (e) {}
+            showToast("Voqea o'chirildi 🗑️");
+          } catch (e) {
+            console.error('Delete event error:', e);
+          }
         },
       },
     ]);

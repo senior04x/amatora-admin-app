@@ -18,14 +18,17 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
-  }),
+    shouldShowBanner: true,
+    shouldShowList: true,
+  } as any),
 });
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { appQueryClient } from './src/api/queryClient';
 import { OrgProvider, useOrg } from './src/context/OrgContext';
 import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -48,8 +51,7 @@ import { SponsorsScreen } from './src/screens/SponsorsScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
 import { OrganizersScreen } from './src/screens/OrganizersScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
-
-const queryClient = new QueryClient();
+import { hasSecurePin } from './src/utils/securePin';
 
 const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React.ReactNode }) => {
   const [hasRendered, setHasRendered] = useState(isActive);
@@ -409,8 +411,8 @@ function App() {
 
   const checkPinStatus = async (isFreshLogin: boolean = false) => {
     try {
-      const storedPin = await AsyncStorage.getItem('@amatora_pin_code');
-      if (storedPin) {
+      const isPinSet = await hasSecurePin();
+      if (isPinSet) {
         setPinState('locked');
       } else {
         const skipped = await AsyncStorage.getItem('@amatora_pin_skipped');
@@ -430,7 +432,7 @@ function App() {
   };
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={appQueryClient}>
       <View style={styles.container}>
         <StatusBar style="light" />
         {/* App-wide background image for all screens including Login/Pin */}

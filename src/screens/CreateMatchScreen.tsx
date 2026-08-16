@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { adminNotificationService } from '../utils/adminNotificationService';
 
@@ -156,7 +156,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
     setLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       const activeOrgId = Number(orgId) || 1;
 
       // Conflict Guard: check if another match is scheduled on the exact same field, date & time

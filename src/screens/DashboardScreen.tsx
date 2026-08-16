@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, 
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { Image } from 'react-native';
 import { MatchControlScreen } from './MatchControlScreen';
 
@@ -177,7 +177,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
   const fetchUserMatches = async () => {
     setMatchesLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient
         .from('matches')
         .select(`

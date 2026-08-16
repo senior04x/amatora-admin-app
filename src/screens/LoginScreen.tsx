@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { logUserLoginWithLocation } from '../utils/locationLogger';
 
 interface LoginScreenProps {
@@ -50,7 +50,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     setLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let loginEmail = '';
 
       if (loginMode === 'email') {

@@ -17,7 +17,8 @@ const FaceIdIcon = ({ size = 28, color = '#FFFFFF' }) => (
   <Ionicons name="scan-outline" size={size} color={color} />
 );
 import * as LocalAuthentication from 'expo-local-authentication';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
+import { getSecurePin, saveSecurePin, deleteSecurePin } from '../utils/securePin';
 
 interface PinScreenProps {
   onSuccess: () => void;
@@ -28,7 +29,6 @@ interface PinScreenProps {
 type PinMode = 'checking' | 'create' | 'confirm' | 'verify';
 
 const PIN_LENGTH = 4;
-const PIN_KEY = '@amatora_pin_code';
 
 export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action = 'login' }) => {
   const [mode, setMode] = useState<PinMode>('checking');
@@ -43,7 +43,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
 
   const checkExistingPin = async () => {
     try {
-      const storedPin = await AsyncStorage.getItem(PIN_KEY);
+      const storedPin = await getSecurePin();
       if (storedPin) {
         setMode('verify');
         const bioEnabled = await AsyncStorage.getItem('@amatora_biometrics_enabled');
@@ -123,7 +123,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
           style: 'destructive',
           onPress: async () => {
             try {
-              await AsyncStorage.removeItem(PIN_KEY);
+              await deleteSecurePin();
               await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
               await AsyncStorage.removeItem('@amatora_pin_skipped');
               DeviceEventEmitter.emit('app_pin_changed');
@@ -150,9 +150,9 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
       setMode('confirm');
     } else if (mode === 'confirm') {
       if (enteredPin === tempPin) {
-        // Success: save PIN locally on device and remove skipped flag
+        // Success: save PIN in hardware-encrypted secure store
         try {
-          await AsyncStorage.setItem(PIN_KEY, enteredPin);
+          await saveSecurePin(enteredPin);
           await AsyncStorage.removeItem('@amatora_pin_skipped');
 
           // Prompt for Biometrics enrollment if device supports hardware
@@ -198,7 +198,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
       }
     } else if (mode === 'verify') {
       try {
-        const storedPin = await AsyncStorage.getItem(PIN_KEY);
+        const storedPin = await getSecurePin();
         if (enteredPin === storedPin) {
           setErrorMsg('');
           setPin('');

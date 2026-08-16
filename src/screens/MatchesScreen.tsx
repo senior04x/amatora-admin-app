@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { SwipeRow } from '../components/SwipeRow';
 import { MatchControlScreen } from './MatchControlScreen';
@@ -203,7 +203,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
   const fetchMatches = async () => {
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient
         .from('matches')
         .select(`
@@ -350,7 +350,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     );
 
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let { error } = await dbClient.from('matches').update(fullUpdatePayload).eq('id', editingMatch.id);
 
       if (error) {
@@ -397,7 +397,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     setMatches((prev) => prev.filter((m) => m.id !== targetId));
 
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       // 1. Delete associated live timer sponsor row
       await dbClient.from('sponsors').delete().eq('name', `MATCH_TIMER_${targetId}`);

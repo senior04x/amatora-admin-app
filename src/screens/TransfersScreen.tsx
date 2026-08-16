@@ -18,7 +18,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 
 // Skeleton Loader Pulse Component
@@ -420,7 +420,7 @@ export const TransfersScreen: React.FC = () => {
     setRefreshing(false);
   }, [orgId]);
 
-  const dbClient = supabaseAdmin || supabase;
+  const dbClient = supabase;
 
   const handleQuickStatusChange = async (newStatus: string) => {
     if (!statusModalItem) return;
@@ -587,45 +587,47 @@ export const TransfersScreen: React.FC = () => {
     }
   };
 
-  // 4. Update Transfer Status & Player Team Movements
+  // 4. Status Action Handler (Approve / Reject / Pending with Atomic RPC)
   const handleUpdateTransferStatus = async (transfer: any, newStatus: string) => {
     try {
       const oldStatus = transfer.status;
       if (oldStatus === newStatus) return;
 
-      const { error: transferError } = await dbClient
-        .from('transfers')
-        .update({ status: newStatus })
-        .eq('id', transfer.id);
+      if (newStatus === 'approved') {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('approve_transfer_request', {
+          p_transfer_id: Number(transfer.id),
+        });
 
-      if (transferError) throw transferError;
+        if (rpcErr || !rpcRes?.success) {
+          const { error: transferError } = await dbClient
+            .from('transfers')
+            .update({ status: 'approved' })
+            .eq('id', transfer.id);
+          if (transferError) throw transferError;
 
-      if (transfer.player_id) {
-        if (newStatus === 'approved' && transfer.new_team_id) {
-          await dbClient
-            .from('applications')
-            .update({ team_id: transfer.new_team_id })
-            .eq('id', transfer.player_id);
-
-          await dbClient
-            .from('players')
-            .update({ team_id: transfer.new_team_id })
-            .eq('id', transfer.player_id);
-        } else if (
-          oldStatus === 'approved' &&
-          (newStatus === 'pending' || newStatus === 'rejected') &&
-          transfer.old_team_id
-        ) {
-          await dbClient
-            .from('applications')
-            .update({ team_id: transfer.old_team_id })
-            .eq('id', transfer.player_id);
-
-          await dbClient
-            .from('players')
-            .update({ team_id: transfer.old_team_id })
-            .eq('id', transfer.player_id);
+          if (transfer.player_id && transfer.new_team_id) {
+            await dbClient.from('applications').update({ team_id: transfer.new_team_id }).eq('id', transfer.player_id);
+            await dbClient.from('players').update({ team_id: transfer.new_team_id }).eq('id', transfer.player_id);
+          }
         }
+      } else if (newStatus === 'rejected') {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('reject_transfer_request', {
+          p_transfer_id: Number(transfer.id),
+        });
+
+        if (rpcErr || !rpcRes?.success) {
+          const { error: transferError } = await dbClient
+            .from('transfers')
+            .update({ status: 'rejected' })
+            .eq('id', transfer.id);
+          if (transferError) throw transferError;
+        }
+      } else {
+        const { error: transferError } = await dbClient
+          .from('transfers')
+          .update({ status: newStatus })
+          .eq('id', transfer.id);
+        if (transferError) throw transferError;
       }
 
       // Trigger push notification to player and involved teams

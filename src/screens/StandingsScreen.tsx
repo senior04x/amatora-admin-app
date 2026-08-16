@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 
 interface TeamStanding {
@@ -52,7 +52,7 @@ export const StandingsScreen: React.FC = () => {
   const fetchLeagues = async () => {
     setLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('name');
       if (orgId) {
         query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
@@ -85,7 +85,7 @@ export const StandingsScreen: React.FC = () => {
   const calculateStandings = async (leagueName: string, roundFilter: string) => {
     setLoading(true);
     try {
-      const dbClient = supabaseAdmin || supabase;
+      const dbClient = supabase;
 
       // 1. Fetch Teams
       let teamsQuery = dbClient.from('teams').select('*');
@@ -239,7 +239,7 @@ export const StandingsScreen: React.FC = () => {
       });
 
       // Fetch Standings Overrides from sponsors table
-      const dbClientFetch = supabaseAdmin || supabase;
+      const dbClientFetch = supabase;
       const { data: sponsorData } = await dbClientFetch
         .from('sponsors')
         .select('*');
