@@ -20,11 +20,23 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 
 const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
+  // 1. Direct fetch arrayBuffer (Fastest & SDK 54 recommended)
+  try {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const buffer = await new Response(blob).arrayBuffer();
+    if (buffer && buffer.byteLength > 0) {
+      return buffer;
+    }
+  } catch (e) {
+    // Proceed to fallback
+  }
+
+  // 2. XHR Fallback for local files on Android/iOS
   try {
     return await new Promise<ArrayBuffer>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -43,30 +55,34 @@ const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
       xhr.send(null);
     });
   } catch (xhrErr) {
-    console.warn('XHR ArrayBuffer read failed, using FileSystem Base64 fallback...', xhrErr);
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: 'base64' as any,
-    });
-    // Native base64 decoding helper
-    const decodeBase64 = (b64: string): Uint8Array => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-      let str = b64.replace(/=+$/, '');
-      let output = new Uint8Array((str.length * 3) >> 2);
-      let p = 0;
-      for (let i = 0; i < str.length; i += 4) {
-        let n =
-          (chars.indexOf(str[i]) << 18) |
-          (chars.indexOf(str[i + 1]) << 12) |
-          ((chars.indexOf(str[i + 2]) || 0) << 6) |
-          (chars.indexOf(str[i + 3]) || 0);
-        output[p++] = (n >> 16) & 0xff;
-        if (str[i + 2] !== '=' && str[i + 2] !== undefined) output[p++] = (n >> 8) & 0xff;
-        if (str[i + 3] !== '=' && str[i + 3] !== undefined) output[p++] = n & 0xff;
-      }
-      return output;
-    };
-    const uint8Arr = decodeBase64(base64);
-    return uint8Arr.buffer as ArrayBuffer;
+    // 3. expo-file-system/legacy fallback
+    try {
+      const FileSystemLegacy = require('expo-file-system/legacy');
+      const base64 = await FileSystemLegacy.readAsStringAsync(uri, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
+      });
+      const decodeBase64 = (b64: string): Uint8Array => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        let str = b64.replace(/=+$/, '');
+        let output = new Uint8Array((str.length * 3) >> 2);
+        let p = 0;
+        for (let i = 0; i < str.length; i += 4) {
+          let n =
+            (chars.indexOf(str[i]) << 18) |
+            (chars.indexOf(str[i + 1]) << 12) |
+            ((chars.indexOf(str[i + 2]) || 0) << 6) |
+            (chars.indexOf(str[i + 3]) || 0);
+          output[p++] = (n >> 16) & 0xff;
+          if (str[i + 2] !== '=' && str[i + 2] !== undefined) output[p++] = (n >> 8) & 0xff;
+          if (str[i + 3] !== '=' && str[i + 3] !== undefined) output[p++] = n & 0xff;
+        }
+        return output;
+      };
+      const uint8Arr = decodeBase64(base64);
+      return uint8Arr.buffer as ArrayBuffer;
+    } catch (legacyErr) {
+      throw new Error(`Faylni o'qishda xatolik yuz berdi`);
+    }
   }
 };
 
