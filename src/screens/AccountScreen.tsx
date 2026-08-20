@@ -405,19 +405,68 @@ export const AccountScreen: React.FC<{
     }
   };
 
-  // 1-to-1 SuperAdmin Organization Save Handler
+  // Save Profile / Organization Info Handler
   const handleSaveAdminInfo = async () => {
     if (!editName.trim()) {
-      Alert.alert('Xatolik', 'Iltimos, tashkilot nomini kiriting!');
+      Alert.alert('Xatolik', userRole === 'user' ? 'Iltimos, ismingizni kiriting!' : 'Iltimos, tashkilot nomini kiriting!');
       return;
     }
 
-    // Trigger progressive crescendo iOS vibration while gradient expands & covers screen
     triggerIosCrescendoHaptic();
 
+    // 1. ORGANIZATOR (user role) - ONLY UPDATE organization_users TABLE
+    if (userRole === 'user') {
+      updateCurrentUserLocally({
+        full_name: editName.trim(),
+        email: editEmail.trim(),
+      });
+
+      setIsEditingInfo(false);
+      setIsSavingInfo(false);
+
+      (async () => {
+        try {
+          const dbClient = supabase;
+          const targetOrgId = orgId || currentOrg?.id || 1;
+
+          const userUpdatePayload: any = {
+            full_name: editName.trim(),
+            email: editEmail.trim(),
+          };
+          if (editPassword.trim()) {
+            userUpdatePayload.password = editPassword.trim();
+          }
+
+          if (currentUser?.id) {
+            await dbClient
+              .from('organization_users')
+              .update(userUpdatePayload)
+              .eq('id', currentUser.id);
+          } else {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const sessionEmail = sessionData?.session?.user?.email;
+            if (sessionEmail) {
+              await dbClient
+                .from('organization_users')
+                .update(userUpdatePayload)
+                .eq('organization_id', targetOrgId)
+                .ilike('email', sessionEmail);
+            }
+          }
+
+          refreshCurrentUser();
+          showToast({ message: "Profil ma'lumotlaringiz muvaffaqiyatli saqlandi! ✅", type: "success" });
+        } catch (err: any) {
+          console.error('Save organizer profile error:', err);
+          showToast({ message: "Saqlashda xatolik yuz berdi", type: "error" });
+        }
+      })();
+      return;
+    }
+
+    // 2. BOSH ADMIN (org_admin / superadmin) - UPDATE organizations AND admin_users TABLES
     const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
 
-    // 1. INSTANTLY update RAM state so gradient background changes immediately on device!
     updateOrgLocally({
       name: editName.trim(),
       brand_colors: editBrandColors,
@@ -425,20 +474,17 @@ export const AccountScreen: React.FC<{
       contact_phone: fullPhone,
     });
 
-    // 2. INSTANTLY close edit mode — no waiting
     setIsEditingInfo(false);
     setIsSavingInfo(false);
 
-    // 3. Save to database IN THE BACKGROUND (non-blocking)
-    const saveToDB = async () => {
+    (async () => {
       try {
         const dbClient = supabase;
         const targetOrgId = orgId || currentOrg?.id || 1;
 
-        const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
         const mainUpdatePayload: any = {
           name: editName.trim(),
-          slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\\s+/g, '-'),
+          slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
           brand_colors: editBrandColors,
         };
         if (editEmail.trim()) {
@@ -448,7 +494,6 @@ export const AccountScreen: React.FC<{
           mainUpdatePayload.contact_phone = fullPhone;
         }
 
-        // Update organizations table
         const { error: primaryErr } = await dbClient
           .from('organizations')
           .update(mainUpdatePayload)
@@ -460,57 +505,35 @@ export const AccountScreen: React.FC<{
             .from('organizations')
             .update({
               name: editName.trim(),
-              slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\\s+/g, '-'),
+              slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
               brand_colors: editBrandColors,
             })
             .eq('id', targetOrgId);
         }
 
-        // Sync admin_users or organization_users
-        try {
-          if (userRole === 'user') {
-            const { data: userData } = await supabase.auth.getUser();
-            const currentEmail = userData?.user?.email || editEmail.trim();
-            await dbClient
-              .from('organization_users')
-              .update({
-                email: editEmail.trim(),
-                password: editPassword.trim(),
-                full_name: editName.trim(),
-              })
-              .eq('organization_id', targetOrgId)
-              .ilike('email', currentEmail);
-          } else {
-            const { data: adminUser } = await dbClient
-              .from('admin_users')
-              .select('id')
-              .eq('organization_id', targetOrgId)
-              .eq('role', 'org_admin')
-              .maybeSingle();
+        const { data: adminUser } = await dbClient
+          .from('admin_users')
+          .select('id')
+          .eq('organization_id', targetOrgId)
+          .eq('role', 'org_admin')
+          .maybeSingle();
 
-            if (adminUser) {
-              const uPayload: any = {};
-              if (editEmail.trim()) uPayload.email = editEmail.trim();
-              if (editPassword.trim()) uPayload.password = editPassword.trim();
-              if (fullPhone) uPayload.phone_number = fullPhone;
-              if (Object.keys(uPayload).length > 0) {
-                await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
-              }
-            }
+        if (adminUser) {
+          const uPayload: any = {};
+          if (editEmail.trim()) uPayload.email = editEmail.trim();
+          if (editPassword.trim()) uPayload.password = editPassword.trim();
+          if (fullPhone) uPayload.phone_number = fullPhone;
+          if (Object.keys(uPayload).length > 0) {
+            await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
           }
-        } catch (adminErr) {
-          console.warn('User credential sync note:', adminErr);
         }
 
-        // Refresh org context silently in background
         refreshOrg();
+        showToast({ message: "Tashkilot ma'lumotlari muvaffaqiyatli saqlandi! ✅", type: "success" });
       } catch (err: any) {
         console.error('Background save error:', err);
       }
-    };
-
-    // Fire and forget — don't await
-    saveToDB();
+    })();
   };
 
   // Handle Logout
