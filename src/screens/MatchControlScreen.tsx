@@ -34,34 +34,42 @@ const EVENT_TYPES = [
   { id: 'substitution', icon: 'swap-horizontal-outline', label: 'Almashtirish', color: '#A855F7' },
 ];
 
+// High-speed In-Memory Cache for Match Details & Rosters (Instant 0ms screen re-entry)
+const MATCH_CONTROL_CACHE = new Map<string, any>();
+
 export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack }) => {
   const { orgId } = useOrg();
-  const [loading, setLoading] = useState(!initialMatch);
+  const cachedData = MATCH_CONTROL_CACHE.get(String(matchId));
 
   // Match, League & Team Data (Immediate initial render from cache - 0ms delay!)
-  const initialLeagueName = initialMatch?.league ? String(initialMatch.league).trim() : '';
+  const seedMatch = cachedData?.match || initialMatch;
+  const [loading, setLoading] = useState(!seedMatch);
+
+  const initialLeagueName = seedMatch?.league ? String(seedMatch.league).trim() : '';
   const initialMatchDur = initialLeagueName.includes('7x7') ? 50 : 60;
   const initialHalfDur = Math.round(initialMatchDur / 2);
 
   const [match, setMatch] = useState<any>(
-    initialMatch
-      ? { ...initialMatch, match_duration: initialMatch.match_duration || initialMatchDur, half_duration: initialMatch.half_duration || initialHalfDur }
+    seedMatch
+      ? { ...seedMatch, match_duration: seedMatch.match_duration || initialMatchDur, half_duration: seedMatch.half_duration || initialHalfDur }
       : null
   );
-  const [leagueData, setLeagueData] = useState<any>({
-    match_duration: initialMatchDur,
-    half_duration: initialHalfDur,
-  });
-  const [homeTeam, setHomeTeam] = useState<any>(initialMatch?.home_team || null);
-  const [awayTeam, setAwayTeam] = useState<any>(initialMatch?.away_team || null);
-  const [homePlayers, setHomePlayers] = useState<any[]>([]);
-  const [awayPlayers, setAwayPlayers] = useState<any[]>([]);
-  const [events, setEvents] = useState<any[]>([]);
+  const [leagueData, setLeagueData] = useState<any>(
+    cachedData?.leagueData || {
+      match_duration: initialMatchDur,
+      half_duration: initialHalfDur,
+    }
+  );
+  const [homeTeam, setHomeTeam] = useState<any>(cachedData?.homeTeam || seedMatch?.home_team || null);
+  const [awayTeam, setAwayTeam] = useState<any>(cachedData?.awayTeam || seedMatch?.away_team || null);
+  const [homePlayers, setHomePlayers] = useState<any[]>(cachedData?.homePlayers || []);
+  const [awayPlayers, setAwayPlayers] = useState<any[]>(cachedData?.awayPlayers || []);
+  const [events, setEvents] = useState<any[]>(cachedData?.events || []);
 
   // Penalty Shootout State
   const [showPenaltyControls, setShowPenaltyControls] = useState(false);
-  const [homePenalties, setHomePenalties] = useState(0);
-  const [awayPenalties, setAwayPenalties] = useState(0);
+  const [homePenalties, setHomePenalties] = useState(cachedData?.homePenalties || 0);
+  const [awayPenalties, setAwayPenalties] = useState(cachedData?.awayPenalties || 0);
 
   // Animated Toast popup state (1:1 matching user screenshot UI)
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -531,16 +539,38 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           dbClient.from('match_events').select('*, player:player_id(first_name, last_name, player_number), team:team_id(name)').eq('match_id', matchId).order('minute', { ascending: true })
         ]);
 
+        let ht = null;
+        let at = null;
         if (teamsRes.data) {
-          const ht = teamsRes.data.find((t: any) => t.id === matchData.home_team_id);
-          const at = teamsRes.data.find((t: any) => t.id === matchData.away_team_id);
+          ht = teamsRes.data.find((t: any) => t.id === matchData.home_team_id);
+          at = teamsRes.data.find((t: any) => t.id === matchData.away_team_id);
           if (ht) setHomeTeam(ht);
           if (at) setAwayTeam(at);
         }
 
-        setHomePlayers(((homeAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived));
-        setAwayPlayers(((awayAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived));
-        setEvents((eventsRes.data as any[]) || []);
+        const finalHomePlayers = ((homeAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived);
+        const finalAwayPlayers = ((awayAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived);
+        const finalEvents = (eventsRes.data as any[]) || [];
+
+        setHomePlayers(finalHomePlayers);
+        setAwayPlayers(finalAwayPlayers);
+        setEvents(finalEvents);
+
+        // Update high-speed memory cache for instant future loads
+        MATCH_CONTROL_CACHE.set(String(matchId), {
+          match: mergedMatchData,
+          leagueData: {
+            match_duration: finalMatchDuration,
+            half_duration: finalHalfDuration,
+          },
+          homeTeam: ht || null,
+          awayTeam: at || null,
+          homePlayers: finalHomePlayers,
+          awayPlayers: finalAwayPlayers,
+          events: finalEvents,
+          homePenalties: matchData.home_penalty_score || 0,
+          awayPenalties: matchData.away_penalty_score || 0,
+        });
       }
     } catch (e) {
       console.error('Background fetchMatchControlData error:', e);
