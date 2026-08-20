@@ -33,6 +33,11 @@ interface OrgContextType {
   collabLeagueIds: number[];
   collabLeagueNames: string[];
   showToast: (opts: ToastOptions) => void;
+  unreadNotificationsCount: number;
+  readNotificationIds: string[];
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: (allIds: string[]) => Promise<void>;
+  refreshNotificationsCount: () => Promise<void>;
 }
 
 const OrgContext = createContext<OrgContextType | null>(null);
@@ -53,6 +58,8 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(true);
   const [collabLeagueIds, setCollabLeagueIds] = useState<number[]>([]);
   const [collabLeagueNames, setCollabLeagueNames] = useState<string[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
 
   // Toast state & animation
   const [toast, setToast] = useState<{
@@ -348,6 +355,98 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [orgId]);
 
+  // Load cached read notification IDs on mount & listen to changes
+  useEffect(() => {
+    const initReadNotifications = async () => {
+      try {
+        const raw = await AsyncStorage.getItem('@amatora_read_notif_ids');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setReadNotificationIds(parsed);
+            fetchLiveUnreadCount(parsed);
+            return;
+          }
+        }
+      } catch (e) {}
+      fetchLiveUnreadCount([]);
+    };
+
+    initReadNotifications();
+
+    const targetOrgId = currentOrg?.id || orgId || 1;
+    const channel = supabase
+      .channel(`org_notif_channel_${targetOrgId}_${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        fetchLiveUnreadCount();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+        fetchLiveUnreadCount();
+      })
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch (e) {}
+    };
+  }, [orgId, currentOrg?.id]);
+
+  const fetchLiveUnreadCount = async (knownReadIds?: string[]) => {
+    try {
+      const dbClient = supabase;
+      const targetOrgId = currentOrg?.id || orgId || 1;
+      const readList = knownReadIds || readNotificationIds;
+
+      let appQuery = dbClient
+        .from('applications')
+        .select('id')
+        .or('status.eq.pending,status.eq.kutilmoqda,status.eq.yangi,status.is.null');
+
+      if (targetOrgId) {
+        appQuery = appQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+      }
+
+      const { data: apps } = await appQuery;
+
+      let teamQuery = dbClient
+        .from('teams')
+        .select('id')
+        .in('status', ['pending', 'kutilmoqda']);
+
+      if (targetOrgId) {
+        teamQuery = teamQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+      }
+
+      const { data: teams } = await teamQuery;
+
+      const appIds = (apps || []).map((a: any) => `app_${a.id}`);
+      const teamIds = (teams || []).map((t: any) => `team_app_${t.id}`);
+      const allActiveNotifIds = [...appIds, ...teamIds];
+
+      const unread = allActiveNotifIds.filter((id) => !readList.includes(id)).length;
+      setUnreadNotificationsCount(unread);
+    } catch (e) {}
+  };
+
+  const markNotificationAsRead = async (id: string) => {
+    try {
+      const next = Array.from(new Set([...readNotificationIds, id]));
+      setReadNotificationIds(next);
+      await AsyncStorage.setItem('@amatora_read_notif_ids', JSON.stringify(next));
+      setUnreadNotificationsCount((prev) => Math.max(0, prev - 1));
+    } catch (e) {}
+  };
+
+  const markAllNotificationsAsRead = async (allIds: string[]) => {
+    try {
+      const next = Array.from(new Set([...readNotificationIds, ...allIds]));
+      setReadNotificationIds(next);
+      await AsyncStorage.setItem('@amatora_read_notif_ids', JSON.stringify(next));
+      setUnreadNotificationsCount(0);
+    } catch (e) {}
+  };
+
   const updateOrgLocally = (fields: Partial<any>) => {
     if (fields.brand_colors) {
       triggerIosCrescendoHaptic();
@@ -378,6 +477,11 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         collabLeagueIds,
         collabLeagueNames,
         showToast,
+        unreadNotificationsCount,
+        readNotificationIds,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        refreshNotificationsCount: fetchLiveUnreadCount,
       }}
     >
       {children}

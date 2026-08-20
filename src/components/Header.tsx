@@ -50,57 +50,8 @@ export const Header: React.FC<{
   onSaveOrder?: () => void;
   onNavigate?: (tab: any) => void;
 }> = ({ isEditingOrder = false, onSaveOrder, onNavigate }) => {
-  const { currentOrg, currentUser, loading, userRole, orgId } = useOrg();
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  // Realtime unread count fetch from pending applications & teams
-  useEffect(() => {
-    const fetchCount = async () => {
-      try {
-        const targetOrgId = currentOrg?.id || orgId || 1;
-        let query = supabase
-          .from('applications')
-          .select('id', { count: 'exact', head: true })
-          .or('status.eq.pending,status.eq.kutilmoqda,status.eq.yangi,status.is.null');
-
-        if (targetOrgId) {
-          query = query.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
-        }
-
-        const { count: appCount } = await query;
-
-        let tQuery = supabase
-          .from('teams')
-          .select('id', { count: 'exact', head: true })
-          .in('status', ['pending', 'kutilmoqda']);
-
-        if (targetOrgId) {
-          tQuery = tQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
-        }
-
-        const { count: teamCount } = await tQuery;
-        setUnreadCount((appCount || 0) + (teamCount || 0));
-      } catch (e) {}
-    };
-
-    fetchCount();
-
-    const channel = supabase
-      .channel(`header_notif_sub_${Date.now()}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
-        fetchCount();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        fetchCount();
-      })
-      .subscribe();
-
-    return () => {
-      try {
-        supabase.removeChannel(channel);
-      } catch (e) {}
-    };
-  }, [currentOrg?.id, orgId]);
+  const { currentOrg, currentUser, loading, userRole, unreadNotificationsCount } = useOrg();
+  const unreadCount = unreadNotificationsCount;
 
   const getGreeting = () => {
     const hour = new Date().getHours();

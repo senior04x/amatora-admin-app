@@ -38,12 +38,21 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
   onNavigate,
   onGoBack,
 }) => {
-  const { currentOrg, orgId, userRole, isRegistrationOpen, transferWindowOpen } = useOrg();
+  const {
+    currentOrg,
+    orgId,
+    userRole,
+    isRegistrationOpen,
+    transferWindowOpen,
+    readNotificationIds,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    unreadNotificationsCount,
+  } = useOrg();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'applications' | 'transfers' | 'system'>('all');
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
 
   const fetchLiveNotifications = async () => {
     try {
@@ -81,7 +90,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
             message: `${playerName}${team} arizasi tasdiqlash uchun kutmoqda`,
             time: formatTimeAgo(app.created_at),
             createdAt: new Date(app.created_at || Date.now()).getTime(),
-            isRead: readIds.has(`app_${app.id}`),
+            isRead: readNotificationIds.includes(`app_${app.id}`),
             targetTab: 'applications',
             targetSubTab: 'players',
             rawItem: app,
@@ -112,7 +121,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
               message: `"${t.name || 'Jamoa'}" (${t.league || 'Liga'}) arizasi tasdiqlashni kutmoqda`,
               time: formatTimeAgo(t.created_at),
               createdAt: new Date(t.created_at || Date.now()).getTime(),
-              isRead: readIds.has(`team_app_${t.id}`),
+              isRead: readNotificationIds.includes(`team_app_${t.id}`),
               targetTab: 'applications',
               targetSubTab: 'teams',
               rawItem: t,
@@ -140,7 +149,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
               message: "O'yinchi transfer o'tish arizasi ko'rib chiqishni kutmoqda",
               time: formatTimeAgo(t.created_at),
               createdAt: new Date(t.created_at || Date.now()).getTime(),
-              isRead: readIds.has(`transfer_${t.id}`),
+              isRead: readNotificationIds.includes(`transfer_${t.id}`),
               targetTab: 'transfers',
               rawItem: t,
             });
@@ -157,7 +166,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
           message: "Arizalar qabuli (Ro'yxatdan o'tish) hozirda YOPILGAN holatda",
           time: 'Faol',
           createdAt: Date.now() - 1000,
-          isRead: readIds.has('sys_reg_closed'),
+          isRead: readNotificationIds.includes('sys_reg_closed'),
           targetTab: 'settings',
         });
       }
@@ -170,7 +179,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
           message: "Transfer oynasi YOPILGAN — o'yinchilar ko'chishi to'xtatilgan",
           time: 'Faol',
           createdAt: Date.now() - 2000,
-          isRead: readIds.has('sys_transfer_closed'),
+          isRead: readNotificationIds.includes('sys_transfer_closed'),
           targetTab: 'settings',
         });
       }
@@ -198,7 +207,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
               message: `${m.league || 'Uchrashuv'} (${m.location || '1-Maydon'}): ${m.home_score || 0} - ${m.away_score || 0}`,
               time: 'Jonli Efir',
               createdAt: Date.now(),
-              isRead: readIds.has(`match_live_${m.id}`),
+              isRead: readNotificationIds.includes(`match_live_${m.id}`),
               targetTab: 'matches',
             });
           });
@@ -236,7 +245,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
         supabase.removeChannel(channel);
       } catch (e) {}
     };
-  }, [currentOrg?.id, orgId, isRegistrationOpen, transferWindowOpen]);
+  }, [currentOrg?.id, orgId, isRegistrationOpen, transferWindowOpen, readNotificationIds]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -260,16 +269,16 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
     }
   };
 
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
     triggerIosCrescendoHaptic();
-    const allIds = new Set(notifications.map((n) => n.id));
-    setReadIds(allIds);
+    const allIds = notifications.map((n) => n.id);
+    await markAllNotificationsAsRead(allIds);
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
-  const handleNotificationPress = (item: AppNotification) => {
+  const handleNotificationPress = async (item: AppNotification) => {
     triggerIosCrescendoHaptic();
-    setReadIds((prev) => new Set([...prev, item.id]));
+    await markNotificationAsRead(item.id);
     setNotifications((prev) =>
       prev.map((n) => (n.id === item.id ? { ...n, isRead: true } : n))
     );
