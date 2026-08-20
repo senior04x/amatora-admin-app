@@ -734,19 +734,33 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     return rawItems
       .map((item: any) => {
         let teamObj = null;
-        if (item.team_id) teamObj = teamsMap.get(String(item.team_id));
-        if (!teamObj && item.team_name) teamObj = teamsMap.get(item.team_name.trim().toLowerCase());
+        if (item.team_id) {
+          teamObj = teamsMap.get(String(item.team_id));
+        }
+        if (!teamObj && item.team?.name) {
+          teamObj = item.team;
+        }
+        if (!teamObj && item.team_name) {
+          teamObj = teamsMap.get(String(item.team_name).trim().toLowerCase()) || teamsMap.get(String(item.team_name).trim());
+        }
+
+        let rawName = item.team_name ? String(item.team_name).trim() : '';
+        if (rawName && teamsMap.has(rawName)) {
+          rawName = teamsMap.get(rawName)?.name || rawName;
+        }
 
         const resolvedTeamName =
-          item.team_name ||
           teamObj?.name ||
-          (item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon');
+          item.team?.name ||
+          (rawName && isNaN(Number(rawName)) ? rawName : null) ||
+          (item.team_id ? (teamsMap.get(String(item.team_id))?.name || rawName || 'Yakkaxon') : (rawName || 'Yakkaxon'));
 
         const resolvedLeague =
           item.league ||
           item.league_name ||
           item.team_league ||
           teamObj?.league ||
+          item.team?.league ||
           '';
 
         return {

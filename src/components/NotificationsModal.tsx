@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import * as Notifications from 'expo-notifications';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
@@ -43,7 +44,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   onNavigate,
   onUnreadCountChange,
 }) => {
-  const { currentOrg, orgId, userRole, isRegistrationOpen, transferWindowOpen } = useOrg();
+  const { currentOrg, orgId, userRole, isRegistrationOpen, transferWindowOpen, showToast } = useOrg();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
@@ -91,16 +92,16 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
       const targetOrgId = currentOrg?.id || orgId || 1;
       const notifs: AppNotification[] = [];
 
-      // 1. Fetch pending new applications (Arizalar)
+      // 1. Fetch pending new player applications (O'yinchi Arizalari)
       let appQuery = dbClient
         .from('applications')
-        .select('id, first_name, last_name, team_name, created_at, status')
-        .or('status.eq.pending,status.eq.kutilmoqda,status.is.null')
+        .select('id, first_name, last_name, team_name, team_id, team:team_id(name), created_at, status, organization_id')
+        .or('status.eq.pending,status.eq.kutilmoqda,status.eq.yangi,status.is.null')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(30);
 
       if (targetOrgId) {
-        appQuery = appQuery.eq('organization_id', targetOrgId);
+        appQuery = appQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
       }
 
       const { data: appsData } = await appQuery;
@@ -108,13 +109,17 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
       if (appsData && appsData.length > 0) {
         appsData.forEach((app: any) => {
           const playerName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || "Yangi o'yinchi";
-          const team = app.team_name ? ` (${app.team_name})` : '';
+          let teamName = app.team?.name || app.team_name || '';
+          if (teamName && !isNaN(Number(teamName))) {
+            teamName = `Jamoa #${teamName}`;
+          }
+          const team = teamName ? ` (${teamName})` : '';
           const timeAgo = formatTimeAgo(app.created_at);
 
           notifs.push({
             id: `app_${app.id}`,
             type: 'application',
-            title: "Yangi O'yinchi Arizasi",
+            title: "Yangi O'yinchi Arizasi 👤",
             message: `${playerName}${team} arizasi tasdiqlash uchun kutmoqda`,
             time: timeAgo,
             createdAt: new Date(app.created_at || Date.now()).getTime(),
@@ -123,6 +128,36 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
           });
         });
       }
+
+      // 1b. Fetch pending team applications (Jamoa Arizalari)
+      try {
+        let teamQuery = dbClient
+          .from('teams')
+          .select('id, name, logo_url, league, created_at, status')
+          .in('status', ['pending', 'kutilmoqda'])
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (targetOrgId) {
+          teamQuery = teamQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        }
+
+        const { data: pendingTeams } = await teamQuery;
+        if (pendingTeams && pendingTeams.length > 0) {
+          pendingTeams.forEach((t: any) => {
+            notifs.push({
+              id: `team_app_${t.id}`,
+              type: 'application',
+              title: "Yangi Jamoa Arizasi 🛡️",
+              message: `"${t.name || 'Jamoa'}" (${t.league || 'Liga'}) arizasi tasdiqlashni kutmoqda`,
+              time: formatTimeAgo(t.created_at),
+              createdAt: new Date(t.created_at || Date.now()).getTime(),
+              isRead: readIds.has(`team_app_${t.id}`),
+              targetTab: 'applications',
+            });
+          });
+        }
+      } catch (e) {}
 
       // 2. Fetch pending transfers if available
       try {
@@ -232,8 +267,58 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'applications' },
-        () => {
+        (payload: any) => {
           fetchLiveNotifications();
+          if (payload?.eventType === 'INSERT') {
+            const newApp = payload.new;
+            const pName = `${newApp?.first_name || ''} ${newApp?.last_name || ''}`.trim() || "Yangi o'yinchi";
+            const team = newApp?.team_name ? ` (${newApp.team_name})` : '';
+
+            showToast({
+              message: `Yangi ariza: ${pName}${team} kelib tushdi! 🔔`,
+              type: 'info',
+              duration: 4000,
+            });
+
+            try {
+              Notifications.scheduleNotificationAsync({
+                content: {
+                  title: "Yangi O'yinchi Arizasi! ⚽",
+                  body: `${pName}${team} ro'yxatdan o'tish arizasini yubordi.`,
+                  sound: 'default',
+                  data: { type: 'new_application', id: newApp?.id },
+                },
+                trigger: null,
+              });
+            } catch (e) {}
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'teams' },
+        (payload: any) => {
+          fetchLiveNotifications();
+          if (payload?.eventType === 'INSERT') {
+            const newTeam = payload.new;
+            showToast({
+              message: `Yangi jamoa arizasi: "${newTeam?.name || 'Jamoa'}" kelib tushdi! 🛡️`,
+              type: 'info',
+              duration: 4000,
+            });
+
+            try {
+              Notifications.scheduleNotificationAsync({
+                content: {
+                  title: "Yangi Jamoa Arizasi! 🛡️",
+                  body: `"${newTeam?.name || 'Jamoa'}" arizasi tasdiqlash uchun kutmoqda.`,
+                  sound: 'default',
+                  data: { type: 'new_application', id: newTeam?.id },
+                },
+                trigger: null,
+              });
+            } catch (e) {}
+          }
         }
       )
       .on(

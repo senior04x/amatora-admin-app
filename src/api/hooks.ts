@@ -323,15 +323,24 @@ export const useApplicationsData = (
           id,
           first_name,
           last_name,
+          middle_name,
           father_name,
           birth_date,
           passport_series,
           passport_number,
+          passport_id,
+          pinfl,
           phone,
           photo_url,
           position,
           player_number,
           team_id,
+          team_name,
+          league,
+          team_league,
+          citizenship,
+          height,
+          weight,
           status,
           is_archived,
           comment,
@@ -352,7 +361,7 @@ export const useApplicationsData = (
         .range(from, to);
 
       if (targetOrgId) {
-        query = query.eq('organization_id', targetOrgId);
+        query = query.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
       }
 
       if (status !== 'all') {
