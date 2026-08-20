@@ -237,6 +237,40 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
             });
           });
         }
+      // 6. Collab Notifications & Proposals
+      try {
+        let collabNotifQuery = dbClient
+          .from('admin_notifications')
+          .select('*')
+          .eq('organization_id', targetOrgId)
+          .order('created_at', { ascending: false })
+          .limit(15);
+
+        const { data: collabNotifsRaw } = await collabNotifQuery;
+        if (collabNotifsRaw && collabNotifsRaw.length > 0) {
+          collabNotifsRaw.forEach((cn: any) => {
+            const notifId = `admin_notif_${cn.id}`;
+            const createdMs = new Date(cn.created_at || Date.now()).getTime();
+            const isItemRead = readNotificationIds.includes(notifId) || (lastReadAllTime > 0 && createdMs <= lastReadAllTime);
+
+            let icon = '🤝';
+            if (cn.type === 'collab_accepted') icon = '🎉';
+            if (cn.type === 'collab_rejected') icon = '❌';
+            if (cn.type === 'collab_disconnected') icon = '⚡';
+
+            notifs.push({
+              id: notifId,
+              type: 'collab',
+              title: `${cn.title || 'Sherikchilik'} ${icon}`,
+              message: cn.message || '',
+              time: formatTimeAgo(cn.created_at),
+              createdAt: createdMs,
+              isRead: isItemRead,
+              targetTab: 'leagues',
+              rawItem: cn,
+            });
+          });
+        }
       } catch (e) {}
 
       // Sort newest first

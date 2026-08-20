@@ -111,6 +111,111 @@ export const adminNotificationService = {
   },
 
   /**
+   * 5. Notify organization when a new collab request is received
+   */
+  notifyCollabRequest: async (payload: {
+    receiverOrgId: number;
+    senderOrgName: string;
+    leagueName: string;
+    leagueId?: number | string;
+  }) => {
+    try {
+      const { supabase } = require('../supabaseClient');
+      // 1. Fetch push token for receiver organization
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('push_token')
+        .eq('id', payload.receiverOrgId)
+        .maybeSingle();
+
+      const pushToken = orgData?.push_token;
+
+      // 2. Send Expo push notification if token exists
+      if (pushToken && pushToken.startsWith('ExponentPushToken')) {
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            to: pushToken,
+            sound: 'default',
+            title: '🤝 Yangi sherikchilik taklifi!',
+            body: `"${payload.senderOrgName}" tashkiloti "${payload.leagueName}" ligasi bo'yicha sherikchilik taklifi yubordi.`,
+            data: {
+              type: 'collab_request',
+              leagueId: payload.leagueId,
+            },
+          }),
+        }).catch((err) => console.warn('Direct Expo push error:', err));
+      }
+
+      // 3. Fallback / supplementary backend notification endpoint
+      fetch(`${BACKEND_URL}/api/notifications/collab-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+
+      return { success: true };
+    } catch (error) {
+      console.warn('⚠️ Collab request push notification error:', error);
+      return { success: false };
+    }
+  },
+
+  /**
+   * 6. Notify organization when collab status changes (accepted, rejected, disconnected)
+   */
+  notifyCollabStatus: async (payload: {
+    targetOrgId: number;
+    title: string;
+    message: string;
+    type: 'collab_accepted' | 'collab_rejected' | 'collab_disconnected';
+    leagueName?: string;
+  }) => {
+    try {
+      const { supabase } = require('../supabaseClient');
+      // 1. Fetch push token for target organization
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('push_token')
+        .eq('id', payload.targetOrgId)
+        .maybeSingle();
+
+      const pushToken = orgData?.push_token;
+
+      // 2. Send Expo push notification if token exists
+      if (pushToken && pushToken.startsWith('ExponentPushToken')) {
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            to: pushToken,
+            sound: 'default',
+            title: payload.title,
+            body: payload.message,
+            data: {
+              type: payload.type,
+            },
+          }),
+        }).catch((err) => console.warn('Direct Expo push error:', err));
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.warn('⚠️ Collab status push notification error:', error);
+      return { success: false };
+    }
+  },
+
+  /**
    * Broadcast general notification
    */
   broadcast: async (payload: {

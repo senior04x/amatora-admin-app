@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
+import { adminNotificationService } from '../utils/adminNotificationService';
 
 const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
   // 1. Direct fetch arrayBuffer (Fastest & SDK 54 recommended)
@@ -503,7 +504,7 @@ export const LeaguesScreen: React.FC = () => {
           }));
         }
 
-        // Notify receiver organization about the collab request
+        // Notify receiver organization about the collab request (DB notification + Expo Push)
         try {
           const senderOrgName = currentOrg?.name || 'Tashkilot';
           await dbClient.from('admin_notifications').insert({
@@ -513,6 +514,14 @@ export const LeaguesScreen: React.FC = () => {
             message: `"${senderOrgName}" tashkiloti "${leagueToSend.name}" ligasi bo'yicha sherikchilik taklifi yubordi`,
             is_read: false,
             metadata: JSON.stringify({ league_id: leagueToSend.id, sender_org_id: orgId }),
+          });
+
+          // Trigger Expo Push Notification to receiver organization
+          adminNotificationService.notifyCollabRequest({
+            receiverOrgId: foundOrgId,
+            senderOrgName: senderOrgName,
+            leagueName: leagueToSend.name,
+            leagueId: leagueToSend.id,
           });
         } catch (notifErr) {
           console.warn('Collab notification insert failed:', notifErr);
@@ -944,7 +953,7 @@ export const LeaguesScreen: React.FC = () => {
                     .or(`receiver_org_id.eq.${orgId},sender_org_id.eq.${orgId}`);
                 }
 
-                // Notify partner organization about disconnection
+                // Notify partner organization about disconnection (DB + Push)
                 if (partnerOrgId && Number(partnerOrgId) !== Number(orgId)) {
                   try {
                     const myOrgName = currentOrg?.name || 'Tashkilot';
@@ -955,6 +964,15 @@ export const LeaguesScreen: React.FC = () => {
                       message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi`,
                       is_read: false,
                       metadata: JSON.stringify({ league_name: leagueName, disconnected_by_org_id: orgId }),
+                    });
+
+                    // Trigger Expo Push Notification
+                    adminNotificationService.notifyCollabStatus({
+                      targetOrgId: partnerOrgId,
+                      title: '⚡ Sherikchilik uzildi',
+                      message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi.`,
+                      type: 'collab_disconnected',
+                      leagueName: leagueName,
                     });
                   } catch (notifErr) {}
                 }
@@ -1004,7 +1022,7 @@ export const LeaguesScreen: React.FC = () => {
           .eq('id', collabRequest.id);
         if (error) throw error;
 
-        // Notify sender organization that collab was accepted
+        // Notify sender organization that collab was accepted (DB + Push)
         try {
           const myOrgName = currentOrg?.name || 'Tashkilot';
           await dbClient.from('admin_notifications').insert({
@@ -1014,6 +1032,15 @@ export const LeaguesScreen: React.FC = () => {
             message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni qabul qildi`,
             is_read: false,
             metadata: JSON.stringify({ league_id: collabRequest.league_id, accepted_by_org_id: orgId }),
+          });
+
+          // Trigger Expo Push Notification
+          adminNotificationService.notifyCollabStatus({
+            targetOrgId: collabRequest.sender_org_id,
+            title: '🎉 Sherikchilik qabul qilindi!',
+            message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni qabul qildi.`,
+            type: 'collab_accepted',
+            leagueName: leagueName,
           });
         } catch (notifErr) {}
 
@@ -1057,7 +1084,7 @@ export const LeaguesScreen: React.FC = () => {
                 .eq('id', collabRequest.id);
               if (error) throw error;
 
-              // Notify sender organization that collab was rejected
+              // Notify sender organization that collab was rejected (DB + Push)
               try {
                 const myOrgName = currentOrg?.name || 'Tashkilot';
                 const leagueName = collabRequest.league?.name || collabRequest.league_name || 'Liga';
@@ -1068,6 +1095,15 @@ export const LeaguesScreen: React.FC = () => {
                   message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni rad etdi`,
                   is_read: false,
                   metadata: JSON.stringify({ league_id: collabRequest.league_id, rejected_by_org_id: orgId }),
+                });
+
+                // Trigger Expo Push Notification
+                adminNotificationService.notifyCollabStatus({
+                  targetOrgId: collabRequest.sender_org_id,
+                  title: '❌ Sherikchilik rad etildi',
+                  message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni rad etdi.`,
+                  type: 'collab_rejected',
+                  leagueName: leagueName,
                 });
               } catch (notifErr) {
                 console.warn('Reject notification failed:', notifErr);
