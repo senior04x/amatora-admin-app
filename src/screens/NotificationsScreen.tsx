@@ -73,7 +73,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
         .limit(50);
 
       if (targetOrgId) {
-        appQuery = appQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        appQuery = appQuery.eq('organization_id', targetOrgId);
       }
 
       const { data: appsDataRaw } = await appQuery;
@@ -119,7 +119,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
           .limit(20);
 
         if (targetOrgId) {
-          teamQuery = teamQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+          teamQuery = teamQuery.eq('organization_id', targetOrgId);
         }
 
         const { data: pendingTeamsRaw } = await teamQuery;
@@ -242,10 +242,10 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       notifs.sort((a, b) => b.createdAt - a.createdAt);
       setNotifications(notifs);
 
-      // If no unread notifications exist in the list, refresh count to immediately clear the badge
+      // If no unread notifications exist in the list, clear badge & save read timestamp immediately
       const actualUnreadCount = notifs.filter((n) => !n.isRead).length;
       if (actualUnreadCount === 0 && unreadNotificationsCount > 0) {
-        refreshNotificationsCount();
+        await markAllNotificationsAsRead([]);
       }
     } catch (err) {
       console.error('Error loading notifications:', err);

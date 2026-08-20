@@ -394,13 +394,13 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const rawLastReadTime = await AsyncStorage.getItem(`@amatora_last_read_all_time_${targetOrgId}`);
       const lastReadAllTime = rawLastReadTime ? parseInt(rawLastReadTime, 10) : 0;
 
-      // 1. Fetch player applications
+      // 1. Fetch player applications for this organization strictly
       let appQuery = dbClient
         .from('applications')
         .select('id, created_at, status, organization_id');
 
       if (targetOrgId) {
-        appQuery = appQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        appQuery = appQuery.eq('organization_id', targetOrgId);
       }
 
       const { data: appsRaw } = await appQuery;
@@ -410,13 +410,13 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return !st || st === 'pending' || st === 'kutilmoqda' || st === 'yangi';
       });
 
-      // 2. Fetch team applications
+      // 2. Fetch team applications for this organization strictly
       let teamQuery = dbClient
         .from('teams')
         .select('id, created_at, status, organization_id');
 
       if (targetOrgId) {
-        teamQuery = teamQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        teamQuery = teamQuery.eq('organization_id', targetOrgId);
       }
 
       const { data: teamsRaw } = await teamQuery;
