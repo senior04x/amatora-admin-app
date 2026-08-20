@@ -215,19 +215,28 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsRegistrationOpen(true);
       }
 
-      // 4. Fetch Collab Leagues
+      // 4. Fetch Collab Leagues (Robust IDs and Names fetch)
       try {
         const { data: myCollabs } = await dbClient
           .from('league_collabs')
-          .select('league_id, leagues(name)')
+          .select('league_id')
           .eq('status', 'accepted')
           .or(`sender_org_id.eq.${targetOrgId},receiver_org_id.eq.${targetOrgId}`);
 
         if (myCollabs && myCollabs.length > 0) {
           const ids = myCollabs.map((c: any) => c.league_id).filter(Boolean);
-          const names = myCollabs.map((c: any) => c.leagues?.name).filter(Boolean);
           setCollabLeagueIds(ids);
-          setCollabLeagueNames(names);
+
+          if (ids.length > 0) {
+            const { data: lData } = await dbClient
+              .from('leagues')
+              .select('name')
+              .in('id', ids);
+            const names = (lData || []).map((l: any) => l.name).filter(Boolean);
+            setCollabLeagueNames(names);
+          } else {
+            setCollabLeagueNames([]);
+          }
         } else {
           setCollabLeagueIds([]);
           setCollabLeagueNames([]);

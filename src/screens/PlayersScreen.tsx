@@ -287,7 +287,7 @@ const SwipeablePlayerCard = ({
 };
 
 export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }) => {
-  const { orgId, userRole, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, refreshOrg } = useOrg();
+  const { orgId, userRole, collabLeagueNames, collabLeagueIds, isRegistrationOpen, toggleRegistrationStatus, refreshOrg } = useOrg();
   const isReadOnlyUser = userRole === 'user';
   const [fullImagePreview, setFullImagePreview] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialSegmentTab || 'players');
@@ -332,16 +332,16 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     data: playersData,
     isLoading: loadingPlayers,
     refetch: refetchPlayers,
-  } = usePlayersData(orgId, debouncedSearchQuery, playerPage, PLAYER_PAGE_SIZE, showArchived);
+  } = usePlayersData(orgId, debouncedSearchQuery, playerPage, PLAYER_PAGE_SIZE, showArchived, collabLeagueNames);
 
   const {
     data: teamsData,
     isLoading: loadingTeams,
     refetch: refetchTeams,
-  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, teamPage, TEAM_PAGE_SIZE, showArchived);
+  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, teamPage, TEAM_PAGE_SIZE, showArchived, collabLeagueNames);
 
-  const { data: allTeamsList = [] } = useTeamsData(orgId);
-  const { data: leagues = [] } = useLeaguesData(orgId);
+  const { data: allTeamsList = [] } = useTeamsData(orgId, collabLeagueNames);
+  const { data: leagues = [] } = useLeaguesData(orgId, collabLeagueIds);
 
   useEffect(() => {
     setPlayerPage(0);
