@@ -13,6 +13,7 @@ import {
   ScrollView,
   PanResponder,
   Alert,
+  Switch,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -156,7 +157,7 @@ const SwipeableCard: React.FC<{
 };
 
 export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', onNavigate }) => {
-  const { orgId, collabLeagueNames } = useOrg();
+  const { orgId, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, userRole } = useOrg();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialTab);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -873,6 +874,36 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         </Animated.View>
       )}
 
+      {/* Registration Status Toggle Bar (Saytda yangi arizalar qabuli holati) */}
+      {userRole !== 'user' && (
+        <View style={styles.regStatusBar}>
+          <View style={styles.regStatusInfoRow}>
+            <View
+              style={[
+                styles.regStatusDot,
+                { backgroundColor: isRegistrationOpen ? '#00FF66' : '#EF4444' },
+              ]}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.regStatusTitle}>
+                {isRegistrationOpen ? "Arizalar Qabuli: OCHIQ" : "Arizalar Qabuli: YOPIQ"}
+              </Text>
+              <Text style={styles.regStatusSub}>
+                {isRegistrationOpen
+                  ? "Sayt orqali yangi arizalar yuborish faol"
+                  : "Sayt orqali yangi arizalar qabul qilish to'xtatilgan"}
+              </Text>
+            </View>
+          </View>
+          <Switch
+            value={isRegistrationOpen}
+            onValueChange={toggleRegistrationStatus}
+            trackColor={{ false: 'rgba(239, 68, 68, 0.3)', true: 'rgba(0, 255, 102, 0.35)' }}
+            thumbColor={isRegistrationOpen ? '#00FF66' : '#EF4444'}
+          />
+        </View>
+      )}
+
       {/* Top Segment Sub-Tabs */}
       <View style={styles.segmentContainer}>
         <TouchableOpacity
@@ -1573,6 +1604,43 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  regStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(21, 26, 36, 0.95)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginBottom: 12,
+    gap: 12,
+  },
+  regStatusInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+  },
+  regStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  regStatusTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  regStatusSub: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 1,
   },
 
   segmentContainer: {
