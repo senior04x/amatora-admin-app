@@ -345,6 +345,7 @@ export const LeaguesScreen: React.FC = () => {
   const [sendingCollab, setSendingCollab] = useState(false);
 
   const handleOpenCollabModal = (league: any) => {
+    if (isReadOnlyUser) return;
     setSelectedLeagueForCollab(league);
     setTargetOrgEmail('');
     setShowCollabModal(true);
@@ -561,6 +562,7 @@ export const LeaguesScreen: React.FC = () => {
 
   // Create / Update League (1-to-1 Match with Admin Panel DB Logic)
   const handleSaveLeague = async () => {
+    if (isReadOnlyUser) return;
     if (!formName.trim()) {
       Alert.alert('Xatolik', 'Liga nomini kiriting');
       return;
@@ -764,6 +766,7 @@ export const LeaguesScreen: React.FC = () => {
 
   // Open Edit Modal
   const handleEditLeague = (league: any) => {
+    if (isReadOnlyUser) return;
     setEditingLeague(league);
     setFormName(league.name || '');
     setFormLogo(league.logo_url || '');
@@ -779,6 +782,7 @@ export const LeaguesScreen: React.FC = () => {
 
   // Open Create Modal
   const handleCreateLeague = () => {
+    if (isReadOnlyUser) return;
     resetForm();
     setShowModal(true);
   };
@@ -798,6 +802,7 @@ export const LeaguesScreen: React.FC = () => {
 
   // Upload Background Image (Sync to all bg columns: export_bg_url, bg_image, schedule_banner_url, etc. and sponsors)
   const handleUploadBgImage = (league: any) => {
+    if (isReadOnlyUser) return;
     requestAnimationFrame(async () => {
       try {
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -861,6 +866,7 @@ export const LeaguesScreen: React.FC = () => {
 
   // Delete Background Image (Clears export_bg_url, bg_image, and sponsors LEAGUE_BG_)
   const handleDeleteBgImage = async (league: any) => {
+    if (isReadOnlyUser) return;
     Alert.alert('Orqa fonni o\'chirish', 'Orqa fon rasmini o\'chirishni xohlaysizmi?', [
       { text: 'Yo\'q', style: 'cancel' },
       {
@@ -898,6 +904,7 @@ export const LeaguesScreen: React.FC = () => {
 
   // Upload Logo Image (Crop completely disabled + inline spinner loader + public HTTP URL)
   const handleUploadLogo = (league: any) => {
+    if (isReadOnlyUser) return;
     requestAnimationFrame(async () => {
       try {
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -955,13 +962,15 @@ export const LeaguesScreen: React.FC = () => {
           resizeMode="cover"
         >
           <View style={s.cardDarkOverlay}>
-            {/* Top Row: Upload BG */}
-            <View style={s.cardTopRow}>
-              <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleUploadBgImage(item)} activeOpacity={0.8}>
-                <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
-                <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Top Row: Upload BG (Only for Admins) */}
+            {!isReadOnlyUser && (
+              <View style={s.cardTopRow}>
+                <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleUploadBgImage(item)} activeOpacity={0.8}>
+                  <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
+                  <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Center Content */}
             <View style={s.cardCenterContent}>
@@ -971,11 +980,21 @@ export const LeaguesScreen: React.FC = () => {
                   <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, marginTop: 4, fontWeight: '700' }}>{"Yuklanmoqda..."}</Text>
                 </View>
               ) : (item.logo_url || item.logo || item.logoUrl) ? (
-                <TouchableOpacity onPress={() => handleUploadLogo(item)} activeOpacity={0.8} style={s.freeLogoWrap}>
+                <TouchableOpacity
+                  disabled={isReadOnlyUser}
+                  onPress={() => !isReadOnlyUser && handleUploadLogo(item)}
+                  activeOpacity={isReadOnlyUser ? 1 : 0.8}
+                  style={s.freeLogoWrap}
+                >
                   <Image source={{ uri: item.logo_url || item.logo || item.logoUrl }} style={s.freeLogoImg} resizeMode="contain" />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onPress={() => handleUploadLogo(item)} activeOpacity={0.8} style={s.freeLogoWrap}>
+                <TouchableOpacity
+                  disabled={isReadOnlyUser}
+                  onPress={() => !isReadOnlyUser && handleUploadLogo(item)}
+                  activeOpacity={isReadOnlyUser ? 1 : 0.8}
+                  style={s.freeLogoWrap}
+                >
                   <Ionicons name="trophy" size={38} color="#FFFFFF" />
                 </TouchableOpacity>
               )}
@@ -1040,17 +1059,22 @@ export const LeaguesScreen: React.FC = () => {
   };
 
   // Render each item wrapped in SwipeableLeagueCard
-  const renderLeagueCard = ({ item }: { item: any }) => (
-    <SwipeableLeagueCard
-      item={item}
-      isOpen={openSwipeId === String(item.id)}
-      setIsSwiping={setIsSwiping}
-      onSwipeOpen={() => setOpenSwipeId(String(item.id))}
-      onSwipeClose={() => { if (openSwipeId === String(item.id)) setOpenSwipeId(null); }}
-      onDelete={() => handleDeleteLeague(item)}
-      renderContent={renderLeagueCardContent}
-    />
-  );
+  const renderLeagueCard = ({ item }: { item: any }) => {
+    if (isReadOnlyUser) {
+      return renderLeagueCardContent(item);
+    }
+    return (
+      <SwipeableLeagueCard
+        item={item}
+        isOpen={openSwipeId === String(item.id)}
+        setIsSwiping={setIsSwiping}
+        onSwipeOpen={() => setOpenSwipeId(String(item.id))}
+        onSwipeClose={() => { if (openSwipeId === String(item.id)) setOpenSwipeId(null); }}
+        onDelete={() => handleDeleteLeague(item)}
+        renderContent={renderLeagueCardContent}
+      />
+    );
+  };
 
   return (
     <View style={s.container}>
