@@ -1392,6 +1392,8 @@ export const LeaguesScreen: React.FC = () => {
     );
   };
 
+  return (
+    <View style={s.container}>
       {/* Page Header with Animated Rejected Collabs Button */}
       <View style={s.pageHeader}>
         <View style={s.pageHeaderLeft}>
