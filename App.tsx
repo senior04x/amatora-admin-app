@@ -368,7 +368,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               />
             ) : (
               <Ionicons
-                name={activeTab === 'account' ? "person" : "person-outline"}
+                name="person-outline"
                 size={22}
                 color={activeTab === 'account' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
                 style={activeTab === 'account' && styles.glowingIcon}
