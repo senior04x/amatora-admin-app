@@ -32,7 +32,8 @@ const APP_VERSION = `v${pkg.version}`;
 const GOOGLE_WEB_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
 // iOS Client ID — Google Console > Credentials > Create OAuth Client ID > iOS > Bundle ID: com.amatora.adminapp
 const GOOGLE_IOS_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
-// ⬆️ TODO: Replace GOOGLE_IOS_CLIENT_ID with the actual iOS client ID from Google Console
+// Android Client ID — Google Console > Credentials > Create OAuth Client ID > Android
+const GOOGLE_ANDROID_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
 
 interface SettingsScreenProps {
   onGoBack?: () => void;
@@ -51,6 +52,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
 
   // ─── Google Auth Request (handles iOS/Android redirect URIs automatically) ──
   const [request, response, promptAsync] = Google.useAuthRequest({
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     webClientId: GOOGLE_WEB_CLIENT_ID,
     scopes: YT_SCOPES,
