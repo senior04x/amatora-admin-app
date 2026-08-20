@@ -87,7 +87,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards',
     subTab?: 'players' | 'teams'
   ) => {
-    if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers'].includes(tab)) {
+    if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers', 'cards'].includes(tab)) {
       Alert.alert('Cheklangan huquq', 'Sizda ushbu bo\'limga kirish huquqi yo\'q!');
       return;
     }

@@ -514,7 +514,7 @@ export const DashboardScreen: React.FC<Props> = ({
       icon: 'albums-outline',
       color: '#FACC15',
       action: () => onNavigate && onNavigate('cards'),
-      adminOnly: false,
+      adminOnly: true,
     },
     {
       id: 'sponsors',
