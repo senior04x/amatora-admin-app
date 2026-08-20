@@ -13,7 +13,7 @@ import {
   Modal,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { ExpoImage } from 'expo-image';
+import { Image as ExpoImage } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -285,7 +285,7 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
         (p) =>
           p.name.toLowerCase().includes(q) ||
           p.teamName.toLowerCase().includes(q) ||
-          p.playerNumber.includes(q)
+          (p.playerNumber ? p.playerNumber.includes(q) : false)
       );
     }
 
