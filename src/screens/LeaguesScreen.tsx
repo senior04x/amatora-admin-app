@@ -580,12 +580,13 @@ export const LeaguesScreen: React.FC = () => {
       const { data: dateSponsors } = await dbClient
         .from('sponsors')
         .select('name, logo_url')
-        .or('name.like.LEAGUE_BG_%,name.like.LEAGUE_DURATION_%,name.like.LEAGUE_START_DATE_%,name.like.LEAGUE_END_DATE_%');
+        .or('name.like.LEAGUE_BG_%,name.like.LEAGUE_DURATION_%,name.like.LEAGUE_START_DATE_%,name.like.LEAGUE_END_DATE_%,name.like.LEAGUE_STATUS_%');
 
       const bgMap: any = {};
       const durationMap: any = {};
       const startMap: any = {};
       const endMap: any = {};
+      const statusMap: any = {};
 
       if (dateSponsors) {
         dateSponsors.forEach((s: any) => {
@@ -601,6 +602,9 @@ export const LeaguesScreen: React.FC = () => {
           } else if (s.name.startsWith('LEAGUE_END_DATE_')) {
             const lId = s.name.replace('LEAGUE_END_DATE_', '');
             endMap[lId] = s.logo_url;
+          } else if (s.name.startsWith('LEAGUE_STATUS_')) {
+            const lId = s.name.replace('LEAGUE_STATUS_', '');
+            statusMap[lId] = s.logo_url;
           }
         });
       }
@@ -631,6 +635,7 @@ export const LeaguesScreen: React.FC = () => {
       if (leaguesData && leaguesData.length > 0) {
         const merged = leaguesData.map((l: any) => ({
           ...l,
+          is_active: statusMap[l.id] !== undefined ? statusMap[l.id] === 'active' : (l.is_active !== false),
           bg_image: l.bg_image || l.export_bg_url || bgMap[l.id] || bgMap[String(l.id)] || null,
           match_duration: l.match_duration || durationMap[l.id] || durationMap[String(l.id)] || 60,
           start_date: l.start_date || startMap[l.id] || startMap[String(l.id)] || '',
@@ -1352,6 +1357,43 @@ export const LeaguesScreen: React.FC = () => {
     });
   };
 
+  // Toggle League Status (Faol / Nofaol)
+  const handleToggleLeagueStatus = async (league: any) => {
+    if (isReadOnlyUser) return;
+    const currentActive = league.is_active !== false;
+    const nextActive = !currentActive;
+    const nextActiveStr = nextActive ? 'active' : 'inactive';
+
+    // Optimistic UI update
+    setLeagues((prev: any[]) => prev.map((l: any) => l.id === league.id ? { ...l, is_active: nextActive } : l));
+
+    try {
+      const dbClient = supabase;
+      const sponsorKey = `LEAGUE_STATUS_${league.id}`;
+      const { data: existingSponsor } = await dbClient
+        .from('sponsors')
+        .select('id')
+        .eq('name', sponsorKey)
+        .maybeSingle();
+
+      if (existingSponsor?.id) {
+        await dbClient.from('sponsors').update({ logo_url: nextActiveStr }).eq('id', existingSponsor.id);
+      } else {
+        await dbClient.from('sponsors').insert({ name: sponsorKey, logo_url: nextActiveStr });
+      }
+
+      try {
+        await dbClient.from('leagues').update({ is_active: nextActive, status: nextActiveStr }).eq('id', league.id);
+      } catch (e) {}
+
+      Vibration.vibrate(40);
+    } catch (err) {
+      console.error('handleToggleLeagueStatus error:', err);
+      Alert.alert('Xatolik', 'Liga holatini saqlashda xatolik yuz berdi');
+      fetchLeagues();
+    }
+  };
+
   // Swipe-to-delete & scroll lock state
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   const [isSwiping, setIsSwiping] = useState(false);
@@ -1373,24 +1415,42 @@ export const LeaguesScreen: React.FC = () => {
           resizeMode="cover"
         >
           <View style={s.cardDarkOverlay}>
-            {/* Top Row: Upload BG (Only for Admins of own leagues) */}
-            {!isReadOnlyUser && !isCollabLeague && (
-              <View style={s.cardTopRow}>
+            {/* Top Row: Upload BG & Status Switcher */}
+            <View style={s.cardTopRow}>
+              {!isReadOnlyUser && !isCollabLeague ? (
                 <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleUploadBgImage(item)} activeOpacity={0.8}>
                   <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
                   <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
                 </TouchableOpacity>
-              </View>
-            )}
-            {/* Collab League Badge */}
-            {isCollabLeague && (
-              <View style={s.cardTopRow}>
+              ) : isCollabLeague ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,170,255,0.25)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(0,170,255,0.4)' }}>
                   <Ionicons name="link-outline" size={12} color="#00AAFF" />
                   <Text style={{ color: '#00AAFF', fontSize: 10, fontWeight: '800', marginLeft: 4 }}>{"HAMKOR LIGA"}</Text>
                 </View>
-              </View>
-            )}
+              ) : <View />}
+
+              {/* Status Switcher Button */}
+              <TouchableOpacity
+                style={[
+                  s.statusSwitcherBtn,
+                  item.is_active !== false ? s.statusSwitcherActive : s.statusSwitcherInactive
+                ]}
+                onPress={() => handleToggleLeagueStatus(item)}
+                activeOpacity={0.7}
+                disabled={isReadOnlyUser || isCollabLeague}
+              >
+                <View style={[
+                  s.statusIndicatorDot,
+                  item.is_active !== false ? s.statusDotActive : s.statusDotInactive
+                ]} />
+                <Text style={[
+                  s.statusSwitcherText,
+                  item.is_active !== false ? s.statusTextActive : s.statusTextInactive
+                ]}>
+                  {item.is_active !== false ? "FAOL" : "NOFAOL"}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Center Content */}
             <View style={s.cardCenterContent}>
@@ -2414,6 +2474,48 @@ const s = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.85)',
     fontSize: 9,
     fontWeight: '700',
+  },
+
+  /* Status Switcher Button */
+  statusSwitcherBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  },
+  statusSwitcherActive: {
+    borderColor: 'rgba(0, 255, 102, 0.5)',
+    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+  },
+  statusSwitcherInactive: {
+    borderColor: 'rgba(255, 68, 68, 0.5)',
+    backgroundColor: 'rgba(255, 68, 68, 0.15)',
+  },
+  statusIndicatorDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  statusDotActive: {
+    backgroundColor: '#00FF66',
+  },
+  statusDotInactive: {
+    backgroundColor: '#FF4444',
+  },
+  statusSwitcherText: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  statusTextActive: {
+    color: '#00FF66',
+  },
+  statusTextInactive: {
+    color: '#FF4444',
   },
 
   cardTitle: {
