@@ -39,7 +39,7 @@ interface SettingsScreenProps {
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
-  const { currentOrg, orgId, showToast } = useOrg();
+  const { currentOrg, orgId, userRole, showToast } = useOrg();
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [hasPin, setHasPin] = useState(false);
@@ -124,22 +124,22 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
     }
   };
 
-  // ─── Load YouTube channel on mount ─────────────────────────────────
+  // ─── Load YouTube channel on mount (Only for Super Admin) ───────────
   useEffect(() => {
-    if (orgId) {
+    if (orgId && userRole !== 'user') {
       loadYouTubeStatus();
     }
-  }, [orgId]);
+  }, [orgId, userRole]);
 
-  // ─── Reload when app comes to foreground ───────────────────────────
+  // ─── Reload when app comes to foreground (Only for Super Admin) ────
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && orgId) {
+      if (nextAppState === 'active' && orgId && userRole !== 'user') {
         loadYouTubeStatus();
       }
     });
     return () => subscription.remove();
-  }, [orgId]);
+  }, [orgId, userRole]);
 
   const loadYouTubeStatus = async () => {
     setYtLoading(true);
@@ -476,84 +476,88 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         </TouchableOpacity>
       )}
 
-      {/* ─── YouTube Integration Section ──────────────────────────── */}
-      <Text style={styles.sectionHeader}>YouTube Integratsiya</Text>
+      {/* ─── YouTube Integration Section (Only for Super Admin) ─────── */}
+      {userRole !== 'user' && (
+        <>
+          <Text style={styles.sectionHeader}>YouTube Integratsiya</Text>
 
-      {ytLoading ? (
-        <View style={styles.settingItem}>
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-          <View style={styles.settingLeft}>
-            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-              <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-            </View>
-            <View>
-              <Text style={styles.settingTitle}>YouTube holati tekshirilmoqda...</Text>
-              <Text style={styles.settingSub}>Iltimos kuting</Text>
-            </View>
-          </View>
-          <ActivityIndicator size="small" color="rgba(255, 255, 255, 0.5)" />
-        </View>
-      ) : ytChannelInfo ? (
-        /* ─── Connected State ─── */
-        <View style={[styles.settingItem, { borderColor: 'rgba(0, 255, 102, 0.3)' }]}>
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-          <View style={styles.settingLeft}>
-            {ytChannelInfo.thumbnail ? (
-              <Image
-                source={{ uri: ytChannelInfo.thumbnail }}
-                style={styles.ytAvatar}
-              />
-            ) : (
-              <View style={[styles.settingIcon, { backgroundColor: 'rgba(0, 255, 102, 0.15)' }]}>
-                <Ionicons name="checkmark-circle" size={20} color="#00FF66" />
+          {ytLoading ? (
+            <View style={styles.settingItem}>
+              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+                  <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+                </View>
+                <View>
+                  <Text style={styles.settingTitle}>YouTube holati tekshirilmoqda...</Text>
+                  <Text style={styles.settingSub}>Iltimos kuting</Text>
+                </View>
               </View>
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingTitle} numberOfLines={1}>{ytChannelInfo.title}</Text>
-              <Text style={[styles.settingSub, { color: 'rgba(0, 255, 102, 0.7)' }]}>
-                YouTube kanal ulangan ✓
-              </Text>
+              <ActivityIndicator size="small" color="rgba(255, 255, 255, 0.5)" />
             </View>
-          </View>
-          <TouchableOpacity
-            style={styles.ytDisconnectBtn}
-            activeOpacity={0.7}
-            onPress={handleDisconnectYouTube}
-          >
-            <Ionicons name="close-circle" size={16} color="#EF4444" />
-            <Text style={styles.ytDisconnectText}>Uzish</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        /* ─── Not Connected State ─── */
-        <TouchableOpacity
-          style={styles.settingItem}
-          activeOpacity={0.7}
-          onPress={handleConnectYouTube}
-          disabled={ytConnecting}
-        >
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-          <View style={styles.settingLeft}>
-            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-              <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+          ) : ytChannelInfo ? (
+            /* ─── Connected State ─── */
+            <View style={[styles.settingItem, { borderColor: 'rgba(0, 255, 102, 0.3)' }]}>
+              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+              <View style={styles.settingLeft}>
+                {ytChannelInfo.thumbnail ? (
+                  <Image
+                    source={{ uri: ytChannelInfo.thumbnail }}
+                    style={styles.ytAvatar}
+                  />
+                ) : (
+                  <View style={[styles.settingIcon, { backgroundColor: 'rgba(0, 255, 102, 0.15)' }]}>
+                    <Ionicons name="checkmark-circle" size={20} color="#00FF66" />
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.settingTitle} numberOfLines={1}>{ytChannelInfo.title}</Text>
+                  <Text style={[styles.settingSub, { color: 'rgba(0, 255, 102, 0.7)' }]}>
+                    YouTube kanal ulangan ✓
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.ytDisconnectBtn}
+                activeOpacity={0.7}
+                onPress={handleDisconnectYouTube}
+              >
+                <Ionicons name="close-circle" size={16} color="#EF4444" />
+                <Text style={styles.ytDisconnectText}>Uzish</Text>
+              </TouchableOpacity>
             </View>
-            <View>
-              <Text style={styles.settingTitle}>YouTube Kanal Ulash</Text>
-              <Text style={styles.settingSub}>Translyatsiya boshqaruvi uchun</Text>
-            </View>
-          </View>
-          {ytConnecting ? (
-            <ActivityIndicator size="small" color="#FF0000" />
           ) : (
-            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+            /* ─── Not Connected State ─── */
+            <TouchableOpacity
+              style={styles.settingItem}
+              activeOpacity={0.7}
+              onPress={handleConnectYouTube}
+              disabled={ytConnecting}
+            >
+              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+              <View style={styles.settingLeft}>
+                <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+                  <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+                </View>
+                <View>
+                  <Text style={styles.settingTitle}>YouTube Kanal Ulash</Text>
+                  <Text style={styles.settingSub}>Translyatsiya boshqaruvi uchun</Text>
+                </View>
+              </View>
+              {ytConnecting ? (
+                <ActivityIndicator size="small" color="#FF0000" />
+              ) : (
+                <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+              )}
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-      )}
 
-      <Text style={styles.ytInfoText}>
-        YouTube kanalini ulash orqali translyatsiya oblojkalarini avtomatik yangilash va jonli efirlarni boshqarish imkoniyatiga ega bo'lasiz.
-        {'\n\n'}Kanal ma'lumotlari serverda saqlanadi — ilovani qayta o'rnatganingizda ham uzilmaydi.
-      </Text>
+          <Text style={styles.ytInfoText}>
+            YouTube kanalini ulash orqali translyatsiya oblojkalarini avtomatik yangilash va jonli efirlarni boshqarish imkoniyatiga ega bo'lasiz.
+            {'\n\n'}Kanal ma'lumotlari serverda saqlanadi — ilovani qayta o'rnatganingizda ham uzilmaydi.
+          </Text>
+        </>
+      )}
 
       {/* App Info */}
       <Text style={styles.sectionHeader}>Ilova haqida</Text>
