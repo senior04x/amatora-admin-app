@@ -246,6 +246,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             saveDashboardOrderRef.current();
           }
         }}
+        onNavigate={handleNavigate}
       />
 
       <View style={styles.screenContainer}>

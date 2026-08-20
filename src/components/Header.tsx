@@ -1,9 +1,10 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated } from 'react-native';
+import React, { useRef, useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
+import { NotificationsModal } from './NotificationsModal';
 
 const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number; style?: any }> = ({
   width = 100,
@@ -48,8 +49,33 @@ const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number;
 export const Header: React.FC<{
   isEditingOrder?: boolean;
   onSaveOrder?: () => void;
-}> = ({ isEditingOrder = false, onSaveOrder }) => {
-  const { currentOrg, currentUser, loading, userRole } = useOrg();
+  onNavigate?: (tab: any) => void;
+}> = ({ isEditingOrder = false, onSaveOrder, onNavigate }) => {
+  const { currentOrg, currentUser, loading, userRole, orgId } = useOrg();
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Initial unread count fetch from pending applications
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const targetOrgId = currentOrg?.id || orgId || 1;
+        let query = supabase
+          .from('applications')
+          .select('id', { count: 'exact', head: true })
+          .or('status.eq.pending,status.eq.kutilmoqda,status.is.null');
+
+        if (targetOrgId) {
+          query = query.eq('organization_id', targetOrgId);
+        }
+
+        const { count } = await query;
+        setUnreadCount(count || 0);
+      } catch (e) {}
+    };
+
+    fetchCount();
+  }, [currentOrg?.id, orgId]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -62,56 +88,82 @@ export const Header: React.FC<{
   const displayAvatar = userRole === 'user' ? currentUser?.avatar_url : currentOrg?.logo_url;
 
   return (
-    <BlurView intensity={50} tint="dark" style={styles.headerContainer}>
-      <View style={styles.leftRow}>
-        {/* Logo / Avatar */}
-        <View style={styles.logoBadge}>
-          {loading && !displayName ? (
-            <HeaderSkeletonLoader width={44} height={44} style={{ borderRadius: 12 }} />
-          ) : displayAvatar ? (
-            <Image
-              source={{ uri: displayAvatar }}
-              style={[styles.logoImage, userRole === 'user' && { borderRadius: 22 }]}
-              resizeMode={userRole === 'user' ? "cover" : "contain"}
-            />
-          ) : (
-            <Ionicons name={userRole === 'user' ? "person-circle" : "trophy"} size={32} color={userRole === 'user' ? "#38BDF8" : "#00FF66"} />
-          )}
+    <>
+      <BlurView intensity={Platform.OS === 'ios' ? 50 : 80} tint="dark" style={styles.headerContainer}>
+        {Platform.OS === 'android' && <View style={styles.androidHeaderBackdrop} />}
+        
+        <View style={styles.leftRow}>
+          {/* Logo / Avatar */}
+          <View style={styles.logoBadge}>
+            {loading && !displayName ? (
+              <HeaderSkeletonLoader width={44} height={44} style={{ borderRadius: 12 }} />
+            ) : displayAvatar ? (
+              <Image
+                source={{ uri: displayAvatar }}
+                style={[styles.logoImage, userRole === 'user' && { borderRadius: 22 }]}
+                resizeMode={userRole === 'user' ? "cover" : "contain"}
+              />
+            ) : (
+              <Ionicons name={userRole === 'user' ? "person-circle" : "trophy"} size={32} color={userRole === 'user' ? "#38BDF8" : "#00FF66"} />
+            )}
+          </View>
+
+          {/* Name & Greeting */}
+          <View style={styles.titleCol}>
+            {loading && !displayName ? (
+              <View style={{ gap: 6 }}>
+                <HeaderSkeletonLoader width={140} height={16} />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.orgName}>{displayName}</Text>
+                <Text style={styles.greetingText}>{getGreeting()}</Text>
+              </>
+            )}
+          </View>
         </View>
 
-        {/* Name & Greeting */}
-        <View style={styles.titleCol}>
-          {loading && !displayName ? (
-            <View style={{ gap: 6 }}>
-              <HeaderSkeletonLoader width={140} height={16} />
-            </View>
+        <View style={styles.rightRow}>
+          {isEditingOrder ? (
+            <TouchableOpacity
+              style={styles.saveOrderBtn}
+              onPress={onSaveOrder}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="checkmark-outline" size={17} color="#FFFFFF" />
+              <Text style={styles.saveOrderBtnText}>{"Tayyor"}</Text>
+            </TouchableOpacity>
           ) : (
-            <>
-              <Text style={styles.orgName}>{displayName}</Text>
-              <Text style={styles.greetingText}>{getGreeting()}</Text>
-            </>
+            <TouchableOpacity
+              style={styles.bellBtn}
+              activeOpacity={0.75}
+              onPress={() => setShowNotifModal(true)}
+            >
+              <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
+              {unreadCount > 0 && (
+                <View style={styles.notifBadge}>
+                  {unreadCount > 9 ? (
+                    <Text style={styles.notifBadgeText}>9+</Text>
+                  ) : unreadCount > 1 ? (
+                    <Text style={styles.notifBadgeText}>{unreadCount}</Text>
+                  ) : (
+                    <View style={styles.notifDotInner} />
+                  )}
+                </View>
+              )}
+            </TouchableOpacity>
           )}
         </View>
-      </View>
+      </BlurView>
 
-      <View style={styles.rightRow}>
-        {isEditingOrder ? (
-          <TouchableOpacity
-            style={styles.saveOrderBtn}
-            onPress={onSaveOrder}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="checkmark-outline" size={17} color="#FFFFFF" />
-            <Text style={styles.saveOrderBtnText}>{"Tayyor"}</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={{ position: 'relative', padding: 4 }}>
-            <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
-            <View style={styles.notifBadge} />
-          </TouchableOpacity>
-        )}
-      </View>
-    </BlurView>
+      {/* Live System Notifications Modal */}
+      <NotificationsModal
+        visible={showNotifModal}
+        onClose={() => setShowNotifModal(false)}
+        onNavigate={onNavigate}
+        onUnreadCountChange={(cnt) => setUnreadCount(cnt)}
+      />
+    </>
   );
 };
 
@@ -173,30 +225,50 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  androidHeaderBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+  },
   rightRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  iconBtn: {
+  bellBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
+    borderRadius: 13,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
+    alignItems: 'center',
     position: 'relative',
   },
   notifBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  notifBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  notifDotInner: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#FFFFFF',
   },
   saveOrderBtn: {
     flexDirection: 'row',
