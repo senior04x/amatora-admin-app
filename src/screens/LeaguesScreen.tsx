@@ -293,7 +293,7 @@ const LeagueSkeletonLoader = () => {
 
 // Leagues Screen Component
 export const LeaguesScreen: React.FC = () => {
-  const { orgId, userRole, collabLeagueIds } = useOrg();
+  const { orgId, userRole, collabLeagueIds, showToast } = useOrg();
   const isReadOnlyUser = userRole === 'user';
   const [leagues, setLeagues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -800,7 +800,7 @@ export const LeaguesScreen: React.FC = () => {
     setFormStatus('active');
   };
 
-  // Upload Background Image (Sync to all bg columns: export_bg_url, bg_image, schedule_banner_url, etc. and sponsors)
+  // Upload Background Image (Instant local preview + silent background upload, NO modal alert)
   const handleUploadBgImage = (league: any) => {
     if (isReadOnlyUser) return;
     requestAnimationFrame(async () => {
@@ -812,8 +812,20 @@ export const LeaguesScreen: React.FC = () => {
         });
 
         if (!result.canceled && result.assets[0]) {
-          setUploadingLogoLeagueId(league.id);
           const uri = result.assets[0].uri;
+
+          // 1. Instant local preview (Optimistic UI update)
+          setLeagues((prev) =>
+            prev.map((l) =>
+              l.id === league.id ? { ...l, bg_image: uri, export_bg_url: uri } : l
+            )
+          );
+
+          if (showToast) {
+            showToast({ message: `"${league.name}" fon rasmi yangilanmoqda...`, type: 'info', duration: 2000 });
+          }
+
+          // 2. Silent Background Upload
           const cleanUri = uri.split('?')[0];
           const rawExt = cleanUri.split('.').pop()?.toLowerCase() || 'jpg';
           const fileExt = (rawExt === 'heic' || rawExt === 'heif') ? 'jpg' : rawExt;
@@ -825,13 +837,10 @@ export const LeaguesScreen: React.FC = () => {
           const publicUrl = await uploadFileToSupabase(dbClient, 'player-photos', filePath, uri, mimeType);
 
           if (publicUrl) {
-            // 1. Update export_bg_url on leagues table (guaranteed DB column matching Settings.jsx)
-            const { error: bgErr } = await dbClient.from('leagues').update({ export_bg_url: publicUrl }).eq('id', league.id);
-            if (bgErr) {
-              console.warn('DB update export_bg_url warn:', bgErr);
-            }
+            // Update export_bg_url on leagues table
+            await dbClient.from('leagues').update({ export_bg_url: publicUrl }).eq('id', league.id);
 
-            // 2. Always sync sponsors table keys used by website (LEAGUE_BG_, BANNER_SCHEDULE_, BANNER_YT_)
+            // Sync sponsors table keys used by website (LEAGUE_BG_, BANNER_SCHEDULE_, BANNER_YT_)
             const keysToSync = [
               `LEAGUE_BG_${league.id}`,
               `BANNER_SCHEDULE_${league.organization_id || orgId}_${league.name}`,
@@ -849,17 +858,16 @@ export const LeaguesScreen: React.FC = () => {
               } catch (e) {}
             }
 
-            showSuccessGlassAlert('Orqa fon saqlandi', `"${league.name}" ligasi orqa fon rasmi muvaffaqiyatli saqlandi!`);
-            await fetchLeagues();
-          } else {
-            Alert.alert('Xatolik', 'Orqa fon rasmini bazaga yuklashda xatolik yuz berdi. Internetni tekshiring.');
+            if (showToast) {
+              showToast({ message: `"${league.name}" fon rasmi saqlandi ✓`, type: 'success', duration: 2500 });
+            }
           }
         }
       } catch (e) {
-        console.error(e);
-        Alert.alert('Xatolik', 'Rasm yuklashda xatolik yuz berdi');
-      } finally {
-        setUploadingLogoLeagueId(null);
+        console.error('handleUploadBgImage error:', e);
+        if (showToast) {
+          showToast({ message: 'Rasm yuklashda xatolik yuz berdi', type: 'error' });
+        }
       }
     });
   };
@@ -874,6 +882,13 @@ export const LeaguesScreen: React.FC = () => {
         style: 'destructive',
         onPress: async () => {
           try {
+            // Instant local clear
+            setLeagues((prev) =>
+              prev.map((l) =>
+                l.id === league.id ? { ...l, bg_image: null, export_bg_url: null } : l
+              )
+            );
+
             const dbClient = supabase;
             try {
               await dbClient.from('leagues').update({
@@ -890,7 +905,10 @@ export const LeaguesScreen: React.FC = () => {
               const bgKey = `LEAGUE_BG_${league.id}`;
               await dbClient.from('sponsors').delete().eq('name', bgKey);
             } catch (e) {}
-            await fetchLeagues();
+
+            if (showToast) {
+              showToast({ message: 'Orqa fon o\'chirildi', type: 'info', duration: 2000 });
+            }
           } catch (e) {
             console.error(e);
           }
@@ -902,7 +920,7 @@ export const LeaguesScreen: React.FC = () => {
   // Inline logo uploading state
   const [uploadingLogoLeagueId, setUploadingLogoLeagueId] = useState<string | number | null>(null);
 
-  // Upload Logo Image (Crop completely disabled + inline spinner loader + public HTTP URL)
+  // Upload Logo Image (Instant local preview + silent background upload, NO modal alert)
   const handleUploadLogo = (league: any) => {
     if (isReadOnlyUser) return;
     requestAnimationFrame(async () => {
@@ -914,8 +932,18 @@ export const LeaguesScreen: React.FC = () => {
         });
 
         if (!result.canceled && result.assets[0]) {
-          setUploadingLogoLeagueId(league.id); // Show loader only during upload
           const uri = result.assets[0].uri;
+
+          // 1. Instant local preview (Optimistic UI update)
+          setLeagues((prev) =>
+            prev.map((l) => (l.id === league.id ? { ...l, logo_url: uri } : l))
+          );
+
+          if (showToast) {
+            showToast({ message: `"${league.name}" logosi yangilanmoqda...`, type: 'info', duration: 2000 });
+          }
+
+          // 2. Silent Background Upload
           const cleanUri = uri.split('?')[0];
           const rawExt = cleanUri.split('.').pop()?.toLowerCase() || 'png';
           const fileExt = (rawExt === 'heic' || rawExt === 'heif') ? 'png' : rawExt;
@@ -928,17 +956,16 @@ export const LeaguesScreen: React.FC = () => {
 
           if (publicUrl) {
             await dbClient.from('leagues').update({ logo_url: publicUrl }).eq('id', league.id);
-            showSuccessGlassAlert('Logo saqlandi', `"${league.name}" ligasi logosi muvaffaqiyatli saqlandi!`);
-            await fetchLeagues();
-          } else {
-            Alert.alert('Xatolik', 'Logo rasmini bazaga yuklashda xatolik yuz berdi. Internetni tekshiring.');
+            if (showToast) {
+              showToast({ message: `"${league.name}" logosi saqlandi ✓`, type: 'success', duration: 2500 });
+            }
           }
         }
       } catch (e) {
-        console.error(e);
-        Alert.alert('Xatolik', 'Logo yuklashda xatolik yuz berdi');
-      } finally {
-        setUploadingLogoLeagueId(null);
+        console.error('handleUploadLogo error:', e);
+        if (showToast) {
+          showToast({ message: 'Logo yuklashda xatolik yuz berdi', type: 'error' });
+        }
       }
     });
   };
