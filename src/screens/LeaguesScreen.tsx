@@ -155,6 +155,8 @@ const SwipeableLeagueCard = ({
   onSwipeOpen,
   onSwipeClose,
   onDelete,
+  onDisconnect,
+  isCollab,
   renderContent,
 }: any) => {
   const panX = useRef(new Animated.Value(0)).current;
@@ -178,7 +180,7 @@ const SwipeableLeagueCard = ({
       },
       onPanResponderMove: (_, gs) => {
         if (gs.dx < 0) {
-          // Clamp swipe to max -90px (width of red delete button)
+          // Clamp swipe to max -90px (width of action button)
           panX.setValue(Math.max(gs.dx, -90));
         } else {
           panX.setValue(0);
@@ -187,7 +189,7 @@ const SwipeableLeagueCard = ({
       onPanResponderRelease: (_, gs) => {
         setIsSwiping(false);
         if (gs.dx < -30) {
-          // Snap open to show red delete button (-90px)
+          // Snap open to show action button (-90px)
           Animated.spring(panX, { toValue: -90, useNativeDriver: true, bounciness: 3 }).start();
         } else {
           // Reset closed (0px)
@@ -205,12 +207,25 @@ const SwipeableLeagueCard = ({
     Animated.spring(panX, { toValue: 0, useNativeDriver: true }).start(() => onSwipeClose());
   };
 
+  const handleAction = () => {
+    resetSwipe();
+    if (isCollab && onDisconnect) {
+      onDisconnect();
+    } else if (onDelete) {
+      onDelete();
+    }
+  };
+
   return (
-    <View style={swipeStyles.container}>
-      {/* Red Delete Action behind card */}
-      <TouchableOpacity style={swipeStyles.deleteBack} onPress={() => { resetSwipe(); onDelete(); }} activeOpacity={0.8}>
-        <Ionicons name="trash-bin" size={22} color="#FFFFFF" />
-        <Text style={swipeStyles.deleteText}>{"O'chirish"}</Text>
+    <View style={[swipeStyles.container, isCollab && swipeStyles.collabContainer]}>
+      {/* Action behind card (Delete for own league, Disconnect for collab league) */}
+      <TouchableOpacity
+        style={[swipeStyles.deleteBack, isCollab && swipeStyles.collabBack]}
+        onPress={handleAction}
+        activeOpacity={0.8}
+      >
+        <Ionicons name={isCollab ? "unlink-outline" : "trash-bin"} size={22} color="#FFFFFF" />
+        <Text style={swipeStyles.deleteText}>{isCollab ? "Uzish" : "O'chirish"}</Text>
       </TouchableOpacity>
 
       {/* Foreground Card */}
@@ -228,6 +243,9 @@ const swipeStyles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#FF3B30',
   },
+  collabContainer: {
+    backgroundColor: '#EA580C',
+  },
   deleteBack: {
     position: 'absolute',
     right: 0,
@@ -239,6 +257,9 @@ const swipeStyles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     zIndex: 1,
+  },
+  collabBack: {
+    backgroundColor: '#EA580C',
   },
   deleteText: {
     color: '#FFFFFF',
@@ -1296,18 +1317,18 @@ export const LeaguesScreen: React.FC = () => {
                 </View>
               ) : (item.logo_url || item.logo || item.logoUrl) ? (
                 <TouchableOpacity
-                  disabled={isReadOnlyUser}
-                  onPress={() => !isReadOnlyUser && handleUploadLogo(item)}
-                  activeOpacity={isReadOnlyUser ? 1 : 0.8}
+                  disabled={isReadOnlyUser || isCollabLeague}
+                  onPress={() => !isReadOnlyUser && !isCollabLeague && handleUploadLogo(item)}
+                  activeOpacity={isReadOnlyUser || isCollabLeague ? 1 : 0.8}
                   style={s.freeLogoWrap}
                 >
                   <Image source={{ uri: item.logo_url || item.logo || item.logoUrl }} style={s.freeLogoImg} resizeMode="contain" />
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
-                  disabled={isReadOnlyUser}
-                  onPress={() => !isReadOnlyUser && handleUploadLogo(item)}
-                  activeOpacity={isReadOnlyUser ? 1 : 0.8}
+                  disabled={isReadOnlyUser || isCollabLeague}
+                  onPress={() => !isReadOnlyUser && !isCollabLeague && handleUploadLogo(item)}
+                  activeOpacity={isReadOnlyUser || isCollabLeague ? 1 : 0.8}
                   style={s.freeLogoWrap}
                 >
                   <Ionicons name="trophy" size={38} color="#FFFFFF" />
@@ -1375,10 +1396,23 @@ export const LeaguesScreen: React.FC = () => {
 
   // Render each item wrapped in SwipeableLeagueCard
   const renderLeagueCard = ({ item }: { item: any }) => {
-    const isCollabItem = item.organization_id && Number(item.organization_id) !== Number(orgId);
-    if (isReadOnlyUser || isCollabItem) {
+    if (isReadOnlyUser) {
       return renderLeagueCardContent(item);
     }
+    const isCollabItem = item.organization_id && Number(item.organization_id) !== Number(orgId);
+
+    // Find the collab record for this league to disconnect if swiped
+    const currentCollab = (item.collabs || []).find((c: any) => 
+      Number(c.sender_org_id) === Number(orgId) || Number(c.receiver_org_id) === Number(orgId)
+    ) || item.collabs?.[0] || {
+      id: item.collab_id || item.id,
+      league_id: item.id,
+      sender_org_id: item.organization_id,
+      receiver_org_id: orgId,
+      sender_org: { name: 'Asosiy Tashkilot' },
+      league_name: item.name,
+    };
+
     return (
       <SwipeableLeagueCard
         item={item}
@@ -1387,6 +1421,8 @@ export const LeaguesScreen: React.FC = () => {
         onSwipeOpen={() => setOpenSwipeId(String(item.id))}
         onSwipeClose={() => { if (openSwipeId === String(item.id)) setOpenSwipeId(null); }}
         onDelete={() => handleDeleteLeague(item)}
+        onDisconnect={() => handleDisconnectCollab(currentCollab)}
+        isCollab={isCollabItem}
         renderContent={renderLeagueCardContent}
       />
     );
