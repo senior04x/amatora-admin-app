@@ -281,7 +281,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     // 1. Fast broadcast channel for instant OBS update (0ms latency!)
     try {
+      const streamKey = match?.location?.includes('2-maydon') ? 'stream2' : 'stream1';
       supabase.channel(`obs_fast_timer_${matchId}`).send({
+        type: 'broadcast',
+        event: 'timer_update',
+        payload: timerPayload,
+      });
+      supabase.channel(`obs_fast_${streamKey}`).send({
         type: 'broadcast',
         event: 'timer_update',
         payload: timerPayload,
