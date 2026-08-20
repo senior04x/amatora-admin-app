@@ -49,7 +49,7 @@ export const useOrg = () => {
 };
 
 export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [orgId, setOrgId] = useState<number>(1);
+  const [orgId, setOrgId] = useState<number | null>(null);
   const [currentOrg, setCurrentOrg] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -133,10 +133,19 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const fetchOrg = async () => {
     try {
       const dbClient = supabase;
-      let targetOrgId = orgId || 1;
 
-      // Read stored role & orgId from AsyncStorage
+      // 1. Immediately read stored role & orgId from AsyncStorage (Primary Authority)
       const storedRole = await AsyncStorage.getItem('@amatora_user_role');
+      const storedOrgId = await AsyncStorage.getItem('@amatora_org_id');
+
+      let targetOrgId: number | null = null;
+      if (storedOrgId) {
+        const parsedId = parseInt(storedOrgId, 10);
+        if (!isNaN(parsedId) && parsedId > 0) {
+          targetOrgId = parsedId;
+        }
+      }
+
       if (storedRole === 'user') {
         setUserRole('user');
         await fetchCurrentUser();
@@ -144,35 +153,30 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setUserRole('org_admin');
       }
 
-      const storedOrgId = await AsyncStorage.getItem('@amatora_org_id');
-      if (storedOrgId) {
-        const parsedId = parseInt(storedOrgId, 10);
-        if (!isNaN(parsedId)) {
-          targetOrgId = parsedId;
-          setOrgId(parsedId);
-        }
-      }
-
-      // 0. Get user session to find their true organization if org_admin
-      if (storedRole !== 'user') {
+      // 2. If org_admin and no stored orgId, get user session to find their true organization
+      if (!targetOrgId && storedRole !== 'user') {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.email) {
           const { data: userOrg } = await dbClient
             .from('organizations')
             .select('id')
             .eq('admin_email', session.user.email)
-            .single();
+            .maybeSingle();
           
           if (userOrg?.id) {
             targetOrgId = userOrg.id;
-            if (targetOrgId !== orgId) {
-              setOrgId(targetOrgId);
-            }
           }
         }
       }
 
-      // 1. Fetch organization record
+      // 3. Fallback only if no org could be determined
+      if (!targetOrgId) {
+        targetOrgId = 1;
+      }
+
+      setOrgId(targetOrgId);
+
+      // 4. Fetch organization record
       const { data } = await dbClient
         .from('organizations')
         .select('*')

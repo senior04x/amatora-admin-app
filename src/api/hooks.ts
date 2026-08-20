@@ -9,7 +9,10 @@ export const useDashboardCountsData = (orgId: any) => {
   return useQuery({
     queryKey: queryKeys.dashboard(orgId),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      if (!orgId || Number(orgId) <= 0) {
+        return { players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0, pendingUpdates: 0 };
+      }
+      const targetOrgId = Number(orgId);
 
       // 1. Fetch collab league IDs for active orgId
       let collabIds: any[] = [];
@@ -105,7 +108,7 @@ export const useDashboardCountsData = (orgId: any) => {
         pendingUpdates: pendingUpdatesRes.count || 0,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
     placeholderData: (prev) => prev,
   });
@@ -128,7 +131,7 @@ export const useLeaguesData = (orgId: any) => {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
   });
 };
 
@@ -149,7 +152,7 @@ export const useNewsData = (orgId: any) => {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
   });
 };
 
@@ -170,7 +173,7 @@ export const useSponsorsData = (orgId: any) => {
       if (error) throw error;
       return data || [];
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
   });
 };
 
@@ -243,7 +246,7 @@ export const usePlayersData = (
         hasMore: rows.length > pageSize,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
     placeholderData: (previousData) => previousData,
   });
@@ -291,7 +294,7 @@ export const useTeamsPaginatedData = (
         hasMore: rows.length > pageSize,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
     placeholderData: (previousData) => previousData,
   });
@@ -391,7 +394,7 @@ export const useApplicationsData = (
         hasMore: rows.length > pageSize,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
     placeholderData: (previousData) => previousData,
   });
@@ -445,7 +448,7 @@ export const useApplicationsCountsData = (
         rejected: rejectedRes.count || 0,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
   });
 };
@@ -467,7 +470,7 @@ export const useTeamsData = (orgId: any) => {
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 5 * 60 * 1000,
   });
 };
@@ -502,7 +505,7 @@ export const useTransfersData = (
         hasMore: transfers.length === pageSize,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
     placeholderData: (previousData) => previousData,
   });
@@ -628,7 +631,7 @@ export const useMatchesData = (
 
       return enrichedMatches as any[];
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 30 * 1000,
     placeholderData: (previousData) => previousData,
   });
@@ -727,7 +730,7 @@ export const useFinishedMatchesData = (
         hasMore: rawMatches.length === pageSize,
       };
     },
-    enabled: !!orgId,
+    enabled: !!orgId && Number(orgId) > 0,
     staleTime: 0,
     refetchOnMount: 'always',
     placeholderData: (previousData) => previousData,

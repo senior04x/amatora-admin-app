@@ -395,7 +395,7 @@ export const DashboardScreen: React.FC<Props> = ({
   setIsEditingOrder: setIsEditingOrderProp,
   onRegisterSaveOrder,
 }) => {
-  const { orgId, userRole } = useOrg();
+  const { orgId, userRole, loading: orgLoading } = useOrg();
   const queryClient = useQueryClient();
 
   // 1. React Query Hooks for Dashboard Counts & Matches (0ms cache hit)
@@ -404,6 +404,8 @@ export const DashboardScreen: React.FC<Props> = ({
     isLoading: loading,
     refetch: refetchCounts,
   } = useDashboardCountsData(orgId);
+
+  const isContentLoading = loading || orgLoading || !orgId;
 
   const {
     data: matchesList = [],
@@ -894,7 +896,7 @@ export const DashboardScreen: React.FC<Props> = ({
             <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
             <View style={{ flex: 1 }}>
               <Text style={styles.statLabel}>{"Kutilayotgan Arizalar"}</Text>
-              {loading ? (
+              {isContentLoading ? (
                 <SkeletonLoader width={160} height={24} />
               ) : (
                 <Text style={[styles.statValue, { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' }]}>
@@ -916,7 +918,7 @@ export const DashboardScreen: React.FC<Props> = ({
           <Ionicons name="people-outline" size={28} color="#2DD4BF" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Qabul Qilingan O'yinchilar"}</Text>
-            {loading ? (
+            {isContentLoading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
               <Text style={styles.statValue}>{counts.players} {"ta"}</Text>
@@ -935,7 +937,7 @@ export const DashboardScreen: React.FC<Props> = ({
           <Ionicons name="trophy-outline" size={28} color="#FBBF24" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Jami Ligalar"}</Text>
-            {loading ? (
+            {isContentLoading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
               <Text style={styles.statValue}>{counts.leagues} {"ta"}</Text>
@@ -954,7 +956,7 @@ export const DashboardScreen: React.FC<Props> = ({
           <Ionicons name="shirt-outline" size={28} color="#4ADE80" />
           <View style={{ flex: 1 }}>
             <Text style={styles.statLabel}>{"Qabul Qilingan Jamoalar"}</Text>
-            {loading ? (
+            {isContentLoading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
               <Text style={styles.statValue}>{counts.teams} {"ta"}</Text>
