@@ -1362,34 +1362,22 @@ export const LeaguesScreen: React.FC = () => {
     if (isReadOnlyUser) return;
     const currentActive = league.is_active !== false;
     const nextActive = !currentActive;
-    const nextActiveStr = nextActive ? 'active' : 'inactive';
 
     // Optimistic UI update
     setLeagues((prev: any[]) => prev.map((l: any) => l.id === league.id ? { ...l, is_active: nextActive } : l));
 
     try {
       const dbClient = supabase;
-      const sponsorKey = `LEAGUE_STATUS_${league.id}`;
-      const { data: existingSponsor } = await dbClient
-        .from('sponsors')
-        .select('id')
-        .eq('name', sponsorKey)
-        .maybeSingle();
+      const { error } = await dbClient
+        .from('leagues')
+        .update({ is_active: nextActive })
+        .eq('id', league.id);
 
-      if (existingSponsor?.id) {
-        await dbClient.from('sponsors').update({ logo_url: nextActiveStr }).eq('id', existingSponsor.id);
-      } else {
-        await dbClient.from('sponsors').insert({ name: sponsorKey, logo_url: nextActiveStr });
-      }
-
-      try {
-        await dbClient.from('leagues').update({ is_active: nextActive, status: nextActiveStr }).eq('id', league.id);
-      } catch (e) {}
-
+      if (error) throw error;
       Vibration.vibrate(40);
     } catch (err) {
       console.error('handleToggleLeagueStatus error:', err);
-      Alert.alert('Xatolik', 'Liga holatini saqlashda xatolik yuz berdi');
+      Alert.alert('Xatolik', 'Liga holatini saqlashda xatolik yuz berdi. Bazada is_active ustuni mavjudligini tekshiring.');
       fetchLeagues();
     }
   };
