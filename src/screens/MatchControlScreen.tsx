@@ -339,6 +339,106 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     })();
   };
 
+  // SEND REMOTE GOAL SIGNAL TO AMATORA-OBS (amatora.exe) REPLAY ENGINE
+  const sendRemoteObsGoalSignal = async (eventUuid: string) => {
+    try {
+      const targetOrgId = match?.organization_id || orgId || 1;
+      const rawLocation = String(match?.location || '1').toLowerCase();
+      const fieldId = rawLocation.includes('2') ? '2' : '1';
+
+      const payloadStr = JSON.stringify({
+        timestamp: Date.now(),
+        event_id: eventUuid,
+        match_id: String(matchId),
+        org_id: String(targetOrgId),
+        field_id: fieldId,
+      });
+
+      const signalKeys = [
+        `REMOTE_GOAL_${targetOrgId}_FIELD_${fieldId}`,
+        `REMOTE_GOAL_FIELD_${fieldId}`,
+      ];
+
+      for (const key of signalKeys) {
+        const { data: existingSp } = await supabaseAdmin
+          .from('sponsors')
+          .select('id')
+          .eq('name', key)
+          .limit(1);
+
+        if (existingSp && existingSp.length > 0) {
+          await supabaseAdmin
+            .from('sponsors')
+            .update({ logo_url: payloadStr, organization_id: targetOrgId })
+            .eq('id', existingSp[0].id);
+        } else {
+          await supabaseAdmin
+            .from('sponsors')
+            .insert({ name: key, logo_url: payloadStr, organization_id: targetOrgId });
+        }
+      }
+
+      // Also trigger fast broadcast
+      try {
+        supabase.channel(`obs_goal_${targetOrgId}_field_${fieldId}`).send({
+          type: 'broadcast',
+          event: 'goal_replay_trigger',
+          payload: {
+            timestamp: Date.now(),
+            event_id: eventUuid,
+            match_id: String(matchId),
+            org_id: String(targetOrgId),
+            field_id: fieldId,
+          },
+        });
+      } catch (bcErr) {}
+    } catch (e) {
+      console.warn('sendRemoteObsGoalSignal error:', e);
+    }
+  };
+
+  // SEND REMOTE FINISH MATCH SIGNAL TO AMATORA-OBS TO CLEAN REPLAYS FOLDER
+  const sendRemoteObsFinishSignal = async () => {
+    try {
+      const targetOrgId = match?.organization_id || orgId || 1;
+      const rawLocation = String(match?.location || '1').toLowerCase();
+      const fieldId = rawLocation.includes('2') ? '2' : '1';
+
+      const payloadStr = JSON.stringify({
+        timestamp: Date.now(),
+        match_id: String(matchId),
+        org_id: String(targetOrgId),
+        field_id: fieldId,
+      });
+
+      const signalKeys = [
+        `REMOTE_FINISH_MATCH_${targetOrgId}_FIELD_${fieldId}`,
+        `REMOTE_FINISH_MATCH_FIELD_${fieldId}`,
+      ];
+
+      for (const key of signalKeys) {
+        const { data: existingSp } = await supabaseAdmin
+          .from('sponsors')
+          .select('id')
+          .eq('name', key)
+          .limit(1);
+
+        if (existingSp && existingSp.length > 0) {
+          await supabaseAdmin
+            .from('sponsors')
+            .update({ logo_url: payloadStr, organization_id: targetOrgId })
+            .eq('id', existingSp[0].id);
+        } else {
+          await supabaseAdmin
+            .from('sponsors')
+            .insert({ name: key, logo_url: payloadStr, organization_id: targetOrgId });
+        }
+      }
+    } catch (e) {
+      console.warn('sendRemoteObsFinishSignal error:', e);
+    }
+  };
+
   // 1:1 Realtime Channel Subscription for live cross-device sync
   useEffect(() => {
     fetchMatchControlData();
@@ -801,6 +901,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus, scoreOverride);
 
+    if (newStatus === 'finished') {
+      sendRemoteObsFinishSignal();
+    }
+
     showToast(
       newStatus === 'first_half'
         ? "1-Taym Boshlandi 🚀"
@@ -896,6 +1000,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           home_score: rpcRes.home_score,
           away_score: rpcRes.away_score,
         }));
+      }
+
+      if (isGoal) {
+        // Trigger OBS Replay Engine (amatora.exe) workflow
+        sendRemoteObsGoalSignal(eventUuid);
       }
 
       queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });

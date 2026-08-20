@@ -13,7 +13,7 @@ interface ToastOptions {
 }
 
 interface OrgContextType {
-  orgId: number;
+  orgId: number | null;
   currentOrg: any;
   loading: boolean;
   userRole: 'org_admin' | 'user';

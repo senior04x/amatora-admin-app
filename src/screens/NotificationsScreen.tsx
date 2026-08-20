@@ -19,13 +19,13 @@ import { triggerIosCrescendoHaptic } from '../utils/haptics';
 
 export interface AppNotification {
   id: string;
-  type: 'application' | 'update' | 'transfer' | 'system_warning' | 'system_error' | 'match';
+  type: 'application' | 'update' | 'transfer' | 'system_warning' | 'system_error' | 'match' | 'collab';
   title: string;
   message: string;
   time: string;
   createdAt: number;
   isRead: boolean;
-  targetTab?: 'applications' | 'updates' | 'transfers' | 'matches' | 'settings';
+  targetTab?: 'applications' | 'updates' | 'transfers' | 'matches' | 'settings' | 'leagues';
   targetSubTab?: 'players' | 'teams';
   rawItem?: any;
 }

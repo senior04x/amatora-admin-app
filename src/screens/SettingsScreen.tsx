@@ -105,7 +105,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         const channelInfo = await fetchYtChannelInfo(tokenData.access_token);
 
         // Save tokens to AsyncStorage + Supabase DB
-        await saveYtTokens(orgId, tokenData, channelInfo);
+        await saveYtTokens(orgId || 1, tokenData, channelInfo);
 
         setYtChannelInfo(channelInfo);
         showToast({
@@ -146,7 +146,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   const loadYouTubeStatus = async () => {
     setYtLoading(true);
     try {
-      const channelInfo = await loadYtChannelForOrg(orgId);
+      const channelInfo = await loadYtChannelForOrg(orgId || 1);
       setYtChannelInfo(channelInfo);
     } catch (e) {
       console.error('Load YT status error:', e);
@@ -185,7 +185,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await disconnectYouTube(orgId);
+              await disconnectYouTube(orgId || 1);
               setYtChannelInfo(null);
               showToast({
                 message: 'YouTube kanal uzildi',
