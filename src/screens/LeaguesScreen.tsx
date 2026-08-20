@@ -881,16 +881,17 @@ export const LeaguesScreen: React.FC = () => {
     );
   };
 
-  // Disconnect / Delete Collab Connection (only by league creator)
+  // Disconnect / Delete Collab Connection (Instant Optimistic UI & Background Execution)
   const handleDisconnectCollab = (collabItem: any) => {
-    const collabId = collabItem.id || collabItem;
+    const collabId = collabItem.id;
+    const leagueIdToDisconnect = collabItem.league_id || (collabItem.id && !collabItem.league ? collabItem.id : null);
     const partnerOrgId = Number(collabItem.sender_org_id) === Number(orgId) 
       ? collabItem.receiver_org_id 
       : collabItem.sender_org_id;
     const partnerOrgName = (Number(collabItem.sender_org_id) === Number(orgId) 
       ? collabItem.receiver_org?.name 
       : collabItem.sender_org?.name) || 'Hamkor tashkilot';
-    const leagueName = editingLeague?.name || '';
+    const leagueName = collabItem.league_name || collabItem.league?.name || editingLeague?.name || 'Liga';
 
     Alert.alert(
       "Collabni uzish",
@@ -900,81 +901,107 @@ export const LeaguesScreen: React.FC = () => {
         {
           text: "Uzish",
           style: 'destructive',
-          onPress: async () => {
-            try {
-              const dbClient = supabase;
-              const { error } = await dbClient.from('league_collabs').delete().eq('id', collabId);
-              if (error) throw error;
-
-              // Notify partner organization about disconnection
-              try {
-                const myOrgName = currentOrg?.name || 'Tashkilot';
-                await dbClient.from('admin_notifications').insert({
-                  organization_id: partnerOrgId,
-                  type: 'collab_disconnected',
-                  title: 'Sherikchilik uzildi',
-                  message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi`,
-                  is_read: false,
-                  metadata: JSON.stringify({ league_name: leagueName, disconnected_by_org_id: orgId }),
-                });
-              } catch (notifErr) {
-                console.warn('Disconnect notification failed:', notifErr);
-              }
-
-              showSuccessGlassAlert("Collab uzildi", "Sherikchilik muvaffaqiyatli uzildi!");
-              if (editingLeague) {
-                const updatedCollabs = (editingLeague.collabs || []).filter((c: any) => c.id !== collabId);
-                setEditingLeague({ ...editingLeague, collabs: updatedCollabs });
-              }
-              await fetchLeagues(true);
-            } catch (e: any) {
-              console.error(e);
-              Alert.alert('Xatolik', 'Collabni uzishda xatolik: ' + (e.message || ''));
+          onPress: () => {
+            // 1. INSTANT OPTIMISTIC UI: Remove league card from screen immediately
+            if (leagueIdToDisconnect) {
+              setLeagues(prev => prev.filter(l => l.id !== leagueIdToDisconnect));
             }
+            if (editingLeague) {
+              const updatedCollabs = (editingLeague.collabs || []).filter((c: any) => c.id !== collabId);
+              setEditingLeague({ ...editingLeague, collabs: updatedCollabs });
+            }
+
+            if (showToast) {
+              showToast({ message: `"${leagueName}" ligasidagi sherikchilik uzildi ✓`, type: 'info', duration: 2500 });
+            }
+
+            // 2. BACKGROUND ASYNCHRONOUS EXECUTION: Do not block UI
+            requestAnimationFrame(async () => {
+              try {
+                const dbClient = supabase;
+                if (collabId) {
+                  await dbClient.from('league_collabs').delete().eq('id', collabId);
+                } else if (leagueIdToDisconnect) {
+                  await dbClient.from('league_collabs').delete().eq('league_id', leagueIdToDisconnect);
+                }
+
+                // Notify partner organization about disconnection
+                try {
+                  const myOrgName = currentOrg?.name || 'Tashkilot';
+                  await dbClient.from('admin_notifications').insert({
+                    organization_id: partnerOrgId,
+                    type: 'collab_disconnected',
+                    title: 'Sherikchilik uzildi',
+                    message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi`,
+                    is_read: false,
+                    metadata: JSON.stringify({ league_name: leagueName, disconnected_by_org_id: orgId }),
+                  });
+                } catch (notifErr) {}
+
+                // Silent background sync
+                fetchLeagues(true);
+              } catch (e: any) {
+                console.error('Disconnect collab background error:', e);
+              }
+            });
           },
         },
       ]
     );
   };
 
-  // Accept incoming collab request (from pending or rejected)
-  const handleAcceptCollab = async (collabRequest: any) => {
-    setProcessingCollabId(collabRequest.id);
-    // Optimistic local remove from pending & rejected list
+  // Accept incoming collab request (Instant Optimistic UI & Background Execution)
+  const handleAcceptCollab = (collabRequest: any) => {
+    const leagueName = collabRequest.league?.name || collabRequest.league_name || 'Liga';
+
+    // 1. INSTANT OPTIMISTIC UI: Remove from pending/rejected and immediately add to active leagues
     setPendingCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
     setRejectedCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
-    try {
-      const dbClient = supabase;
-      const { error } = await dbClient
-        .from('league_collabs')
-        .update({ status: 'accepted' })
-        .eq('id', collabRequest.id);
-      if (error) throw error;
 
-      // Notify sender organization that collab was accepted
-      try {
-        const myOrgName = currentOrg?.name || 'Tashkilot';
-        const leagueName = collabRequest.league?.name || collabRequest.league_name || 'Liga';
-        await dbClient.from('admin_notifications').insert({
-          organization_id: collabRequest.sender_org_id,
-          type: 'collab_accepted',
-          title: 'Sherikchilik qabul qilindi',
-          message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni qabul qildi`,
-          is_read: false,
-          metadata: JSON.stringify({ league_id: collabRequest.league_id, accepted_by_org_id: orgId }),
-        });
-      } catch (notifErr) {
-        console.warn('Accept notification failed:', notifErr);
-      }
-
-      showSuccessGlassAlert('Qabul qilindi!', `"${collabRequest.league?.name || 'Liga'}" ligasi bo'yicha sherikchilik muvaffaqiyatli qabul qilindi!`);
-      await fetchLeagues(true);
-    } catch (e: any) {
-      console.error(e);
-      Alert.alert('Xatolik', 'Qabul qilishda xatolik: ' + (e.message || ''));
-    } finally {
-      setProcessingCollabId(null);
+    if (collabRequest.league) {
+      const newLeagueItem = {
+        ...collabRequest.league,
+        isCollab: true,
+      };
+      setLeagues(prev => {
+        if (prev.some(l => l.id === newLeagueItem.id)) return prev;
+        return [newLeagueItem, ...prev];
+      });
     }
+
+    if (showToast) {
+      showToast({ message: `"${leagueName}" ligasi qabul qilindi ✓`, type: 'success', duration: 2500 });
+    }
+
+    // 2. BACKGROUND ASYNCHRONOUS EXECUTION
+    requestAnimationFrame(async () => {
+      try {
+        const dbClient = supabase;
+        const { error } = await dbClient
+          .from('league_collabs')
+          .update({ status: 'accepted' })
+          .eq('id', collabRequest.id);
+        if (error) throw error;
+
+        // Notify sender organization that collab was accepted
+        try {
+          const myOrgName = currentOrg?.name || 'Tashkilot';
+          await dbClient.from('admin_notifications').insert({
+            organization_id: collabRequest.sender_org_id,
+            type: 'collab_accepted',
+            title: 'Sherikchilik qabul qilindi',
+            message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni qabul qildi`,
+            is_read: false,
+            metadata: JSON.stringify({ league_id: collabRequest.league_id, accepted_by_org_id: orgId }),
+          });
+        } catch (notifErr) {}
+
+        // Silent background sync
+        fetchLeagues(true);
+      } catch (e: any) {
+        console.error('Accept collab background error:', e);
+      }
+    });
   };
 
   // Reject incoming collab request (sets status to 'rejected' and shows rejected button with fade-in)
