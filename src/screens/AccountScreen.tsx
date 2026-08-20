@@ -79,6 +79,9 @@ export const AccountScreen: React.FC<{
   const {
     orgId,
     currentOrg,
+    currentUser,
+    updateCurrentUserLocally,
+    refreshCurrentUser,
     loading,
     userRole,
     transferWindowOpen,
@@ -87,6 +90,7 @@ export const AccountScreen: React.FC<{
     toggleRegistrationStatus,
     refreshOrg,
     updateOrgLocally,
+    showToast,
   } = useOrg();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -262,108 +266,142 @@ export const AccountScreen: React.FC<{
     loadData();
   }, [currentOrg, userRole]);
 
-  // Handle Organization Logo Upload
+  // Handle Organization Logo Upload (SuperAdmin - Instant 0ms Preview + Background CDN Upload)
   const handlePickLogo = async () => {
     try {
       const pickerResult = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 0.8,
-        base64: true,
+        quality: 0.85,
+        base64: false,
       });
 
       if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
         return;
       }
 
-      setIsUploadingLogo(true);
       const asset = pickerResult.assets[0];
-      const dbClient = supabase;
-      const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'png';
-      const fileName = `org_logo_${orgId || 1}_${Date.now()}.${fileExt}`;
+      const localUri = asset.uri;
 
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Response(blob).arrayBuffer();
+      // 1. Instant 0ms local update for Header & AccountScreen
+      updateOrgLocally({ logo_url: localUri });
+      showToast({ message: "Tashkilot logotipi tanlandi, saqlanmoqda...", type: "info" });
 
-      const { error: uploadErr } = await dbClient.storage
-        .from('player-photos')
-        .upload(`logos/${fileName}`, arrayBuffer, { contentType: `image/${fileExt}`, upsert: true });
+      // 2. Background Asynchronous CDN Upload (Non-blocking)
+      (async () => {
+        try {
+          const dbClient = supabase;
+          const fileExt = localUri.split('.').pop()?.toLowerCase().split('?')[0] || 'jpg';
+          const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt) ? fileExt : 'jpg';
+          const fileName = `org_logo_${orgId || 1}_${Date.now()}.${safeExt}`;
 
-      if (uploadErr) {
-        throw new Error(uploadErr.message);
-      }
+          const response = await fetch(localUri);
+          const blob = await response.blob();
+          const arrayBuffer = await new Response(blob).arrayBuffer();
 
-      const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(`logos/${fileName}`);
-      const publicUrl = urlData?.publicUrl || '';
+          const { error: uploadErr } = await dbClient.storage
+            .from('player-photos')
+            .upload(`logos/${fileName}`, arrayBuffer, {
+              contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+              upsert: true
+            });
 
-      if (publicUrl) {
-        await dbClient.from('organizations').update({ logo_url: publicUrl }).eq('id', orgId || 1);
-        await refreshOrg();
-        Alert.alert('Muvaffaqiyatli', 'Tashkilot logotipi yangilandi!');
-      }
+          if (uploadErr) {
+            console.error('Storage logo upload error:', uploadErr);
+            return;
+          }
+
+          const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(`logos/${fileName}`);
+          const publicUrl = urlData?.publicUrl || '';
+
+          if (publicUrl) {
+            await dbClient.from('organizations').update({ logo_url: publicUrl }).eq('id', orgId || 1);
+            updateOrgLocally({ logo_url: publicUrl });
+            refreshOrg();
+            showToast({ message: "Tashkilot logotipi muvaffaqiyatli saqlandi! ✅", type: "success" });
+          }
+        } catch (bgErr: any) {
+          console.warn('Background logo upload warn:', bgErr);
+        }
+      })();
     } catch (err: any) {
-      console.error('Error uploading logo:', err);
-      Alert.alert('Xatolik', err.message || 'Logotipni yuklashda xatolik yuz berdi');
-    } finally {
-      setIsUploadingLogo(false);
+      console.error('Error picking logo:', err);
     }
   };
 
-  // Handle User Avatar Photo Upload (For Regular User / Organizator)
+  // Handle User Avatar Photo Upload (Organizator / User - Instant 0ms Preview + Background CDN Upload)
   const handlePickUserAvatar = async () => {
     try {
       const pickerResult = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
-        base64: true,
+        quality: 0.85,
+        base64: false,
       });
 
       if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
         return;
       }
 
-      setIsUploadingLogo(true);
       const asset = pickerResult.assets[0];
-      const dbClient = supabase;
-      const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'png';
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionEmail = sessionData?.session?.user?.email;
+      const localUri = asset.uri;
 
-      const fileName = `user_avatar_${Date.now()}.${fileExt}`;
+      // 1. Instant 0ms local update for Header & AccountScreen
+      setUserAvatarUrl(localUri);
+      updateCurrentUserLocally({ avatar_url: localUri });
+      showToast({ message: "Profil rasmi tanlandi, saqlanmoqda...", type: "info" });
 
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Response(blob).arrayBuffer();
+      // 2. Background Asynchronous CDN Upload (Non-blocking)
+      (async () => {
+        try {
+          const dbClient = supabase;
+          const { data: sessionData } = await supabase.auth.getSession();
+          const sessionEmail = sessionData?.session?.user?.email;
 
-      const { error: uploadErr } = await dbClient.storage
-        .from('player-photos')
-        .upload(`avatars/${fileName}`, arrayBuffer, { contentType: `image/${fileExt}`, upsert: true });
+          const fileExt = localUri.split('.').pop()?.toLowerCase().split('?')[0] || 'jpg';
+          const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt) ? fileExt : 'jpg';
+          const fileName = `user_avatar_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${safeExt}`;
 
-      if (uploadErr) {
-        throw new Error(uploadErr.message);
-      }
+          const response = await fetch(localUri);
+          const blob = await response.blob();
+          const arrayBuffer = await new Response(blob).arrayBuffer();
 
-      const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(`avatars/${fileName}`);
-      const publicUrl = urlData?.publicUrl || '';
+          const { error: uploadErr } = await dbClient.storage
+            .from('player-photos')
+            .upload(`avatars/${fileName}`, arrayBuffer, {
+              contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
+              upsert: true
+            });
 
-      if (publicUrl) {
-        setUserAvatarUrl(publicUrl);
-        if (sessionEmail) {
-          await dbClient
-            .from('organization_users')
-            .update({ avatar_url: publicUrl })
-            .ilike('email', sessionEmail);
+          if (uploadErr) {
+            console.error('Storage avatar upload error:', uploadErr);
+            showToast({ message: "Rasm yuklashda xatolik yuz berdi", type: "error" });
+            return;
+          }
+
+          const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(`avatars/${fileName}`);
+          const publicUrl = urlData?.publicUrl || '';
+
+          if (publicUrl) {
+            setUserAvatarUrl(publicUrl);
+            updateCurrentUserLocally({ avatar_url: publicUrl });
+
+            if (sessionEmail) {
+              await dbClient
+                .from('organization_users')
+                .update({ avatar_url: publicUrl })
+                .ilike('email', sessionEmail);
+            }
+            refreshCurrentUser();
+            showToast({ message: "Profil rasmingiz muvaffaqiyatli saqlandi! ✅", type: "success" });
+          }
+        } catch (bgErr: any) {
+          console.warn('Background avatar upload warn:', bgErr);
         }
-        Alert.alert('Muvaffaqiyatli', 'Profillaringiz logotipi (rasmingiz) yangilandi!');
-      }
+      })();
     } catch (err: any) {
-      console.error('Error uploading user avatar:', err);
-      Alert.alert('Xatolik', err.message || 'Rasm yuklashda xatolik yuz berdi');
-    } finally {
-      setIsUploadingLogo(false);
+      console.error('Error picking user avatar:', err);
     }
   };
 
@@ -524,7 +562,7 @@ export const AccountScreen: React.FC<{
                   source={{
                     uri:
                       userRole === 'user'
-                        ? (userAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop')
+                        ? (currentUser?.avatar_url || userAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop')
                         : (currentOrg?.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=120&auto=format&fit=crop'),
                   }}
                   style={styles.orgLogo}

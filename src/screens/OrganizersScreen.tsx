@@ -111,18 +111,14 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false, // Instant selection without slow cropper delay
-        quality: 0.6,
-        base64: true,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        base64: false,
       });
 
       if (!res.canceled && res.assets[0]) {
-        const asset = res.assets[0];
-        if (asset.base64) {
-          setNewOrgAvatar(`data:image/jpeg;base64,${asset.base64}`);
-        } else {
-          setNewOrgAvatar(asset.uri);
-        }
+        setNewOrgAvatar(res.assets[0].uri);
       }
     } catch (e) {
       console.error('Avatar pick error:', e);

@@ -49,37 +49,7 @@ export const Header: React.FC<{
   isEditingOrder?: boolean;
   onSaveOrder?: () => void;
 }> = ({ isEditingOrder = false, onSaveOrder }) => {
-  const { currentOrg, loading, userRole } = useOrg();
-  const [userName, setUserName] = React.useState<string | null>(null);
-  const [userAvatar, setUserAvatar] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    const fetchUserHeader = async () => {
-      if (userRole === 'user') {
-        try {
-          const dbClient = supabase;
-          const { data: sessionData } = await supabase.auth.getSession();
-          const email = sessionData?.session?.user?.email;
-          if (email) {
-            const { data: uRec } = await dbClient
-              .from('organization_users')
-              .select('full_name, avatar_url')
-              .ilike('email', email)
-              .maybeSingle();
-
-            if (uRec) {
-              setUserName(uRec.full_name || 'Organizator');
-              setUserAvatar(uRec.avatar_url || null);
-            }
-          }
-        } catch (e) {
-          console.error('Header fetch user error:', e);
-        }
-      }
-    };
-
-    fetchUserHeader();
-  }, [userRole]);
+  const { currentOrg, currentUser, loading, userRole } = useOrg();
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -88,8 +58,8 @@ export const Header: React.FC<{
     return 'Xayrli kech';
   };
 
-  const displayName = userRole === 'user' ? (userName || 'Organizator') : currentOrg?.name;
-  const displayAvatar = userRole === 'user' ? userAvatar : currentOrg?.logo_url;
+  const displayName = userRole === 'user' ? (currentUser?.full_name || 'Organizator') : currentOrg?.name;
+  const displayAvatar = userRole === 'user' ? currentUser?.avatar_url : currentOrg?.logo_url;
 
   return (
     <BlurView intensity={50} tint="dark" style={styles.headerContainer}>

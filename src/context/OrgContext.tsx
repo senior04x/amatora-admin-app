@@ -18,6 +18,10 @@ interface OrgContextType {
   loading: boolean;
   userRole: 'org_admin' | 'user';
   setUserRole: (role: 'org_admin' | 'user') => void;
+  currentUser: any;
+  setCurrentUser: (user: any) => void;
+  updateCurrentUserLocally: (fields: Partial<any>) => void;
+  refreshCurrentUser: () => Promise<void>;
   transferWindowOpen: boolean;
   setTransferWindowOpen: (val: boolean) => void;
   toggleTransferWindow: (val: boolean) => Promise<void>;
@@ -42,6 +46,7 @@ export const useOrg = () => {
 export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [orgId, setOrgId] = useState<number>(1);
   const [currentOrg, setCurrentOrg] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<'org_admin' | 'user'>('org_admin');
   const [transferWindowOpen, setTransferWindowOpen] = useState<boolean>(false);
@@ -92,6 +97,32 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const updateCurrentUserLocally = (fields: Partial<any>) => {
+    setCurrentUser((prev: any) => ({ ...prev, ...fields }));
+  };
+
+  const fetchCurrentUser = async () => {
+    try {
+      const dbClient = supabase;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionEmail = sessionData?.session?.user?.email;
+
+      if (sessionEmail) {
+        const { data: uRec } = await dbClient
+          .from('organization_users')
+          .select('*')
+          .ilike('email', sessionEmail)
+          .maybeSingle();
+
+        if (uRec) {
+          setCurrentUser(uRec);
+        }
+      }
+    } catch (e) {
+      console.error('Fetch currentUser error:', e);
+    }
+  };
+
   const fetchOrg = async () => {
     try {
       const dbClient = supabase;
@@ -101,6 +132,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const storedRole = await AsyncStorage.getItem('@amatora_user_role');
       if (storedRole === 'user') {
         setUserRole('user');
+        await fetchCurrentUser();
       } else {
         setUserRole('org_admin');
       }
@@ -147,6 +179,8 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           email: data.admin_email || data.email || '',
           phone: data.contact_phone || data.phone || '',
         };
+
+        setCurrentOrg(mergedOrg);
 
         setCurrentOrg(mergedOrg);
         if (data.transfer_window_open !== null && data.transfer_window_open !== undefined) {
@@ -326,6 +360,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         orgId,
         currentOrg,
+        currentUser,
+        setCurrentUser,
+        updateCurrentUserLocally,
+        refreshCurrentUser: fetchCurrentUser,
         loading,
         userRole,
         setUserRole,
