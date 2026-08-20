@@ -137,25 +137,47 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
         `)
         .in('event_type', ['yellow_card', 'red_card']);
 
+      let loadedEvents: any[] = [];
       if (eventsError) {
         const { data: fbEvents } = await dbClient
           .from('match_events')
           .select('*')
           .in('event_type', ['yellow_card', 'red_card']);
-        setEvents(fbEvents || []);
+        loadedEvents = fbEvents || [];
+        setEvents(loadedEvents);
       } else {
-        setEvents(eventsData || []);
+        loadedEvents = eventsData || [];
+        setEvents(loadedEvents);
       }
 
-      // 4. Fetch Players for fallback info
-      let playersQuery = dbClient
-        .from('applications')
-        .select('id, first_name, last_name, player_number, photo_url, team_id');
-      if (orgId) {
-        playersQuery = playersQuery.eq('organization_id', orgId);
+      // 4. Fetch Players for fallback info & photos from applications and players tables
+      const eventPlayerIds = loadedEvents.map((e: any) => e.player_id).filter(Boolean);
+      const uniquePlayerIds = Array.from(new Set(eventPlayerIds));
+
+      const combinedPlayers: any[] = [];
+      if (uniquePlayerIds.length > 0) {
+        try {
+          const [appsRes, playersRes] = await Promise.all([
+            dbClient.from('applications').select('*').in('id', uniquePlayerIds),
+            dbClient.from('players').select('*').in('id', uniquePlayerIds),
+          ]);
+          if (appsRes.data) combinedPlayers.push(...appsRes.data);
+          if (playersRes.data) combinedPlayers.push(...playersRes.data);
+        } catch (e) {}
       }
-      const { data: playersData } = await playersQuery;
-      setPlayersList(playersData || []);
+
+      try {
+        let fallbackAppsQuery = dbClient
+          .from('applications')
+          .select('id, first_name, last_name, player_number, photo_url, photo, avatar_url, image_url, team_id');
+        if (orgId) {
+          fallbackAppsQuery = fallbackAppsQuery.eq('organization_id', orgId);
+        }
+        const { data: fallbackApps } = await fallbackAppsQuery;
+        if (fallbackApps) combinedPlayers.push(...fallbackApps);
+      } catch (e) {}
+
+      setPlayersList(combinedPlayers);
     } catch (err) {
       console.error('Error fetching cards data:', err);
     }
@@ -181,7 +203,12 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
 
   const playerAppMap = useMemo(() => {
     const map = new Map();
-    playersList.forEach((p) => map.set(p.id, p));
+    playersList.forEach((p) => {
+      if (p.id) {
+        map.set(String(p.id), p);
+        map.set(Number(p.id), p);
+      }
+    });
     return map;
   }, [playersList]);
 
@@ -243,14 +270,36 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
 
       const pId = String(e.player_id);
       if (!cardMap.has(pId)) {
-        const appInfo = playerAppMap.get(e.player_id);
+        const appInfo = playerAppMap.get(e.player_id) || playerAppMap.get(String(e.player_id)) || playerAppMap.get(Number(e.player_id));
         const pObj = e.player || {};
 
         const firstName = pObj.first_name || appInfo?.first_name || '';
         const lastName = pObj.last_name || appInfo?.last_name || '';
-        const fullName = `${firstName} ${lastName}`.trim() || "Noma'lum o'yinchi";
-        const photoUrl = pObj.photo_url || appInfo?.photo_url || '';
-        const playerNumber = pObj.player_number || appInfo?.player_number || '';
+        const fullName =
+          pObj.full_name ||
+          appInfo?.full_name ||
+          `${firstName} ${lastName}`.trim() ||
+          pObj.name ||
+          appInfo?.name ||
+          "Noma'lum o'yinchi";
+
+        const photoUrl =
+          pObj.photo_url ||
+          pObj.photo ||
+          pObj.avatar_url ||
+          pObj.image_url ||
+          appInfo?.photo_url ||
+          appInfo?.photo ||
+          appInfo?.avatar_url ||
+          appInfo?.image_url ||
+          '';
+
+        const playerNumber =
+          pObj.player_number ||
+          pObj.number ||
+          appInfo?.player_number ||
+          appInfo?.number ||
+          '';
 
         cardMap.set(pId, {
           id: pId,
@@ -498,8 +547,10 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
           <Text style={styles.rankText}>{index + 1}</Text>
           <View style={styles.avatarWrapper}>
             <ExpoImage
-              source={{ uri: item.photoUrl || DEFAULT_AVATAR }}
+              source={{ uri: item.photoUrl ? item.photoUrl : DEFAULT_AVATAR }}
               style={styles.avatar}
+              contentFit="cover"
+              transition={200}
               cachePolicy="memory-disk"
             />
             {Boolean(item.playerNumber) && (
@@ -519,6 +570,7 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
                 <ExpoImage
                   source={{ uri: item.teamLogo || DEFAULT_TEAM_LOGO }}
                   style={styles.teamLogo}
+                  contentFit="cover"
                   cachePolicy="memory-disk"
                 />
               )}
