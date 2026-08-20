@@ -116,7 +116,12 @@ export const Header: React.FC<{
 
   return (
     <>
-      <BlurView intensity={Platform.OS === 'ios' ? 50 : 80} tint="dark" style={styles.headerContainer}>
+      <BlurView
+        intensity={Platform.OS === 'ios' ? 55 : 80}
+        tint="dark"
+        experimentalBlurMethod="dimezisBlurView"
+        style={styles.headerContainer}
+      >
         {Platform.OS === 'android' && <View style={styles.androidHeaderBackdrop} />}
         
         <View style={styles.leftRow}>
@@ -254,7 +259,7 @@ const styles = StyleSheet.create({
   },
   androidHeaderBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    backgroundColor: 'rgba(8, 8, 12, 0.68)',
   },
   rightRow: {
     flexDirection: 'row',

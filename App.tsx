@@ -280,7 +280,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       {/* Tactile Dark Navigation Dock */}
       <View style={styles.navDockWrapper}>
         <View style={styles.navDock}>
-          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'android' && <View style={styles.androidNavBackdrop} />}
+          <BlurView
+            intensity={Platform.OS === 'ios' ? 60 : 85}
+            tint="dark"
+            experimentalBlurMethod="dimezisBlurView"
+            style={StyleSheet.absoluteFill}
+          />
           
           {/* Segment 1: Dashboard (Home Outline) */}
           <TouchableOpacity
@@ -560,16 +566,20 @@ const styles = StyleSheet.create({
     right: 16,
     alignItems: 'center',
   },
+  androidNavBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(8, 8, 14, 0.72)',
+  },
   navDock: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
     height: 66,
-    backgroundColor: 'transparent',
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: Platform.OS === 'android' ? 'rgba(8, 8, 14, 0.70)' : 'transparent',
+    borderRadius: 22,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
     paddingHorizontal: 4,
     paddingVertical: 4,
     overflow: 'hidden',
@@ -577,7 +587,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.6,
     shadowRadius: 18,
-    elevation: 16,
+    elevation: 18,
   },
   segmentItem: {
     flex: 1,

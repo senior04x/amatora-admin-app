@@ -450,7 +450,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
         >
           {/* iOS Blur or Android Deep Glass Slate Container */}
           {Platform.OS === 'ios' ? (
-            <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurMethod" style={StyleSheet.absoluteFill} />
           ) : (
             <View style={styles.androidSolidBackdrop} />
           )}
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
   },
   androidSolidBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.98)',
+    backgroundColor: 'rgba(8, 8, 14, 0.94)',
   },
   sheetHeader: {
     flexDirection: 'row',
