@@ -706,127 +706,91 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   };
 
   // Execute Status Change
-  const executeStatusChange = async (overrideStatus?: string) => {
+  const executeStatusChange = (overrideStatus?: string) => {
     const newStatus = typeof overrideStatus === 'string' ? overrideStatus : statusConfirmModal.targetStatus;
-    if (!newStatus || typeof newStatus !== 'string' || isStatusChanging) return;
+    if (!newStatus || typeof newStatus !== 'string') return;
 
-    setIsStatusChanging(true);
+    setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
 
-    try {
-      let newBaseSec = timerSeconds;
-      let newRunning = isTimerRunning;
-      let nowIso: string | null = new Date().toISOString();
+    let newBaseSec = timerSeconds;
+    let newRunning = isTimerRunning;
+    let nowIso: string | null = new Date().toISOString();
 
-      if (newStatus === 'first_half') {
-        newBaseSec = halfDurationSecs;
-        newRunning = true;
-        nowIso = new Date().toISOString();
-      } else if (newStatus === 'half_time') {
-        newBaseSec = timerSeconds;
-        newRunning = false;
-        nowIso = null;
-      } else if (newStatus === 'second_half') {
-        newBaseSec = halfDurationSecs;
-        newRunning = true;
-        nowIso = new Date().toISOString();
-      } else if (newStatus === 'finished') {
-        newRunning = false;
-        nowIso = null;
-      } else if (newStatus === 'scheduled') {
-        newBaseSec = halfDurationSecs;
-        newRunning = false;
-        nowIso = null;
-      }
-
-      let scoreOverride: any = undefined;
-      if (newStatus === 'finished') {
-        const homeGoals = events.filter(
-          (e) =>
-            (e.event_type === 'goal' || e.type === 'goal') &&
-            (e.team_id === match?.home_team_id || String(e.team_id) === String(match?.home_team_id))
-        ).length;
-        const awayGoals = events.filter(
-          (e) =>
-            (e.event_type === 'goal' || e.type === 'goal') &&
-            (e.team_id === match?.away_team_id || String(e.team_id) === String(match?.away_team_id))
-        ).length;
-
-        const finalHomeScore = homeGoals > 0 ? homeGoals : (match?.home_score || 0);
-        const finalAwayScore = awayGoals > 0 ? awayGoals : (match?.away_score || 0);
-
-        scoreOverride = {
-          home_score: finalHomeScore,
-          away_score: finalAwayScore,
-          home_penalty_score: homePenalties,
-          away_penalty_score: awayPenalties,
-        };
-      }
-
-      const localUpdateData: any = {
-        status: newStatus,
-        timer_seconds: newBaseSec,
-        timer_started_at: nowIso,
-        is_timer_running: newRunning,
-        ...(scoreOverride || {}),
-      };
-
-      await updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus, scoreOverride);
-      setMatch((prev: any) => ({ ...prev, ...localUpdateData }));
-
-      // Broadcast remote signal for OBS Replay clearing if match finished
-      if (newStatus === 'finished') {
-        const fieldNum = match?.location?.includes('2-maydon') ? 2 : 1;
-        const finishSignalName = `REMOTE_FINISH_MATCH_FIELD_${fieldNum}`;
-        try {
-          const signalPayload = JSON.stringify({
-            match_id: matchId,
-            action: 'finish_match',
-            timestamp: Date.now(),
-          });
-          const { data: existingSignal } = await supabase
-            .from('sponsors')
-            .select('id')
-            .eq('name', finishSignalName)
-            .maybeSingle();
-
-          if (existingSignal) {
-            await supabase.from('sponsors').update({ logo_url: signalPayload }).eq('id', existingSignal.id);
-          } else {
-            await supabase.from('sponsors').insert({
-              name: finishSignalName,
-              logo_url: signalPayload,
-              organization_id: match?.organization_id || orgId || null,
-            });
-          }
-        } catch (sigErr) {
-          console.warn(`[FIELD_${fieldNum}] Finish match signal error:`, sigErr);
-        }
-      }
-
-      queryClient.invalidateQueries({ queryKey: ['matches'] });
-      queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.refetchQueries({ queryKey: ['finishedMatches'] });
-      queryClient.refetchQueries({ queryKey: ['matches'] });
-
-      showToast(
-        newStatus === 'first_half'
-          ? "1-Taym Boshlandi 🚀"
-          : newStatus === 'half_time'
-          ? "Tanaffus E'lon Qilindi ⏸️"
-          : newStatus === 'second_half'
-          ? "2-Taym Boshlandi 🚀"
-          : newStatus === 'finished'
-          ? "Uchrashuv Yakunlandi 🏁"
-          : "Boshlang'ich Holatga Qaytildi 🔄"
-      );
-    } catch (err: any) {
-      console.error('Error in executeStatusChange:', err);
-      Alert.alert("Xatolik", err?.message || "Statusni saqlashda xatolik yuz berdi");
-    } finally {
-      setIsStatusChanging(false);
-      setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
+    if (newStatus === 'first_half') {
+      newBaseSec = halfDurationSecs;
+      newRunning = true;
+      nowIso = new Date().toISOString();
+    } else if (newStatus === 'half_time') {
+      newBaseSec = timerSeconds;
+      newRunning = false;
+      nowIso = null;
+    } else if (newStatus === 'second_half') {
+      newBaseSec = halfDurationSecs;
+      newRunning = true;
+      nowIso = new Date().toISOString();
+    } else if (newStatus === 'finished') {
+      newRunning = false;
+      nowIso = null;
+    } else if (newStatus === 'scheduled') {
+      newBaseSec = halfDurationSecs;
+      newRunning = false;
+      nowIso = null;
     }
+
+    let scoreOverride: any = undefined;
+    if (newStatus === 'finished') {
+      const homeGoals = events.filter(
+        (e) =>
+          (e.event_type === 'goal' || e.type === 'goal') &&
+          (e.team_id === match?.home_team_id || String(e.team_id) === String(match?.home_team_id))
+      ).length;
+      const awayGoals = events.filter(
+        (e) =>
+          (e.event_type === 'goal' || e.type === 'goal') &&
+          (e.team_id === match?.away_team_id || String(e.team_id) === String(match?.away_team_id))
+      ).length;
+
+      const finalHomeScore = homeGoals > 0 ? homeGoals : (match?.home_score || 0);
+      const finalAwayScore = awayGoals > 0 ? awayGoals : (match?.away_score || 0);
+
+      scoreOverride = {
+        home_score: finalHomeScore,
+        away_score: finalAwayScore,
+        home_penalty_score: homePenalties,
+        away_penalty_score: awayPenalties,
+      };
+    }
+
+    const localUpdateData: any = {
+      status: newStatus,
+      timer_seconds: newBaseSec,
+      timer_started_at: nowIso,
+      is_timer_running: newRunning,
+      ...(scoreOverride || {}),
+    };
+
+    setMatch((prev: any) => ({ ...prev, ...localUpdateData }));
+    setIsTimerRunning(newRunning);
+    setTimerSeconds(newBaseSec);
+
+    updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus, scoreOverride);
+
+    showToast(
+      newStatus === 'first_half'
+        ? "1-Taym Boshlandi 🚀"
+        : newStatus === 'half_time'
+        ? "Tanaffus E'lon Qilindi ⏸️"
+        : newStatus === 'second_half'
+        ? "2-Taym Boshlandi 🚀"
+        : newStatus === 'finished'
+        ? "Uchrashuv Yakunlandi 🏁"
+        : "Boshlang'ich Holatga Qaytildi 🔄"
+    );
+
+    // Invalidate caches in background
+    queryClient.invalidateQueries({ queryKey: ['matches'] });
+    queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
   // Open Event Modal prefilled
