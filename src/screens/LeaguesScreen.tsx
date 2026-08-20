@@ -1523,7 +1523,7 @@ export const LeaguesScreen: React.FC = () => {
           <Text style={s.pageTitle}>{"Tashkilot Ligalari Boshqaruvi"}</Text>
         </View>
 
-        {rejectedCollabRequests.length > 0 && (
+        {!isReadOnlyUser && rejectedCollabRequests.length > 0 && (
           <Animated.View style={{ opacity: rejectedAnim }}>
             <TouchableOpacity
               style={{
@@ -1558,7 +1558,7 @@ export const LeaguesScreen: React.FC = () => {
 
       {loading ? (
         <LeagueSkeletonLoader />
-      ) : leagues.length === 0 && pendingCollabRequests.length === 0 && rejectedCollabRequests.length === 0 ? (
+      ) : leagues.length === 0 && (!isReadOnlyUser ? (pendingCollabRequests.length === 0 && rejectedCollabRequests.length === 0) : true) ? (
         <View style={s.emptyCard}>
           <Ionicons name="trophy-outline" size={48} color="rgba(255,255,255,0.15)" />
           <Text style={s.emptyTitle}>{"Hozircha ligalar mavjud emas"}</Text>
@@ -1577,57 +1577,58 @@ export const LeaguesScreen: React.FC = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />}
           renderItem={renderLeagueCard}
           ListHeaderComponent={
-            <View style={{ marginBottom: 12 }}>
-              {/* 1. Rejected Collab Requests Accordion List */}
-              {showRejectedSection && rejectedCollabRequests.length > 0 && (
-                <View style={{ marginBottom: 16, backgroundColor: 'rgba(239,68,68,0.06)', padding: 12, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Ionicons name="close-circle" size={16} color="#EF4444" style={{ marginRight: 6 }} />
-                      <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 }}>
-                        {`RAD ETILGAN SHERIKCHILIK TAKLIFLARI (${rejectedCollabRequests.length})`}
-                      </Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setShowRejectedSection(false)}>
-                      <Ionicons name="close" size={16} color="rgba(255,255,255,0.6)" />
-                    </TouchableOpacity>
-                  </View>
-
-                  {rejectedCollabRequests.map((req: any) => {
-                    const lInfo = req.league || {};
-                    const sOrg = req.sender_org || {};
-                    const isProcessing = processingCollabId === req.id;
-
-                    return (
-                      <View key={req.id} style={{ backgroundColor: 'rgba(0,0,0,0.4)', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>{lInfo.name || 'Liga'}</Text>
-                          <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{sOrg.name || 'Tashkilot'}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                          <TouchableOpacity
-                            style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.1)' }}
-                            onPress={() => handleDeleteRejectedCollab(req)}
-                          >
-                            <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '600' }}>{"O'chirish"}</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(0,255,102,0.2)', borderWidth: 1, borderColor: 'rgba(0,255,102,0.4)' }}
-                            onPress={() => handleAcceptCollab(req)}
-                            disabled={isProcessing}
-                          >
-                            {isProcessing ? (
-                              <ActivityIndicator size="small" color="#00FF66" />
-                            ) : (
-                              <Text style={{ color: '#00FF66', fontSize: 11, fontWeight: '700' }}>{"Qayta Qabul Qilish"}</Text>
-                            )}
-                          </TouchableOpacity>
-                        </View>
+            !isReadOnlyUser ? (
+              <View style={{ marginBottom: 12 }}>
+                {/* 1. Rejected Collab Requests Accordion List (Admin only) */}
+                {showRejectedSection && rejectedCollabRequests.length > 0 && (
+                  <View style={{ marginBottom: 16, backgroundColor: 'rgba(239,68,68,0.06)', padding: 12, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="close-circle" size={16} color="#EF4444" style={{ marginRight: 6 }} />
+                        <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 }}>
+                          {`RAD ETILGAN SHERIKCHILIK TAKLIFLARI (${rejectedCollabRequests.length})`}
+                        </Text>
                       </View>
-                    );
-                  })}
-                </View>
-              )}
+                      <TouchableOpacity onPress={() => setShowRejectedSection(false)}>
+                        <Ionicons name="close" size={16} color="rgba(255,255,255,0.6)" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {rejectedCollabRequests.map((req: any) => {
+                      const lInfo = req.league || {};
+                      const sOrg = req.sender_org || {};
+                      const isProcessing = processingCollabId === req.id;
+
+                      return (
+                        <View key={req.id} style={{ backgroundColor: 'rgba(0,0,0,0.4)', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>{lInfo.name || 'Liga'}</Text>
+                            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{sOrg.name || 'Tashkilot'}</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                            <TouchableOpacity
+                              style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.1)' }}
+                              onPress={() => handleDeleteRejectedCollab(req)}
+                            >
+                              <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '600' }}>{"O'chirish"}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(0,255,102,0.2)', borderWidth: 1, borderColor: 'rgba(0,255,102,0.4)' }}
+                              onPress={() => handleAcceptCollab(req)}
+                              disabled={isProcessing}
+                            >
+                              {isProcessing ? (
+                                <ActivityIndicator size="small" color="#00FF66" />
+                              ) : (
+                                <Text style={{ color: '#00FF66', fontSize: 11, fontWeight: '700' }}>{"Qayta Qabul Qilish"}</Text>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
 
               {/* 2. Pending Incoming Collab Requests with Full Metadata */}
               {pendingCollabRequests.length > 0 && (
@@ -1750,7 +1751,7 @@ export const LeaguesScreen: React.FC = () => {
                 </View>
               )}
             </View>
-          }
+          ) : null}
           ListFooterComponent={
             !isReadOnlyUser ? (
               <TouchableOpacity style={s.addBtn} onPress={handleCreateLeague} activeOpacity={0.8}>

@@ -459,15 +459,17 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
-      pendingCollabs.forEach((c: any) => {
-        const notifId = `collab_${c.id}`;
-        const createdMs = new Date(c.created_at || 0).getTime();
-        const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
-        const isReadById = readList.includes(notifId);
-        if (!isReadByTime && !isReadById) {
-          unreadCount++;
-        }
-      });
+      if (userRole !== 'user') {
+        pendingCollabs.forEach((c: any) => {
+          const notifId = `collab_${c.id}`;
+          const createdMs = new Date(c.created_at || 0).getTime();
+          const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
+          const isReadById = readList.includes(notifId);
+          if (!isReadByTime && !isReadById) {
+            unreadCount++;
+          }
+        });
+      }
 
       setUnreadNotificationsCount(unreadCount);
     } catch (e) {}
