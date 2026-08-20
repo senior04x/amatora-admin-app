@@ -52,6 +52,7 @@ import { SponsorsScreen } from './src/screens/SponsorsScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
 import { OrganizersScreen } from './src/screens/OrganizersScreen';
 import { FinishedMatchesScreen } from './src/screens/FinishedMatchesScreen';
+import { NotificationsScreen } from './src/screens/NotificationsScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 import { hasSecurePin } from './src/utils/securePin';
 
@@ -76,12 +77,12 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, userRole } = useOrg();
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers'
+    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications'
   >('dashboard');
   const [playersSubTab, setPlayersSubTab] = useState<'players' | 'teams'>('players');
 
   const handleNavigate = (
-    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers',
+    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications',
     subTab?: 'players' | 'teams'
   ) => {
     if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers'].includes(tab)) {
@@ -275,6 +276,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => setActiveTab('matches')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={() => setActiveTab('dashboard')} /></LazyScreen>
       </View>
 
       {/* Tactile Dark Navigation Dock */}

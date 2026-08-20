@@ -35,6 +35,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
   const [pin, setPin] = useState<string>('');
   const [tempPin, setTempPin] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [attempts, setAttempts] = useState<number>(0);
   const [showResetOption, setShowResetOption] = useState<boolean>(false);
 
   useEffect(() => {
@@ -63,18 +64,9 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
   const handleBiometricAuth = async () => {
     try {
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
 
-      if (!hasHardware) {
-        Alert.alert('Biometriya', 'Qurilmangizda biometrik apparat (Face ID / Barmoq izi) topilmadi.');
-        return;
-      }
-
-      if (!isEnrolled) {
-        Alert.alert('Biometriya', 'Qurilma sozlamalarida Face ID / Barmoq izi sozlanmagan.');
-        return;
-      }
+      if (!hasHardware || !isEnrolled) return;
 
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'AMATORA Admin ilovasiga kirish',
@@ -84,12 +76,9 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
 
       if (result.success) {
         onSuccess();
-      } else if (result.error && result.error !== 'user_cancel' && result.error !== 'app_cancel') {
-        Alert.alert('Face ID Xatoligi', `Xatolik turi: ${result.error}`);
       }
     } catch (err: any) {
       console.log('Biometric auth error:', err);
-      Alert.alert('Xatolik', err?.message || 'Biometriyadan foydalanishda xatolik yuz berdi');
     }
   };
 
@@ -100,7 +89,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
       setErrorMsg('');
 
       if (newPin.length === PIN_LENGTH) {
-        setTimeout(() => handlePinComplete(newPin), 200);
+        setTimeout(() => handlePinComplete(newPin), 180);
       }
     }
   };
@@ -114,12 +103,12 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
 
   const handleForgotOrResetPin = () => {
     Alert.alert(
-      'PIN kodni o\'chirish',
-      'Joriy PIN kod o\'chiriladi va tizimdan chiqasiz. Tizimga qayta kirishingiz kerak bo\'ladi. Davom etasizmi?',
+      "PIN kodni o'chirish",
+      "Qurilmadagi PIN kod o'chiriladi va Login sahifasiga qaytasiz. Davom etasizmi?",
       [
         { text: 'Bekor qilish', style: 'cancel' },
         {
-          text: 'O\'chirish va chiqish',
+          text: "O'chirish va Tizimdan chiqish",
           style: 'destructive',
           onPress: async () => {
             try {
@@ -202,12 +191,21 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
         if (enteredPin === storedPin) {
           setErrorMsg('');
           setPin('');
+          setAttempts(0);
           onSuccess();
         } else {
           Vibration.vibrate(400);
-          setErrorMsg('PIN kod noto\'g\'ri');
-          setShowResetOption(true);
+          const nextAttempts = attempts + 1;
+          setAttempts(nextAttempts);
           setPin('');
+
+          if (nextAttempts >= 3) {
+            setErrorMsg('3 marta noto\'g\'ri kiritildi! PIN kodni o\'chirib qayta kiring.');
+            setShowResetOption(true);
+          } else {
+            setErrorMsg(`PIN kod noto'g'ri (${3 - nextAttempts} ta urinish qoldi)`);
+            setShowResetOption(true);
+          }
         }
       } catch (err) {
         setErrorMsg('PIN kod o\'qishda xatolik');
@@ -315,12 +313,17 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
             {/* Reset PIN Option on Incorrect PIN */}
             {showResetOption && mode === 'verify' && (
               <TouchableOpacity
-                style={styles.resetPinBtn}
+                style={[
+                  styles.resetPinBtn,
+                  attempts >= 3 && styles.resetPinBtnUrgent,
+                ]}
                 activeOpacity={0.75}
                 onPress={handleForgotOrResetPin}
               >
-                <Ionicons name="trash-outline" size={16} color="#EF4444" />
-                <Text style={styles.resetPinBtnText}>PIN kodni o'chirish</Text>
+                <Ionicons name="trash-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.resetPinBtnText}>
+                  {attempts >= 3 ? "PIN kodni o'chirish va Tizimdan chiqish" : "PIN kodni esdan chiqardingizmi?"}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -342,16 +345,25 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 22,
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 20,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.35)',
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  resetPinBtnUrgent: {
+    backgroundColor: '#EF4444',
+    borderColor: '#EF4444',
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
   },
   resetPinBtnText: {
-    color: '#EF4444',
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '800',
   },
   bgImage: {
     flex: 1,

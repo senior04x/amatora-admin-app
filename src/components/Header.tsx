@@ -4,7 +4,6 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
-import { NotificationsModal } from './NotificationsModal';
 
 const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number; style?: any }> = ({
   width = 100,
@@ -52,7 +51,6 @@ export const Header: React.FC<{
   onNavigate?: (tab: any) => void;
 }> = ({ isEditingOrder = false, onSaveOrder, onNavigate }) => {
   const { currentOrg, currentUser, loading, userRole, orgId } = useOrg();
-  const [showNotifModal, setShowNotifModal] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Realtime unread count fetch from pending applications & teams
@@ -169,7 +167,9 @@ export const Header: React.FC<{
             <TouchableOpacity
               style={styles.bellBtn}
               activeOpacity={0.75}
-              onPress={() => setShowNotifModal(true)}
+              onPress={() => {
+                if (onNavigate) onNavigate('notifications');
+              }}
             >
               <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
               {unreadCount > 0 && (
@@ -187,14 +187,6 @@ export const Header: React.FC<{
           )}
         </View>
       </BlurView>
-
-      {/* Live System Notifications Modal */}
-      <NotificationsModal
-        visible={showNotifModal}
-        onClose={() => setShowNotifModal(false)}
-        onNavigate={onNavigate}
-        onUnreadCountChange={(cnt) => setUnreadCount(cnt)}
-      />
     </>
   );
 };
