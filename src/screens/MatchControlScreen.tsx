@@ -249,7 +249,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   };
 
   // INSTANT OPTIMISTIC TIMER UPDATE (RAM update first 0ms, DB sync in background)
-  const updateTimerDBAndState = async (
+  const updateTimerDBAndState = (
     baseSec: number,
     startedAtIso: string | null,
     isRunning: boolean,
@@ -279,57 +279,58 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       timerPayload.status = newStatus;
     }
 
-    const matchUpdate: any = {
-      updated_at: new Date().toISOString(),
-    };
-    if (newStatus) {
-      matchUpdate.status = newStatus;
-    }
-    if (scoreOverride?.home_score !== undefined) {
-      matchUpdate.home_score = scoreOverride.home_score;
-    }
-    if (scoreOverride?.away_score !== undefined) {
-      matchUpdate.away_score = scoreOverride.away_score;
-    }
-
-    const payloadStr = JSON.stringify(timerPayload);
-
+    // 1. Fast broadcast channel for instant OBS update (0ms latency!)
     try {
-      // 1. Direct update to matches table via supabaseAdmin
-      await supabaseAdmin
-        .from('matches')
-        .update(matchUpdate)
-        .eq('id', matchId);
+      supabase.channel(`obs_fast_timer_${matchId}`).send({
+        type: 'broadcast',
+        event: 'timer_update',
+        payload: timerPayload,
+      });
+    } catch (bcErr) {}
 
-      // Fast broadcast channel for instant OBS update (0 latency!)
+    // 2. Non-blocking Background DB Persistence (Zero UI delay!)
+    (async () => {
       try {
-        supabase.channel(`obs_fast_timer_${matchId}`).send({
-          type: 'broadcast',
-          event: 'timer_update',
-          payload: timerPayload,
-        });
-      } catch (bcErr) {}
+        const matchUpdate: any = {
+          updated_at: new Date().toISOString(),
+        };
+        if (newStatus) {
+          matchUpdate.status = newStatus;
+        }
+        if (scoreOverride?.home_score !== undefined) {
+          matchUpdate.home_score = scoreOverride.home_score;
+        }
+        if (scoreOverride?.away_score !== undefined) {
+          matchUpdate.away_score = scoreOverride.away_score;
+        }
 
-      // 2. Sync to sponsors timer cache reliably (Update first, insert if not exists)
-      const { data: existingSp } = await supabaseAdmin
-        .from('sponsors')
-        .select('id')
-        .eq('name', nameKey)
-        .limit(1);
+        const payloadStr = JSON.stringify(timerPayload);
 
-      if (existingSp && existingSp.length > 0) {
         await supabaseAdmin
+          .from('matches')
+          .update(matchUpdate)
+          .eq('id', matchId);
+
+        const { data: existingSp } = await supabaseAdmin
           .from('sponsors')
-          .update({ logo_url: payloadStr, organization_id: targetOrgId })
-          .eq('id', existingSp[0].id);
-      } else {
-        await supabaseAdmin
-          .from('sponsors')
-          .insert({ name: nameKey, logo_url: payloadStr, organization_id: targetOrgId });
+          .select('id')
+          .eq('name', nameKey)
+          .limit(1);
+
+        if (existingSp && existingSp.length > 0) {
+          await supabaseAdmin
+            .from('sponsors')
+            .update({ logo_url: payloadStr, organization_id: targetOrgId })
+            .eq('id', existingSp[0].id);
+        } else {
+          await supabaseAdmin
+            .from('sponsors')
+            .insert({ name: nameKey, logo_url: payloadStr, organization_id: targetOrgId });
+        }
+      } catch (e) {
+        console.warn('Background timer sync error:', e);
       }
-    } catch (e) {
-      console.warn('Fast timer sync error:', e);
-    }
+    })();
   };
 
   // 1:1 Realtime Channel Subscription for live cross-device sync
@@ -610,24 +611,22 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const [isTimerToggling, setIsTimerToggling] = useState(false);
-
-  // Instant Manual Timer Toggle (Play / Pause 0ms RAM response)
-  const toggleTimerManual = async () => {
-    if (isTimerToggling) return;
-    setIsTimerToggling(true);
+  // Instant Manual Timer Toggle (Play / Pause 0ms Instant Response!)
+  const toggleTimerManual = () => {
     const newRunning = !isTimerRunning;
     let curRemaining = timerSeconds;
     if (curRemaining <= 0) curRemaining = halfDurationSecs;
     const nowIso = newRunning ? new Date().toISOString() : null;
-    try {
-      await updateTimerDBAndState(curRemaining, nowIso, newRunning);
-      showToast(newRunning ? "Taymer davom ettirildi ▶️" : "Taymer to'xtatildi (Pauza) ⏸️");
-    } catch (e: any) {
-      console.warn('Toggle timer error:', e);
-    } finally {
-      setIsTimerToggling(false);
-    }
+
+    // 1. Immediate UI flip (0ms - zero delay!)
+    setIsTimerRunning(newRunning);
+    setTimerSeconds(curRemaining);
+    baseTimerSecondsRef.current = curRemaining;
+    timerStartedAtRef.current = nowIso;
+    showToast(newRunning ? "Taymer davom ettirildi ▶️" : "Taymer to'xtatildi (Pauza) ⏸️");
+
+    // 2. Non-blocking Background persistence
+    updateTimerDBAndState(curRemaining, nowIso, newRunning);
   };
 
   // Instant Reset Timer (0ms RAM response)
@@ -1565,29 +1564,25 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             },
           ]}
           onPress={toggleTimerManual}
-          disabled={isTimerToggling}
           activeOpacity={0.85}
         >
-          {isTimerToggling ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <View style={styles.solidBtnContentRow}>
-              <View style={styles.solidBtnLeftGroup}>
-                <Ionicons
-                  name={isTimerRunning ? 'pause-circle' : 'play-circle'}
-                  size={26}
-                  color="#FFFFFF"
-                />
-                <Text style={styles.solidBtnMainText}>
-                  {isTimerRunning ? "Taymerni To'xtatish (Pauza)" : "Taymerni Davom Ettirish"}
-                </Text>
-              </View>
-
-              <View style={styles.solidBtnTimeBadge}>
-                <Text style={styles.solidBtnTimeText}>{formatTimer(timerSeconds)}</Text>
-              </View>
+          <View style={styles.solidBtnContentRow}>
+            <View style={styles.solidBtnLeftGroup}>
+              <Ionicons
+                name={isTimerRunning ? 'pause-circle' : 'play-circle'}
+                size={26}
+                color="#FFFFFF"
+              />
+              <Text style={styles.solidBtnMainText}>
+                {isTimerRunning ? "Vaqtni To'xtatish (Pauza)" : 'Vaqtni Davom Ettirish'}
+              </Text>
             </View>
-          )}
+            <View style={styles.solidBtnTimeBadge}>
+              <Text style={styles.solidBtnTimeText}>
+                {formatTimer(timerSeconds)}
+              </Text>
+            </View>
+          </View>
         </TouchableOpacity>
       </View>
 
