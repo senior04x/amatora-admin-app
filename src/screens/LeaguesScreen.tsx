@@ -881,21 +881,29 @@ export const LeaguesScreen: React.FC = () => {
     );
   };
 
-  // Disconnect / Delete Collab Connection (Instant Optimistic UI & Background Execution)
-  const handleDisconnectCollab = (collabItem: any) => {
-    const collabId = collabItem.id;
-    const leagueIdToDisconnect = collabItem.league_id || (collabItem.id && !collabItem.league ? collabItem.id : null);
-    const partnerOrgId = Number(collabItem.sender_org_id) === Number(orgId) 
-      ? collabItem.receiver_org_id 
-      : collabItem.sender_org_id;
-    const partnerOrgName = (Number(collabItem.sender_org_id) === Number(orgId) 
-      ? collabItem.receiver_org?.name 
-      : collabItem.sender_org?.name) || 'Hamkor tashkilot';
-    const leagueName = collabItem.league_name || collabItem.league?.name || editingLeague?.name || 'Liga';
+  // Disconnect / Delete Collab Connection (Robust & Instant)
+  const handleDisconnectCollab = (itemOrCollab: any) => {
+    if (!itemOrCollab) return;
+
+    // Resolve leagueId and collabId accurately
+    const leagueId = itemOrCollab.league_id || itemOrCollab.id;
+    const collabId = (itemOrCollab.league_id && itemOrCollab.id) ? itemOrCollab.id : null;
+    
+    // Find partners
+    const isSender = Number(itemOrCollab.sender_org_id) === Number(orgId);
+    const partnerOrgId = isSender 
+      ? (itemOrCollab.receiver_org_id || itemOrCollab.organization_id)
+      : (itemOrCollab.sender_org_id || itemOrCollab.organization_id);
+    
+    const partnerOrgName = (isSender 
+      ? itemOrCollab.receiver_org?.name 
+      : itemOrCollab.sender_org?.name) || 'Hamkor tashkilot';
+      
+    const leagueName = itemOrCollab.league_name || itemOrCollab.league?.name || itemOrCollab.name || editingLeague?.name || 'Liga';
 
     Alert.alert(
-      "Collabni uzish",
-      `"${partnerOrgName}" tashkiloti bilan "${leagueName}" ligasidagi sherikchilikni uzishni xohlaysizmi?`,
+      "Sherikchilikni uzish",
+      `"${leagueName}" ligasi bo'yicha sherikchilikni uzishni xohlaysizmi?`,
       [
         { text: 'Bekor qilish', style: 'cancel' },
         {
@@ -903,11 +911,13 @@ export const LeaguesScreen: React.FC = () => {
           style: 'destructive',
           onPress: () => {
             // 1. INSTANT OPTIMISTIC UI: Remove league card from screen immediately
-            if (leagueIdToDisconnect) {
-              setLeagues(prev => prev.filter(l => l.id !== leagueIdToDisconnect));
+            if (leagueId) {
+              setLeagues(prev => prev.filter(l => String(l.id) !== String(leagueId)));
             }
             if (editingLeague) {
-              const updatedCollabs = (editingLeague.collabs || []).filter((c: any) => c.id !== collabId);
+              const updatedCollabs = (editingLeague.collabs || []).filter((c: any) => 
+                String(c.id) !== String(collabId) && String(c.league_id) !== String(leagueId)
+              );
               setEditingLeague({ ...editingLeague, collabs: updatedCollabs });
             }
 
@@ -915,28 +925,39 @@ export const LeaguesScreen: React.FC = () => {
               showToast({ message: `"${leagueName}" ligasidagi sherikchilik uzildi ✓`, type: 'info', duration: 2500 });
             }
 
-            // 2. BACKGROUND ASYNCHRONOUS EXECUTION: Do not block UI
+            // 2. BACKGROUND ASYNCHRONOUS EXECUTION
             requestAnimationFrame(async () => {
               try {
                 const dbClient = supabase;
+                
+                // Delete by collab ID if known
                 if (collabId) {
                   await dbClient.from('league_collabs').delete().eq('id', collabId);
-                } else if (leagueIdToDisconnect) {
-                  await dbClient.from('league_collabs').delete().eq('league_id', leagueIdToDisconnect);
+                }
+                
+                // Also delete by league_id & orgId match to guarantee 100% removal
+                if (leagueId && orgId) {
+                  await dbClient
+                    .from('league_collabs')
+                    .delete()
+                    .eq('league_id', leagueId)
+                    .or(`receiver_org_id.eq.${orgId},sender_org_id.eq.${orgId}`);
                 }
 
                 // Notify partner organization about disconnection
-                try {
-                  const myOrgName = currentOrg?.name || 'Tashkilot';
-                  await dbClient.from('admin_notifications').insert({
-                    organization_id: partnerOrgId,
-                    type: 'collab_disconnected',
-                    title: 'Sherikchilik uzildi',
-                    message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi`,
-                    is_read: false,
-                    metadata: JSON.stringify({ league_name: leagueName, disconnected_by_org_id: orgId }),
-                  });
-                } catch (notifErr) {}
+                if (partnerOrgId && Number(partnerOrgId) !== Number(orgId)) {
+                  try {
+                    const myOrgName = currentOrg?.name || 'Tashkilot';
+                    await dbClient.from('admin_notifications').insert({
+                      organization_id: partnerOrgId,
+                      type: 'collab_disconnected',
+                      title: 'Sherikchilik uzildi',
+                      message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi`,
+                      is_read: false,
+                      metadata: JSON.stringify({ league_name: leagueName, disconnected_by_org_id: orgId }),
+                    });
+                  } catch (notifErr) {}
+                }
 
                 // Silent background sync
                 fetchLeagues(true);
@@ -1429,15 +1450,17 @@ export const LeaguesScreen: React.FC = () => {
     const isCollabItem = item.organization_id && Number(item.organization_id) !== Number(orgId);
 
     // Find the collab record for this league to disconnect if swiped
-    const currentCollab = (item.collabs || []).find((c: any) => 
+    const matchingCollab = (item.collabs || []).find((c: any) => 
       Number(c.sender_org_id) === Number(orgId) || Number(c.receiver_org_id) === Number(orgId)
-    ) || item.collabs?.[0] || {
-      id: item.collab_id || item.id,
+    ) || item.collabs?.[0] || {};
+
+    const currentCollab = {
+      ...item,
+      ...matchingCollab,
       league_id: item.id,
-      sender_org_id: item.organization_id,
+      name: item.name,
+      sender_org_id: item.organization_id || matchingCollab.sender_org_id,
       receiver_org_id: orgId,
-      sender_org: { name: 'Asosiy Tashkilot' },
-      league_name: item.name,
     };
 
     return (
