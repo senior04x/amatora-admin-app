@@ -87,15 +87,24 @@ export const StandingsScreen: React.FC = () => {
     try {
       const dbClient = supabase;
 
-      // 1. Fetch Teams
-      let teamsQuery = dbClient.from('teams').select('*');
+      // 1. Fetch ONLY Approved & Active Teams
+      let teamsQuery = dbClient
+        .from('teams')
+        .select('*')
+        .in('status', ['approved', 'tasdiqlangan']);
+
       if (orgId) {
         teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
       }
       const { data: teamsData } = await teamsQuery;
 
-      // Filter teams for this league
+      // Filter teams for this league and strictly check approved status and not archived
       const leagueTeams = (teamsData || []).filter((t: any) => {
+        const st = String(t.status || '').toLowerCase().trim();
+        const isApproved = st === 'approved' || st === 'tasdiqlangan';
+        if (!isApproved) return false;
+        if (t.is_archived === true) return false;
+
         if (!t.league) return true;
         const leaguesList = String(t.league).split(',').map((s) => s.trim().toLowerCase());
         return leaguesList.includes(leagueName.toLowerCase().trim());
