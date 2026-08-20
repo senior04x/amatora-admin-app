@@ -296,8 +296,20 @@ export const ExportScreen: React.FC = () => {
       let appQuery = dbClient.from('applications').select('*').order('created_at', { ascending: false });
       if (orgId) {
         if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          appQuery = appQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+          try {
+            const { data: cTeams } = await dbClient
+              .from('teams')
+              .select('id')
+              .in('league', collabLeagueNames);
+            const cTeamIds = (cTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (cTeamIds.length > 0) {
+              appQuery = appQuery.or(`organization_id.eq.${orgId},team_id.in.(${cTeamIds.join(',')})`);
+            } else {
+              appQuery = appQuery.eq('organization_id', orgId);
+            }
+          } catch (e) {
+            appQuery = appQuery.eq('organization_id', orgId);
+          }
         } else {
           appQuery = appQuery.eq('organization_id', orgId);
         }
