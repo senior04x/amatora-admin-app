@@ -346,6 +346,9 @@ export const LeaguesScreen: React.FC = () => {
 
   // Pending incoming collab requests (where this org is receiver)
   const [pendingCollabRequests, setPendingCollabRequests] = useState<any[]>([]);
+  const [rejectedCollabRequests, setRejectedCollabRequests] = useState<any[]>([]);
+  const [showRejectedSection, setShowRejectedSection] = useState(false);
+  const rejectedAnim = useRef(new Animated.Value(0)).current;
   const [processingCollabId, setProcessingCollabId] = useState<number | null>(null);
   const [viewingLeagueDetail, setViewingLeagueDetail] = useState<any | null>(null);
 
@@ -515,10 +518,27 @@ export const LeaguesScreen: React.FC = () => {
     if (!isSilent) setLoading(true);
     try {
       const dbClient = supabase;
+
+      // 0. Fetch all accepted collabs for this org to guarantee they are displayed
+      let myAcceptedCollabLeagueIds: number[] = [];
+      try {
+        const { data: myCollabsData } = await dbClient
+          .from('league_collabs')
+          .select('league_id')
+          .or(`receiver_org_id.eq.${orgId},sender_org_id.eq.${orgId}`)
+          .eq('status', 'accepted');
+        if (myCollabsData && myCollabsData.length > 0) {
+          myAcceptedCollabLeagueIds = myCollabsData.map((c: any) => Number(c.league_id)).filter(Boolean);
+        }
+      } catch (err) {}
+
+      // Combine with context collab ids
+      const allActiveCollabIds = [...new Set([...(collabLeagueIds || []), ...myAcceptedCollabLeagueIds])];
+
       let query = dbClient.from('leagues').select('*').order('created_at', { ascending: false });
       if (orgId) {
-        if (collabLeagueIds && collabLeagueIds.length > 0) {
-          query = query.or(`organization_id.eq.${orgId},id.in.(${collabLeagueIds.join(',')})`);
+        if (allActiveCollabIds.length > 0) {
+          query = query.or(`organization_id.eq.${orgId},id.in.(${allActiveCollabIds.join(',')})`);
         } else {
           query = query.eq('organization_id', orgId);
         }
@@ -526,79 +546,59 @@ export const LeaguesScreen: React.FC = () => {
       const { data: leaguesData, error } = await query;
       if (error) console.error(error);
 
-      if (leaguesData && leaguesData.length > 0) {
-        // 1. Fetch LEAGUE_BG_%, LEAGUE_DURATION_%, LEAGUE_START_DATE_%, LEAGUE_END_DATE_% from sponsors table
-        const { data: dateSponsors } = await dbClient
-          .from('sponsors')
-          .select('name, logo_url')
-          .or('name.like.LEAGUE_BG_%,name.like.LEAGUE_DURATION_%,name.like.LEAGUE_START_DATE_%,name.like.LEAGUE_END_DATE_%');
+      // 1. Fetch metadata from sponsors table (for ALL leagues including collabs)
+      const { data: dateSponsors } = await dbClient
+        .from('sponsors')
+        .select('name, logo_url')
+        .or('name.like.LEAGUE_BG_%,name.like.LEAGUE_DURATION_%,name.like.LEAGUE_START_DATE_%,name.like.LEAGUE_END_DATE_%');
 
-        const bgMap: any = {};
-        const durationMap: any = {};
-        const startMap: any = {};
-        const endMap: any = {};
+      const bgMap: any = {};
+      const durationMap: any = {};
+      const startMap: any = {};
+      const endMap: any = {};
 
-        if (dateSponsors) {
-          dateSponsors.forEach((s: any) => {
-            if (s.name.startsWith('LEAGUE_BG_')) {
-              const lId = s.name.replace('LEAGUE_BG_', '');
-              bgMap[lId] = s.logo_url;
-            } else if (s.name.startsWith('LEAGUE_DURATION_')) {
-              const lId = s.name.replace('LEAGUE_DURATION_', '');
-              durationMap[lId] = parseInt(s.logo_url) || 60;
-            } else if (s.name.startsWith('LEAGUE_START_DATE_')) {
-              const lId = s.name.replace('LEAGUE_START_DATE_', '');
-              startMap[lId] = s.logo_url;
-            } else if (s.name.startsWith('LEAGUE_END_DATE_')) {
-              const lId = s.name.replace('LEAGUE_END_DATE_', '');
-              endMap[lId] = s.logo_url;
-            }
-          });
-        }
-
-        // 2. Fetch league_collabs and partner organizations
-        let collabList: any[] = [];
-        try {
-          const { data: cData } = await dbClient
-            .from('league_collabs')
-            .select('*, sender_org:organizations!sender_org_id(id, name, logo_url), receiver_org:organizations!receiver_org_id(id, name, logo_url)');
-          if (cData) {
-            collabList = cData;
-          } else {
-            const { data: plainC } = await dbClient.from('league_collabs').select('*');
-            if (plainC && plainC.length > 0) {
-              const { data: orgs } = await dbClient.from('organizations').select('id, name, logo_url');
-              const orgMap: any = {};
-              (orgs || []).forEach((o: any) => { orgMap[o.id] = o; });
-              collabList = plainC.map((c: any) => ({
-                ...c,
-                sender_org: orgMap[c.sender_org_id],
-                receiver_org: orgMap[c.receiver_org_id],
-              }));
-            }
+      if (dateSponsors) {
+        dateSponsors.forEach((s: any) => {
+          if (s.name.startsWith('LEAGUE_BG_')) {
+            const lId = s.name.replace('LEAGUE_BG_', '');
+            bgMap[lId] = s.logo_url;
+          } else if (s.name.startsWith('LEAGUE_DURATION_')) {
+            const lId = s.name.replace('LEAGUE_DURATION_', '');
+            durationMap[lId] = parseInt(s.logo_url) || 60;
+          } else if (s.name.startsWith('LEAGUE_START_DATE_')) {
+            const lId = s.name.replace('LEAGUE_START_DATE_', '');
+            startMap[lId] = s.logo_url;
+          } else if (s.name.startsWith('LEAGUE_END_DATE_')) {
+            const lId = s.name.replace('LEAGUE_END_DATE_', '');
+            endMap[lId] = s.logo_url;
           }
-        } catch (e) {
-          try {
-            const { data: plainC } = await dbClient.from('league_collabs').select('*');
-            if (plainC && plainC.length > 0) {
-              const { data: orgs } = await dbClient.from('organizations').select('id, name, logo_url');
-              const orgMap: any = {};
-              (orgs || []).forEach((o: any) => { orgMap[o.id] = o; });
-              collabList = plainC.map((c: any) => ({
-                ...c,
-                sender_org: orgMap[c.sender_org_id],
-                receiver_org: orgMap[c.receiver_org_id],
-              }));
-            }
-          } catch (err) {}
-        }
-
-        const collabMap: Record<string | number, any[]> = {};
-        collabList.forEach((c: any) => {
-          if (!collabMap[c.league_id]) collabMap[c.league_id] = [];
-          collabMap[c.league_id].push(c);
         });
+      }
 
+      // 2. Fetch league_collabs and partner organizations
+      let collabList: any[] = [];
+      try {
+        const { data: plainC } = await dbClient.from('league_collabs').select('*');
+        if (plainC && plainC.length > 0) {
+          const orgIds = [...new Set(plainC.flatMap((c: any) => [c.sender_org_id, c.receiver_org_id]).filter(Boolean))];
+          const { data: orgs } = await dbClient.from('organizations').select('id, name, logo_url').in('id', orgIds);
+          const orgMap: any = {};
+          (orgs || []).forEach((o: any) => { orgMap[o.id] = o; });
+          collabList = plainC.map((c: any) => ({
+            ...c,
+            sender_org: orgMap[c.sender_org_id],
+            receiver_org: orgMap[c.receiver_org_id],
+          }));
+        }
+      } catch (err) {}
+
+      const collabMap: Record<string | number, any[]> = {};
+      collabList.forEach((c: any) => {
+        if (!collabMap[c.league_id]) collabMap[c.league_id] = [];
+        collabMap[c.league_id].push(c);
+      });
+
+      if (leaguesData && leaguesData.length > 0) {
         const merged = leaguesData.map((l: any) => ({
           ...l,
           bg_image: l.bg_image || l.export_bg_url || bgMap[l.id] || bgMap[String(l.id)] || null,
@@ -607,54 +607,73 @@ export const LeaguesScreen: React.FC = () => {
           end_date: l.end_date || endMap[l.id] || endMap[String(l.id)] || '',
           collabs: collabMap[l.id] || collabMap[String(l.id)] || [],
         }));
-
         setLeagues(merged);
       } else {
         setLeagues([]);
       }
 
-      // 3. Fetch pending incoming collab requests (where this org is receiver)
+      // Helper to enrich a raw league object with all background and date metadata
+      const enrichLeague = (l: any) => {
+        if (!l) return null;
+        const lId = l.id;
+        return {
+          ...l,
+          bg_image: l.bg_image || l.export_bg_url || bgMap[lId] || bgMap[String(lId)] || null,
+          export_bg_url: l.export_bg_url || l.bg_image || bgMap[lId] || bgMap[String(lId)] || null,
+          match_duration: l.match_duration || durationMap[lId] || durationMap[String(lId)] || 60,
+          start_date: l.start_date || startMap[lId] || startMap[String(lId)] || '',
+          end_date: l.end_date || endMap[lId] || endMap[String(lId)] || '',
+        };
+      };
+
+      // 3. Fetch incoming collab requests (pending & rejected) where this org is receiver
       try {
-        const dbClient = supabase;
-        const { data: pendingCollabs } = await dbClient
+        const { data: incomingCollabs } = await dbClient
           .from('league_collabs')
-          .select('*, sender_org:organizations!sender_org_id(id, name, logo_url), league:leagues!league_id(id, name, logo_url, export_bg_url, season, organization_id)')
+          .select('*')
           .eq('receiver_org_id', orgId)
-          .eq('status', 'pending');
+          .in('status', ['pending', 'rejected']);
 
-        if (pendingCollabs && pendingCollabs.length > 0) {
-          setPendingCollabRequests(pendingCollabs);
-        } else {
-          // Fallback without joins
-          const { data: plainPending } = await dbClient
-            .from('league_collabs')
-            .select('*')
-            .eq('receiver_org_id', orgId)
-            .eq('status', 'pending');
+        if (incomingCollabs && incomingCollabs.length > 0) {
+          const senderOrgIds = [...new Set(incomingCollabs.map((p: any) => p.sender_org_id))];
+          const leagueIds = [...new Set(incomingCollabs.map((p: any) => p.league_id))];
 
-          if (plainPending && plainPending.length > 0) {
-            // Fetch related data manually
-            const senderOrgIds = [...new Set(plainPending.map((p: any) => p.sender_org_id))];
-            const leagueIds = [...new Set(plainPending.map((p: any) => p.league_id))];
-            const { data: senderOrgs } = await dbClient.from('organizations').select('id, name, logo_url').in('id', senderOrgIds);
-            const { data: leaguesInfo } = await dbClient.from('leagues').select('id, name, logo_url, export_bg_url, season, organization_id').in('id', leagueIds);
-            const senderMap: any = {};
-            (senderOrgs || []).forEach((o: any) => { senderMap[o.id] = o; });
-            const leagueMap: any = {};
-            (leaguesInfo || []).forEach((l: any) => { leagueMap[l.id] = l; });
+          const [ { data: senderOrgs }, { data: leaguesInfo } ] = await Promise.all([
+            dbClient.from('organizations').select('id, name, logo_url').in('id', senderOrgIds),
+            dbClient.from('leagues').select('*').in('id', leagueIds)
+          ]);
 
-            setPendingCollabRequests(plainPending.map((p: any) => ({
-              ...p,
-              sender_org: senderMap[p.sender_org_id] || null,
-              league: leagueMap[p.league_id] || null,
-            })));
-          } else {
-            setPendingCollabRequests([]);
+          const senderMap: any = {};
+          (senderOrgs || []).forEach((o: any) => { senderMap[o.id] = o; });
+
+          const leagueMap: any = {};
+          (leaguesInfo || []).forEach((l: any) => { leagueMap[l.id] = enrichLeague(l); });
+
+          const enrichedList = incomingCollabs.map((c: any) => ({
+            ...c,
+            sender_org: senderMap[c.sender_org_id] || null,
+            league: leagueMap[c.league_id] || null,
+          }));
+
+          const pendingList = enrichedList.filter(c => c.status === 'pending');
+          const rejectedList = enrichedList.filter(c => c.status === 'rejected');
+
+          setPendingCollabRequests(pendingList);
+          setRejectedCollabRequests(rejectedList);
+
+          if (rejectedList.length > 0) {
+            Animated.timing(rejectedAnim, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }).start();
           }
+        } else {
+          setPendingCollabRequests([]);
+          setRejectedCollabRequests([]);
         }
       } catch (pendingErr) {
-        console.warn('Pending collabs fetch error:', pendingErr);
-        setPendingCollabRequests([]);
+        console.warn('Pending/Rejected collabs fetch error:', pendingErr);
       }
     } catch (e) {
       console.error(e);
@@ -897,11 +916,12 @@ export const LeaguesScreen: React.FC = () => {
     );
   };
 
-  // Accept incoming collab request
+  // Accept incoming collab request (from pending or rejected)
   const handleAcceptCollab = async (collabRequest: any) => {
     setProcessingCollabId(collabRequest.id);
-    // Optimistic local remove from pending list
+    // Optimistic local remove from pending & rejected list
     setPendingCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
+    setRejectedCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
     try {
       const dbClient = supabase;
       const { error } = await dbClient
@@ -936,7 +956,7 @@ export const LeaguesScreen: React.FC = () => {
     }
   };
 
-  // Reject incoming collab request
+  // Reject incoming collab request (sets status to 'rejected' and shows rejected button with fade-in)
   const handleRejectCollab = (collabRequest: any) => {
     Alert.alert(
       "Taklifni rad etish",
@@ -948,11 +968,24 @@ export const LeaguesScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             setProcessingCollabId(collabRequest.id);
-            // Optimistic local remove from pending list
+            // Optimistic local move from pending to rejected
             setPendingCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
+            const updatedRejectedItem = { ...collabRequest, status: 'rejected' };
+            setRejectedCollabRequests(prev => [updatedRejectedItem, ...prev.filter(r => r.id !== collabRequest.id)]);
+
+            // Trigger smooth Fade-in animation
+            Animated.timing(rejectedAnim, {
+              toValue: 1,
+              duration: 400,
+              useNativeDriver: true,
+            }).start();
+
             try {
               const dbClient = supabase;
-              const { error } = await dbClient.from('league_collabs').delete().eq('id', collabRequest.id);
+              const { error } = await dbClient
+                .from('league_collabs')
+                .update({ status: 'rejected' })
+                .eq('id', collabRequest.id);
               if (error) throw error;
 
               // Notify sender organization that collab was rejected
@@ -971,7 +1004,7 @@ export const LeaguesScreen: React.FC = () => {
                 console.warn('Reject notification failed:', notifErr);
               }
 
-              showToast({ message: 'Taklif rad etildi', type: 'info' });
+              if (showToast) showToast({ message: 'Taklif rad etildi (Rad etilganlar ro\'yxatiga o\'tkazildi)', type: 'info' });
               await fetchLeagues(true);
             } catch (e: any) {
               console.error(e);
@@ -979,6 +1012,29 @@ export const LeaguesScreen: React.FC = () => {
             } finally {
               setProcessingCollabId(null);
             }
+          },
+        },
+      ]
+    );
+  };
+
+  // Permanently delete a rejected collab request
+  const handleDeleteRejectedCollab = (collabRequest: any) => {
+    Alert.alert(
+      "Tozalash",
+      `"${collabRequest.league?.name || 'Liga'}" taklifini ro'yxatdan butunlay o'chirib tashlamoqchimisiz?`,
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: "O'chirish",
+          style: 'destructive',
+          onPress: async () => {
+            setRejectedCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
+            try {
+              const dbClient = supabase;
+              await dbClient.from('league_collabs').delete().eq('id', collabRequest.id);
+              if (showToast) showToast({ message: "O'chirildi", type: 'info' });
+            } catch (e) {}
           },
         },
       ]
@@ -1336,21 +1392,49 @@ export const LeaguesScreen: React.FC = () => {
     );
   };
 
-  return (
-    <View style={s.container}>
-      {/* Page Header */}
+      {/* Page Header with Animated Rejected Collabs Button */}
       <View style={s.pageHeader}>
         <View style={s.pageHeaderLeft}>
           <Ionicons name="trophy-outline" size={22} color="#FFFFFF" />
           <Text style={s.pageTitle}>{"Tashkilot Ligalari Boshqaruvi"}</Text>
         </View>
+
+        {rejectedCollabRequests.length > 0 && (
+          <Animated.View style={{ opacity: rejectedAnim }}>
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: showRejectedSection ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.08)',
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: showRejectedSection ? '#EF4444' : 'rgba(255,255,255,0.15)',
+              }}
+              onPress={() => setShowRejectedSection(!showRejectedSection)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close-circle-outline" size={14} color={showRejectedSection ? '#FF6B6B' : '#EF4444'} />
+              <Text style={{ color: showRejectedSection ? '#FFFFFF' : '#EF4444', fontSize: 11, fontWeight: '700', marginLeft: 4 }}>
+                {`Rad etilganlar (${rejectedCollabRequests.length})`}
+              </Text>
+              <Ionicons
+                name={showRejectedSection ? "chevron-up" : "chevron-down"}
+                size={12}
+                color={showRejectedSection ? '#FFFFFF' : '#EF4444'}
+                style={{ marginLeft: 4 }}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+        )}
       </View>
 
       <Text style={s.sectionLabel}>{`MAVJUD LIGALAR (${leagues.length})`}</Text>
 
       {loading ? (
         <LeagueSkeletonLoader />
-      ) : leagues.length === 0 ? (
+      ) : leagues.length === 0 && pendingCollabRequests.length === 0 && rejectedCollabRequests.length === 0 ? (
         <View style={s.emptyCard}>
           <Ionicons name="trophy-outline" size={48} color="rgba(255,255,255,0.15)" />
           <Text style={s.emptyTitle}>{"Hozircha ligalar mavjud emas"}</Text>
@@ -1369,102 +1453,179 @@ export const LeaguesScreen: React.FC = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />}
           renderItem={renderLeagueCard}
           ListHeaderComponent={
-            pendingCollabRequests.length > 0 ? (
-              <View style={{ marginBottom: 12 }}>
-                <Text style={[s.sectionLabel, { marginTop: 0, marginBottom: 8 }]}>{`📩 KIRUVCHI SHERIKCHILIK TAKLIFLARI (${pendingCollabRequests.length})`}</Text>
-                {pendingCollabRequests.map((req: any) => {
-                  const leagueInfo = req.league || {};
-                  const senderOrg = req.sender_org || {};
-                  const isProcessing = processingCollabId === req.id;
-                  return (
-                    <View key={req.id} style={[s.card, { borderWidth: 1, borderColor: 'rgba(0,170,255,0.4)', marginBottom: 12 }]}>
-                      <ImageBackground
-                        source={leagueInfo.export_bg_url ? { uri: leagueInfo.export_bg_url } : undefined}
-                        style={s.cardFullBg}
-                        imageStyle={s.cardFullBgImage}
-                        resizeMode="cover"
-                      >
-                        <View style={s.cardDarkOverlay}>
-                          {/* Top: Taklif badge */}
-                          <View style={s.cardTopRow}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,170,255,0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(0,170,255,0.5)' }}>
-                              <Ionicons name="mail-unread-outline" size={12} color="#00AAFF" />
-                              <Text style={{ color: '#00AAFF', fontSize: 10, fontWeight: '800', marginLeft: 4 }}>{"SHERIKCHILIK TAKLIFI"}</Text>
-                            </View>
-                          </View>
+            <View style={{ marginBottom: 12 }}>
+              {/* 1. Rejected Collab Requests Accordion List */}
+              {showRejectedSection && rejectedCollabRequests.length > 0 && (
+                <View style={{ marginBottom: 16, backgroundColor: 'rgba(239,68,68,0.06)', padding: 12, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="close-circle" size={16} color="#EF4444" style={{ marginRight: 6 }} />
+                      <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 }}>
+                        {`RAD ETILGAN SHERIKCHILIK TAKLIFLARI (${rejectedCollabRequests.length})`}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setShowRejectedSection(false)}>
+                      <Ionicons name="close" size={16} color="rgba(255,255,255,0.6)" />
+                    </TouchableOpacity>
+                  </View>
 
-                          {/* Center: League info (Clickable to view details) */}
+                  {rejectedCollabRequests.map((req: any) => {
+                    const lInfo = req.league || {};
+                    const sOrg = req.sender_org || {};
+                    const isProcessing = processingCollabId === req.id;
+
+                    return (
+                      <View key={req.id} style={{ backgroundColor: 'rgba(0,0,0,0.4)', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>{lInfo.name || 'Liga'}</Text>
+                          <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{sOrg.name || 'Tashkilot'}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
                           <TouchableOpacity
-                            style={s.cardCenterContent}
-                            activeOpacity={0.8}
-                            onPress={() => setViewingLeagueDetail(req)}
+                            style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.1)' }}
+                            onPress={() => handleDeleteRejectedCollab(req)}
                           >
-                            {leagueInfo.logo_url ? (
-                              <View style={s.freeLogoWrap}>
-                                <Image source={{ uri: leagueInfo.logo_url }} style={s.freeLogoImg} resizeMode="contain" />
-                              </View>
+                            <Text style={{ color: '#94A3B8', fontSize: 11, fontWeight: '600' }}>{"O'chirish"}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(0,255,102,0.2)', borderWidth: 1, borderColor: 'rgba(0,255,102,0.4)' }}
+                            onPress={() => handleAcceptCollab(req)}
+                            disabled={isProcessing}
+                          >
+                            {isProcessing ? (
+                              <ActivityIndicator size="small" color="#00FF66" />
                             ) : (
-                              <View style={s.freeLogoWrap}>
-                                <Ionicons name="trophy" size={38} color="#FFFFFF" />
-                              </View>
+                              <Text style={{ color: '#00FF66', fontSize: 11, fontWeight: '700' }}>{"Qayta Qabul Qilish"}</Text>
                             )}
-                            <Text style={s.cardTitle} numberOfLines={2}>{leagueInfo.name || 'Liga'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
 
-                            {/* Sender org info */}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
-                              {senderOrg.logo_url ? (
-                                <Image source={{ uri: senderOrg.logo_url }} style={{ width: 18, height: 18, borderRadius: 9, marginRight: 6 }} resizeMode="contain" />
-                              ) : (
-                                <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.7)" style={{ marginRight: 6 }} />
-                              )}
-                              <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' }}>{`${senderOrg.name || 'Tashkilot'} dan taklif`}</Text>
+              {/* 2. Pending Incoming Collab Requests with Full Metadata */}
+              {pendingCollabRequests.length > 0 && (
+                <View>
+                  <Text style={[s.sectionLabel, { marginTop: 0, marginBottom: 8 }]}>{`📩 KIRUVCHI SHERIKCHILIK TAKLIFLARI (${pendingCollabRequests.length})`}</Text>
+                  {pendingCollabRequests.map((req: any) => {
+                    const leagueInfo = req.league || {};
+                    const senderOrg = req.sender_org || {};
+                    const isProcessing = processingCollabId === req.id;
+                    const bgSource = leagueInfo.bg_image || leagueInfo.export_bg_url;
+                    const matchDur = leagueInfo.match_duration || 60;
+
+                    return (
+                      <View key={req.id} style={[s.card, { borderWidth: 1, borderColor: 'rgba(0,170,255,0.5)', marginBottom: 12 }]}>
+                        <ImageBackground
+                          source={bgSource ? { uri: bgSource } : undefined}
+                          style={s.cardFullBg}
+                          imageStyle={s.cardFullBgImage}
+                          resizeMode="cover"
+                        >
+                          <View style={s.cardDarkOverlay}>
+                            {/* Top: Taklif badge */}
+                            <View style={s.cardTopRow}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,170,255,0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(0,170,255,0.5)' }}>
+                                <Ionicons name="mail-unread-outline" size={12} color="#00AAFF" />
+                                <Text style={{ color: '#00AAFF', fontSize: 10, fontWeight: '800', marginLeft: 4 }}>{"SHERIKCHILIK TAKLIFI"}</Text>
+                              </View>
                             </View>
 
-                            {leagueInfo.season && (
-                              <View style={[s.badgesRow, { marginTop: 6 }]}>
+                            {/* Center: League info (Clickable to view details) */}
+                            <TouchableOpacity
+                              style={s.cardCenterContent}
+                              activeOpacity={0.8}
+                              onPress={() => setViewingLeagueDetail(req)}
+                            >
+                              {leagueInfo.logo_url ? (
+                                <View style={s.freeLogoWrap}>
+                                  <Image source={{ uri: leagueInfo.logo_url }} style={s.freeLogoImg} resizeMode="contain" />
+                                </View>
+                              ) : (
+                                <View style={s.freeLogoWrap}>
+                                  <Ionicons name="trophy" size={38} color="#FFFFFF" />
+                                </View>
+                              )}
+                              <Text style={s.cardTitle} numberOfLines={2}>{leagueInfo.name || 'Liga'}</Text>
+
+                              {/* Sender org info */}
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                                {senderOrg.logo_url ? (
+                                  <Image source={{ uri: senderOrg.logo_url }} style={{ width: 18, height: 18, borderRadius: 9, marginRight: 6 }} resizeMode="contain" />
+                                ) : (
+                                  <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.7)" style={{ marginRight: 6 }} />
+                                )}
+                                <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' }}>{`${senderOrg.name || 'Tashkilot'} dan taklif`}</Text>
+                              </View>
+
+                              {/* Badges: Season & Match Duration */}
+                              <View style={[s.badgesRow, { marginTop: 8 }]}>
                                 <View style={s.badgeSeason}>
                                   <Text style={s.badgeIcon}>{"📅"}</Text>
-                                  <Text style={s.badgeSeasonText}>{leagueInfo.season}</Text>
+                                  <Text style={s.badgeSeasonText}>{leagueInfo.season || '2026/2027'}</Text>
+                                </View>
+                                <View style={s.badgeDuration}>
+                                  <Text style={s.badgeIcon}>{"⏱"}</Text>
+                                  <Text style={s.badgeDurationText}>{`${matchDur} daq`}</Text>
                                 </View>
                               </View>
-                            )}
-                            <Text style={{ color: '#00AAFF', fontSize: 11, fontWeight: '600', marginTop: 6 }}>{"Ma'lumotlarni ko'rish 👆"}</Text>
-                          </TouchableOpacity>
 
-                          {/* Bottom: Accept / Reject buttons */}
-                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, paddingBottom: 12, paddingHorizontal: 16 }}>
-                            <TouchableOpacity
-                              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,255,102,0.2)', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(0,255,102,0.5)' }}
-                              onPress={() => handleAcceptCollab(req)}
-                              disabled={isProcessing}
-                              activeOpacity={0.7}
-                            >
-                              {isProcessing ? (
-                                <ActivityIndicator size="small" color="#00FF66" />
-                              ) : (
-                                <>
-                                  <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
-                                  <Text style={{ color: '#00FF66', fontSize: 13, fontWeight: '800', marginLeft: 6 }}>{"Qabul qilish"}</Text>
-                                </>
+                              {/* Dates row if available */}
+                              {(leagueInfo.start_date || leagueInfo.end_date) && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 10 }}>
+                                  {leagueInfo.start_date && (
+                                    <Text style={{ color: 'rgba(0,255,102,0.85)', fontSize: 11, fontWeight: '600' }}>
+                                      {`Boshlanish: ${leagueInfo.start_date}`}
+                                    </Text>
+                                  )}
+                                  {leagueInfo.end_date && (
+                                    <Text style={{ color: 'rgba(255,150,50,0.85)', fontSize: 11, fontWeight: '600' }}>
+                                      {`Tugash: ${leagueInfo.end_date}`}
+                                    </Text>
+                                  )}
+                                </View>
                               )}
+
+                              <Text style={{ color: '#00AAFF', fontSize: 11, fontWeight: '600', marginTop: 8 }}>{"Batafsil ma'lumotlarni ko'rish 👆"}</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,59,48,0.15)', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,59,48,0.4)' }}
-                              onPress={() => handleRejectCollab(req)}
-                              disabled={isProcessing}
-                              activeOpacity={0.7}
-                            >
-                              <Ionicons name="close-circle" size={18} color="#FF3B30" />
-                              <Text style={{ color: '#FF3B30', fontSize: 13, fontWeight: '800', marginLeft: 6 }}>{"Rad etish"}</Text>
-                            </TouchableOpacity>
+
+                            {/* Bottom: Accept / Reject buttons */}
+                            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, paddingBottom: 12, paddingHorizontal: 16 }}>
+                              <TouchableOpacity
+                                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,255,102,0.2)', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(0,255,102,0.5)' }}
+                                onPress={() => handleAcceptCollab(req)}
+                                disabled={isProcessing}
+                                activeOpacity={0.7}
+                              >
+                                {isProcessing ? (
+                                  <ActivityIndicator size="small" color="#00FF66" />
+                                ) : (
+                                  <>
+                                    <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
+                                    <Text style={{ color: '#00FF66', fontSize: 13, fontWeight: '800', marginLeft: 6 }}>{"Qabul qilish"}</Text>
+                                  </>
+                                )}
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,59,48,0.15)', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,59,48,0.4)' }}
+                                onPress={() => handleRejectCollab(req)}
+                                disabled={isProcessing}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="close-circle" size={18} color="#FF3B30" />
+                                <Text style={{ color: '#FF3B30', fontSize: 13, fontWeight: '800', marginLeft: 6 }}>{"Rad etish"}</Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
-                        </View>
-                      </ImageBackground>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : null
+                        </ImageBackground>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
           }
           ListFooterComponent={
             !isReadOnlyUser ? (
@@ -1893,6 +2054,35 @@ export const LeaguesScreen: React.FC = () => {
                       <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 2 }}>{"Co-host (sheriklik) taklif qilmoqda"}</Text>
                     </View>
                   </View>
+                </View>
+
+                {/* League Specifications */}
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', padding: 14, borderRadius: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                  <Text style={{ color: '#00FF66', fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 10 }}>{"LIGA PARAMETRLARI"}</Text>
+                  
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{"Mavsum:"}</Text>
+                    <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>{viewingLeagueDetail.league?.season || '2026/2027'}</Text>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{"O'yin davomiyligi:"}</Text>
+                    <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>{`${viewingLeagueDetail.league?.match_duration || 60} daqiqa`}</Text>
+                  </View>
+
+                  {viewingLeagueDetail.league?.start_date && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{"Boshlanish sanasi:"}</Text>
+                      <Text style={{ color: '#00FF66', fontSize: 13, fontWeight: '700' }}>{viewingLeagueDetail.league.start_date}</Text>
+                    </View>
+                  )}
+
+                  {viewingLeagueDetail.league?.end_date && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{"Tugash sanasi:"}</Text>
+                      <Text style={{ color: '#FBBF24', fontSize: 13, fontWeight: '700' }}>{viewingLeagueDetail.league.end_date}</Text>
+                    </View>
+                  )}
                 </View>
 
                 {/* Note about Co-hosting */}
