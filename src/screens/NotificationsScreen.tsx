@@ -60,6 +60,10 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       const targetOrgId = currentOrg?.id || orgId || 1;
       const notifs: AppNotification[] = [];
 
+      // Read lastReadAllTime for this organization
+      const rawLastReadTime = await AsyncStorage.getItem(`@amatora_last_read_all_time_${targetOrgId}`);
+      const lastReadAllTime = rawLastReadTime ? parseInt(rawLastReadTime, 10) : 0;
+
       // 1. Fetch pending player applications
       let appQuery = dbClient
         .from('applications')
@@ -83,14 +87,18 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
           }
           const team = teamName ? ` (${teamName})` : '';
 
+          const notifId = `app_${app.id}`;
+          const createdMs = new Date(app.created_at || Date.now()).getTime();
+          const isItemRead = readNotificationIds.includes(notifId) || (lastReadAllTime > 0 && createdMs <= lastReadAllTime);
+
           notifs.push({
-            id: `app_${app.id}`,
+            id: notifId,
             type: 'application',
             title: "Yangi O'yinchi Arizasi 👤",
             message: `${playerName}${team} arizasi tasdiqlash uchun kutmoqda`,
             time: formatTimeAgo(app.created_at),
-            createdAt: new Date(app.created_at || Date.now()).getTime(),
-            isRead: readNotificationIds.includes(`app_${app.id}`),
+            createdAt: createdMs,
+            isRead: isItemRead,
             targetTab: 'applications',
             targetSubTab: 'players',
             rawItem: app,
@@ -114,14 +122,18 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
         const { data: pendingTeams } = await teamQuery;
         if (pendingTeams && pendingTeams.length > 0) {
           pendingTeams.forEach((t: any) => {
+            const notifId = `team_app_${t.id}`;
+            const createdMs = new Date(t.created_at || Date.now()).getTime();
+            const isItemRead = readNotificationIds.includes(notifId) || (lastReadAllTime > 0 && createdMs <= lastReadAllTime);
+
             notifs.push({
-              id: `team_app_${t.id}`,
+              id: notifId,
               type: 'application',
               title: "Yangi Jamoa Arizasi 🛡️",
               message: `"${t.name || 'Jamoa'}" (${t.league || 'Liga'}) arizasi tasdiqlashni kutmoqda`,
               time: formatTimeAgo(t.created_at),
-              createdAt: new Date(t.created_at || Date.now()).getTime(),
-              isRead: readNotificationIds.includes(`team_app_${t.id}`),
+              createdAt: createdMs,
+              isRead: isItemRead,
               targetTab: 'applications',
               targetSubTab: 'teams',
               rawItem: t,
@@ -142,14 +154,18 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
         const { data: transferData } = await transferQuery;
         if (transferData && transferData.length > 0) {
           transferData.forEach((t: any) => {
+            const notifId = `transfer_${t.id}`;
+            const createdMs = new Date(t.created_at || Date.now()).getTime();
+            const isItemRead = readNotificationIds.includes(notifId) || (lastReadAllTime > 0 && createdMs <= lastReadAllTime);
+
             notifs.push({
-              id: `transfer_${t.id}`,
+              id: notifId,
               type: 'transfer',
               title: "Yangi Transfer So'rovi 🔄",
               message: "O'yinchi transfer o'tish arizasi ko'rib chiqishni kutmoqda",
               time: formatTimeAgo(t.created_at),
-              createdAt: new Date(t.created_at || Date.now()).getTime(),
-              isRead: readNotificationIds.includes(`transfer_${t.id}`),
+              createdAt: createdMs,
+              isRead: isItemRead,
               targetTab: 'transfers',
               rawItem: t,
             });

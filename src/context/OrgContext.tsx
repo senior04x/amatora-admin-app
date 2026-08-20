@@ -359,24 +359,9 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [orgId]);
 
-  // Load cached read notification IDs on mount & listen to changes
+  // Load cached read notification state on mount & listen to changes
   useEffect(() => {
-    const initReadNotifications = async () => {
-      try {
-        const raw = await AsyncStorage.getItem('@amatora_read_notif_ids');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            setReadNotificationIds(parsed);
-            fetchLiveUnreadCount(parsed);
-            return;
-          }
-        }
-      } catch (e) {}
-      fetchLiveUnreadCount([]);
-    };
-
-    initReadNotifications();
+    fetchLiveUnreadCount();
 
     const targetOrgId = currentOrg?.id || orgId || 1;
     const channel = supabase
@@ -396,15 +381,22 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [orgId, currentOrg?.id]);
 
-  const fetchLiveUnreadCount = async (knownReadIds?: string[]) => {
+  const fetchLiveUnreadCount = async () => {
     try {
       const dbClient = supabase;
       const targetOrgId = currentOrg?.id || orgId || 1;
-      const readList = knownReadIds || readNotificationIds;
+
+      // Read persisted state directly from AsyncStorage
+      const rawIds = await AsyncStorage.getItem('@amatora_read_notif_ids');
+      const readList: string[] = rawIds ? JSON.parse(rawIds) : [];
+      setReadNotificationIds(readList);
+
+      const rawLastReadTime = await AsyncStorage.getItem(`@amatora_last_read_all_time_${targetOrgId}`);
+      const lastReadAllTime = rawLastReadTime ? parseInt(rawLastReadTime, 10) : 0;
 
       let appQuery = dbClient
         .from('applications')
-        .select('id')
+        .select('id, created_at')
         .or('status.eq.pending,status.eq.kutilmoqda,status.eq.yangi,status.is.null');
 
       if (targetOrgId) {
@@ -415,7 +407,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       let teamQuery = dbClient
         .from('teams')
-        .select('id')
+        .select('id, created_at')
         .in('status', ['pending', 'kutilmoqda']);
 
       if (targetOrgId) {
@@ -424,18 +416,37 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const { data: teams } = await teamQuery;
 
-      const appIds = (apps || []).map((a: any) => `app_${a.id}`);
-      const teamIds = (teams || []).map((t: any) => `team_app_${t.id}`);
-      const allActiveNotifIds = [...appIds, ...teamIds];
+      let unreadCount = 0;
 
-      const unread = allActiveNotifIds.filter((id) => !readList.includes(id)).length;
-      setUnreadNotificationsCount(unread);
+      (apps || []).forEach((a: any) => {
+        const notifId = `app_${a.id}`;
+        const createdMs = new Date(a.created_at || 0).getTime();
+        const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
+        const isReadById = readList.includes(notifId);
+        if (!isReadByTime && !isReadById) {
+          unreadCount++;
+        }
+      });
+
+      (teams || []).forEach((t: any) => {
+        const notifId = `team_app_${t.id}`;
+        const createdMs = new Date(t.created_at || 0).getTime();
+        const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
+        const isReadById = readList.includes(notifId);
+        if (!isReadByTime && !isReadById) {
+          unreadCount++;
+        }
+      });
+
+      setUnreadNotificationsCount(unreadCount);
     } catch (e) {}
   };
 
   const markNotificationAsRead = async (id: string) => {
     try {
-      const next = Array.from(new Set([...readNotificationIds, id]));
+      const raw = await AsyncStorage.getItem('@amatora_read_notif_ids');
+      const currentList: string[] = raw ? JSON.parse(raw) : [];
+      const next = Array.from(new Set([...currentList, id]));
       setReadNotificationIds(next);
       await AsyncStorage.setItem('@amatora_read_notif_ids', JSON.stringify(next));
       setUnreadNotificationsCount((prev) => Math.max(0, prev - 1));
@@ -444,9 +455,18 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const markAllNotificationsAsRead = async (allIds: string[]) => {
     try {
-      const next = Array.from(new Set([...readNotificationIds, ...allIds]));
+      const targetOrgId = currentOrg?.id || orgId || 1;
+      const now = Date.now();
+
+      // Save timestamp so ANY application created before now is considered read forever on this device
+      await AsyncStorage.setItem(`@amatora_last_read_all_time_${targetOrgId}`, String(now));
+
+      const raw = await AsyncStorage.getItem('@amatora_read_notif_ids');
+      const currentList: string[] = raw ? JSON.parse(raw) : [];
+      const next = Array.from(new Set([...currentList, ...allIds]));
       setReadNotificationIds(next);
       await AsyncStorage.setItem('@amatora_read_notif_ids', JSON.stringify(next));
+      
       setUnreadNotificationsCount(0);
     } catch (e) {}
   };
