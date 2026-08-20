@@ -48,6 +48,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
     markNotificationAsRead,
     markAllNotificationsAsRead,
     unreadNotificationsCount,
+    refreshNotificationsCount,
   } = useOrg();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,15 +69,18 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       let appQuery = dbClient
         .from('applications')
         .select('id, first_name, last_name, team_name, team_id, team:team_id(name), created_at, status, organization_id')
-        .or('status.eq.pending,status.eq.kutilmoqda,status.eq.yangi,status.is.null')
         .order('created_at', { ascending: false })
-        .limit(30);
+        .limit(50);
 
       if (targetOrgId) {
         appQuery = appQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
       }
 
-      const { data: appsData } = await appQuery;
+      const { data: appsDataRaw } = await appQuery;
+      const appsData = (appsDataRaw || []).filter((a: any) => {
+        const st = String(a.status || '').toLowerCase().trim();
+        return !st || st === 'pending' || st === 'kutilmoqda' || st === 'yangi';
+      });
 
       if (appsData && appsData.length > 0) {
         appsData.forEach((app: any) => {
@@ -110,16 +114,20 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       try {
         let teamQuery = dbClient
           .from('teams')
-          .select('id, name, logo_url, league, created_at, status')
-          .in('status', ['pending', 'kutilmoqda'])
+          .select('id, name, logo_url, league, created_at, status, organization_id')
           .order('created_at', { ascending: false })
-          .limit(10);
+          .limit(20);
 
         if (targetOrgId) {
           teamQuery = teamQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
         }
 
-        const { data: pendingTeams } = await teamQuery;
+        const { data: pendingTeamsRaw } = await teamQuery;
+        const pendingTeams = (pendingTeamsRaw || []).filter((t: any) => {
+          const st = String(t.status || '').toLowerCase().trim();
+          return st === 'pending' || st === 'kutilmoqda' || st === 'yangi';
+        });
+
         if (pendingTeams && pendingTeams.length > 0) {
           pendingTeams.forEach((t: any) => {
             const notifId = `team_app_${t.id}`;
@@ -233,6 +241,12 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       // Sort newest first
       notifs.sort((a, b) => b.createdAt - a.createdAt);
       setNotifications(notifs);
+
+      // If no unread notifications exist in the list, refresh count to immediately clear the badge
+      const actualUnreadCount = notifs.filter((n) => !n.isRead).length;
+      if (actualUnreadCount === 0 && unreadNotificationsCount > 0) {
+        refreshNotificationsCount();
+      }
     } catch (err) {
       console.error('Error loading notifications:', err);
     } finally {

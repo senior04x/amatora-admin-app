@@ -394,31 +394,41 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const rawLastReadTime = await AsyncStorage.getItem(`@amatora_last_read_all_time_${targetOrgId}`);
       const lastReadAllTime = rawLastReadTime ? parseInt(rawLastReadTime, 10) : 0;
 
+      // 1. Fetch player applications
       let appQuery = dbClient
         .from('applications')
-        .select('id, created_at')
-        .or('status.eq.pending,status.eq.kutilmoqda,status.eq.yangi,status.is.null');
+        .select('id, created_at, status, organization_id');
 
       if (targetOrgId) {
         appQuery = appQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
       }
 
-      const { data: apps } = await appQuery;
+      const { data: appsRaw } = await appQuery;
 
+      const pendingApps = (appsRaw || []).filter((a: any) => {
+        const st = String(a.status || '').toLowerCase().trim();
+        return !st || st === 'pending' || st === 'kutilmoqda' || st === 'yangi';
+      });
+
+      // 2. Fetch team applications
       let teamQuery = dbClient
         .from('teams')
-        .select('id, created_at')
-        .in('status', ['pending', 'kutilmoqda']);
+        .select('id, created_at, status, organization_id');
 
       if (targetOrgId) {
         teamQuery = teamQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
       }
 
-      const { data: teams } = await teamQuery;
+      const { data: teamsRaw } = await teamQuery;
+
+      const pendingTeams = (teamsRaw || []).filter((t: any) => {
+        const st = String(t.status || '').toLowerCase().trim();
+        return st === 'pending' || st === 'kutilmoqda' || st === 'yangi';
+      });
 
       let unreadCount = 0;
 
-      (apps || []).forEach((a: any) => {
+      pendingApps.forEach((a: any) => {
         const notifId = `app_${a.id}`;
         const createdMs = new Date(a.created_at || 0).getTime();
         const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
@@ -428,7 +438,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       });
 
-      (teams || []).forEach((t: any) => {
+      pendingTeams.forEach((t: any) => {
         const notifId = `team_app_${t.id}`;
         const createdMs = new Date(t.created_at || 0).getTime();
         const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
