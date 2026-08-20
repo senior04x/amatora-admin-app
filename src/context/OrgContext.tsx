@@ -112,7 +112,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const dbClient = supabase;
       const { data: sessionData } = await supabase.auth.getSession();
-      const sessionEmail = sessionData?.session?.user?.email;
+      let sessionEmail = sessionData?.session?.user?.email;
+      if (!sessionEmail) {
+        sessionEmail = (await AsyncStorage.getItem('@amatora_user_email')) || undefined;
+      }
 
       if (sessionEmail) {
         const { data: uRec } = await dbClient

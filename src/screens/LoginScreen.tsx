@@ -92,6 +92,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           const targetOrgId = orgData[0].id;
           await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
           await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+          await AsyncStorage.setItem('@amatora_user_email', loginEmail);
           logUserLoginWithLocation({
             organizationId: targetOrgId,
             userEmail: loginEmail,
@@ -114,6 +115,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           const role = orgUser.role || 'user';
           await AsyncStorage.setItem('@amatora_user_role', role);
           await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+          await AsyncStorage.setItem('@amatora_user_email', loginEmail);
           logUserLoginWithLocation({
             organizationId: targetOrgId,
             userEmail: loginEmail,
@@ -138,6 +140,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         const role = directOrgUser.role || 'user';
         await AsyncStorage.setItem('@amatora_user_role', role);
         await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+        await AsyncStorage.setItem('@amatora_user_email', loginEmail);
         logUserLoginWithLocation({
           organizationId: targetOrgId,
           userEmail: loginEmail,
@@ -160,6 +163,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         const targetOrgId = adminUser.organization_id;
         await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
         await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
+        await AsyncStorage.setItem('@amatora_user_email', loginEmail);
         logUserLoginWithLocation({
           organizationId: targetOrgId,
           userEmail: loginEmail,

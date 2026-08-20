@@ -20,6 +20,7 @@ import { BlurView } from 'expo-blur';
 import { ColorPicker } from '@darthrapid/react-native-color-picker';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
@@ -230,7 +231,10 @@ export const AccountScreen: React.FC<{
         try {
           const dbClient = supabase;
           const { data: sessionData } = await supabase.auth.getSession();
-          const sessionEmail = sessionData?.session?.user?.email;
+          let sessionEmail = sessionData?.session?.user?.email || currentUser?.email;
+          if (!sessionEmail) {
+            sessionEmail = await AsyncStorage.getItem('@amatora_user_email');
+          }
 
           if (sessionEmail) {
             const { data: userRec } = await dbClient
