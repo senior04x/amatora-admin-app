@@ -1057,6 +1057,43 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   const matchStatus = resolveMatchStatus();
 
+  // Bottom Sticky Pause/Play Button Pop-Up Spring Animation
+  const isStickyTimerVisible = matchStatus === 'first_half' || matchStatus === 'second_half';
+  const stickyBtnAnim = useRef(new Animated.Value(isStickyTimerVisible ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (isStickyTimerVisible) {
+      stickyBtnAnim.setValue(0);
+      Animated.spring(stickyBtnAnim, {
+        toValue: 1,
+        friction: 5,
+        tension: 80,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(stickyBtnAnim, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [isStickyTimerVisible]);
+
+  const stickyBtnTranslateY = stickyBtnAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [120, 0],
+  });
+
+  const stickyBtnScale = stickyBtnAnim.interpolate({
+    inputRange: [0, 0.6, 1],
+    outputRange: [0.7, 1.06, 1],
+  });
+
+  const stickyBtnOpacity = stickyBtnAnim.interpolate({
+    inputRange: [0, 0.3, 1],
+    outputRange: [0, 0.8, 1],
+  });
+
   return (
     <View style={styles.container}>
       {/* 1. Top Action Buttons Bar (Sleek Icon-Only Row) */}
@@ -1527,8 +1564,20 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         </View>
       </ScrollView>
 
-      {/* Solid Non-Glassmorphic Full-Width Pause/Play Button Directly Over Navbar */}
-      <View style={styles.stickyBottomTimerBar}>
+      {/* Pop-up Animated Solid Full-Width Pause/Play Button (Only visible during active 1st or 2nd half) */}
+      <Animated.View
+        pointerEvents={isStickyTimerVisible ? 'auto' : 'none'}
+        style={[
+          styles.stickyBottomTimerBar,
+          {
+            opacity: stickyBtnOpacity,
+            transform: [
+              { translateY: stickyBtnTranslateY },
+              { scale: stickyBtnScale },
+            ],
+          },
+        ]}
+      >
         <TouchableOpacity
           style={[
             styles.solidTimerFullBtn,
@@ -1557,7 +1606,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             </View>
           </View>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
       {/* Modern Sleek Mobile Status Change Confirmation Modal */}
       <Modal visible={statusConfirmModal.isOpen} transparent animationType="fade">
