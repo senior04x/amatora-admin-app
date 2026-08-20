@@ -50,7 +50,7 @@ export const Header: React.FC<{
   onSaveOrder?: () => void;
   onNavigate?: (tab: any) => void;
 }> = ({ isEditingOrder = false, onSaveOrder, onNavigate }) => {
-  const { currentOrg, currentUser, loading, userRole, unreadNotificationsCount } = useOrg();
+  const { currentOrg, currentUser, loading, userRole, unreadNotificationsCount, markAllNotificationsAsRead } = useOrg();
   const unreadCount = unreadNotificationsCount;
 
   const getGreeting = () => {
@@ -119,6 +119,9 @@ export const Header: React.FC<{
               style={styles.bellBtn}
               activeOpacity={0.75}
               onPress={() => {
+                if (unreadCount > 0 && markAllNotificationsAsRead) {
+                  markAllNotificationsAsRead([]);
+                }
                 if (onNavigate) onNavigate('notifications');
               }}
             >

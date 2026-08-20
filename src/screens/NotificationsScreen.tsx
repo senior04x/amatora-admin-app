@@ -68,7 +68,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       // 1. Fetch pending player applications
       let appQuery = dbClient
         .from('applications')
-        .select('id, first_name, last_name, team_name, team_id, team:team_id(name), created_at, status, organization_id')
+        .select('id, first_name, last_name, team_name, team_id, created_at, status, organization_id')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -85,7 +85,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       if (appsData && appsData.length > 0) {
         appsData.forEach((app: any) => {
           const playerName = `${app.first_name || ''} ${app.last_name || ''}`.trim() || "Yangi o'yinchi";
-          let teamName = app.team?.name || app.team_name || '';
+          let teamName = app.team_name || '';
           if (teamName && !isNaN(Number(teamName))) {
             teamName = `Jamoa #${teamName}`;
           }
@@ -242,11 +242,9 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
       notifs.sort((a, b) => b.createdAt - a.createdAt);
       setNotifications(notifs);
 
-      // If no unread notifications exist in the list, clear badge & save read timestamp immediately
-      const actualUnreadCount = notifs.filter((n) => !n.isRead).length;
-      if (actualUnreadCount === 0 && unreadNotificationsCount > 0) {
-        await markAllNotificationsAsRead([]);
-      }
+      // Auto-clear unread badge when user opens the notifications screen
+      const allIds = notifs.map((n) => n.id);
+      await markAllNotificationsAsRead(allIds);
     } catch (err) {
       console.error('Error loading notifications:', err);
     } finally {
