@@ -359,115 +359,160 @@ export const LeaguesScreen: React.FC = () => {
   const handleSendCollab = async () => {
     const emailToSearch = targetOrgEmail.trim().toLowerCase();
     if (!selectedLeagueForCollab || !emailToSearch) {
-      Alert.alert('Xatolik', 'Tashkilot admin email manzilini kiriting');
+      if (showToast) showToast({ message: 'Tashkilot admin email manzilini kiriting', type: 'warning' });
+      else Alert.alert('Xatolik', 'Tashkilot admin email manzilini kiriting');
       return;
     }
-    setSendingCollab(true);
-    try {
-      const dbClient = supabase;
-      let foundOrgId = null;
-      let foundOrgName = '';
 
-      // 1. Search in admin_users
-      const { data: adminUser } = await dbClient
-        .from('admin_users')
-        .select('organization_id, email')
-        .ilike('email', emailToSearch)
-        .maybeSingle();
+    const leagueToSend = selectedLeagueForCollab;
+    const targetEmail = emailToSearch;
 
-      if (adminUser?.organization_id) {
-        foundOrgId = adminUser.organization_id;
-      } else {
-        // 2. Search in organizations
-        const { data: orgByEmail } = await dbClient
-          .from('organizations')
-          .select('id, name')
-          .ilike('admin_email', emailToSearch)
-          .maybeSingle();
-
-        if (orgByEmail?.id) {
-          foundOrgId = orgByEmail.id;
-          foundOrgName = orgByEmail.name;
-        }
-      }
-
-      if (!foundOrgId) {
-        Alert.alert('Xatolik', `"${targetOrgEmail}" e-mail manzili bo'yicha hech qanday tashkilot topilmadi! Email manzilini to'g'ri kiritganingizga ishonch hosil qiling.`);
-        return;
-      }
-
-      if (Number(foundOrgId) === Number(orgId)) {
-        Alert.alert('Xatolik', "O'z tashkilotingizga sherikchilik taklifini yubora olmaysiz!");
-        return;
-      }
-
-      if (!foundOrgName) {
-        const { data: orgObj } = await dbClient
-          .from('organizations')
-          .select('name')
-          .eq('id', foundOrgId)
-          .maybeSingle();
-        foundOrgName = orgObj?.name || 'Tashkilot';
-      }
-
-      // Check existing collab
-      const { data: existingCollab } = await dbClient
-        .from('league_collabs')
-        .select('id, status')
-        .eq('league_id', selectedLeagueForCollab.id)
-        .or(`and(sender_org_id.eq.${orgId},receiver_org_id.eq.${foundOrgId}),and(sender_org_id.eq.${foundOrgId},receiver_org_id.eq.${orgId})`)
-        .maybeSingle();
-
-      if (existingCollab) {
-        const statusText = existingCollab.status === 'accepted' ? 'qabul qilingan' : 'kutilayotgan takliflar ro\'yxatida mavjud';
-        Alert.alert('Xatolik', `"${foundOrgName}" tashkilotiga ushbu liga bo'yicha sherikchilik taklifi allaqachon ${statusText}!`);
-        return;
-      }
-
-      // Send request
-      const { error } = await dbClient.from('league_collabs').insert({
-        league_id: selectedLeagueForCollab.id,
-        sender_org_id: orgId,
-        receiver_org_id: foundOrgId,
-        status: 'pending',
-      });
-
-      if (error) throw error;
-
-      // Notify receiver organization about the collab request
-      try {
-        const senderOrgName = currentOrg?.name || 'Tashkilot';
-        await dbClient.from('admin_notifications').insert({
-          organization_id: foundOrgId,
-          type: 'collab_request',
-          title: 'Yangi sherikchilik taklifi',
-          message: `"${senderOrgName}" tashkiloti "${selectedLeagueForCollab.name}" ligasi bo'yicha sherikchilik taklifi yubordi`,
-          is_read: false,
-          metadata: JSON.stringify({ league_id: selectedLeagueForCollab.id, sender_org_id: orgId }),
-        });
-      } catch (notifErr) {
-        console.warn('Collab notification insert failed (table may not exist):', notifErr);
-      }
-
-      showSuccessGlassAlert('Muvaffaqiyatli yuborildi', `"${selectedLeagueForCollab.name}" ligasi bo'yicha sherikchilik taklifi "${foundOrgName}" (${targetOrgEmail}) tashkilotiga muvaffaqiyatli yuborildi!`);
-      setShowCollabModal(false);
-      setSelectedLeagueForCollab(null);
-      setTargetOrgEmail('');
-      fetchLeagues();
-    } catch (err: any) {
-      console.error('Send collab error:', err);
-      Alert.alert('Xatolik', 'Taklif yuborishda xatolik: ' + (err.message || ''));
-    } finally {
-      setSendingCollab(false);
+    // Instant modal close + feedback
+    setShowCollabModal(false);
+    setSelectedLeagueForCollab(null);
+    setTargetOrgEmail('');
+    if (showToast) {
+      showToast({ message: 'Sherikchilik taklifi yuborilmoqda...', type: 'info', duration: 2500 });
     }
+
+    // Background asynchronous execution
+    requestAnimationFrame(async () => {
+      try {
+        const dbClient = supabase;
+        let foundOrgId = null;
+        let foundOrgName = '';
+        let foundOrgLogo = '';
+
+        // 1. Search in admin_users
+        const { data: adminUser } = await dbClient
+          .from('admin_users')
+          .select('organization_id, email')
+          .ilike('email', targetEmail)
+          .maybeSingle();
+
+        if (adminUser?.organization_id) {
+          foundOrgId = adminUser.organization_id;
+        } else {
+          // 2. Search in organizations
+          const { data: orgByEmail } = await dbClient
+            .from('organizations')
+            .select('id, name, logo_url')
+            .ilike('admin_email', targetEmail)
+            .maybeSingle();
+
+          if (orgByEmail?.id) {
+            foundOrgId = orgByEmail.id;
+            foundOrgName = orgByEmail.name;
+            foundOrgLogo = orgByEmail.logo_url;
+          }
+        }
+
+        if (!foundOrgId) {
+          if (showToast) showToast({ message: `"${targetEmail}" bo'yicha tashkilot topilmadi!`, type: 'error', duration: 3500 });
+          else Alert.alert('Xatolik', `"${targetEmail}" e-mail manzili bo'yicha hech qanday tashkilot topilmadi!`);
+          return;
+        }
+
+        if (Number(foundOrgId) === Number(orgId)) {
+          if (showToast) showToast({ message: "O'z tashkilotingizga sherikchilik yubora olmaysiz!", type: 'warning' });
+          else Alert.alert('Xatolik', "O'z tashkilotingizga sherikchilik taklifini yubora olmaysiz!");
+          return;
+        }
+
+        if (!foundOrgName) {
+          const { data: orgObj } = await dbClient
+            .from('organizations')
+            .select('name, logo_url')
+            .eq('id', foundOrgId)
+            .maybeSingle();
+          foundOrgName = orgObj?.name || 'Tashkilot';
+          foundOrgLogo = orgObj?.logo_url || '';
+        }
+
+        // Check existing collab
+        const { data: existingCollab } = await dbClient
+          .from('league_collabs')
+          .select('id, status')
+          .eq('league_id', leagueToSend.id)
+          .or(`and(sender_org_id.eq.${orgId},receiver_org_id.eq.${foundOrgId}),and(sender_org_id.eq.${foundOrgId},receiver_org_id.eq.${orgId})`)
+          .maybeSingle();
+
+        if (existingCollab) {
+          const statusText = existingCollab.status === 'accepted' ? 'allaqachon qabul qilingan' : 'kutilmoqda';
+          if (showToast) showToast({ message: `"${foundOrgName}" ga taklif ${statusText}!`, type: 'warning' });
+          return;
+        }
+
+        // Send request
+        const { data: createdCollab, error } = await dbClient.from('league_collabs').insert({
+          league_id: leagueToSend.id,
+          sender_org_id: orgId,
+          receiver_org_id: foundOrgId,
+          status: 'pending',
+        }).select().single();
+
+        if (error) throw error;
+
+        // Optimistic local state update on league card
+        const newCollabItem = {
+          id: createdCollab?.id || Date.now(),
+          league_id: leagueToSend.id,
+          sender_org_id: orgId,
+          receiver_org_id: foundOrgId,
+          status: 'pending',
+          receiver_org: { id: foundOrgId, name: foundOrgName, logo_url: foundOrgLogo },
+          sender_org: { id: orgId, name: currentOrg?.name, logo_url: currentOrg?.logo_url },
+        };
+
+        setLeagues(prev =>
+          prev.map(l =>
+            l.id === leagueToSend.id
+              ? { ...l, collabs: [...(l.collabs || []), newCollabItem] }
+              : l
+          )
+        );
+
+        if (editingLeague && editingLeague.id === leagueToSend.id) {
+          setEditingLeague((prev: any) => ({
+            ...prev,
+            collabs: [...(prev?.collabs || []), newCollabItem]
+          }));
+        }
+
+        // Notify receiver organization about the collab request
+        try {
+          const senderOrgName = currentOrg?.name || 'Tashkilot';
+          await dbClient.from('admin_notifications').insert({
+            organization_id: foundOrgId,
+            type: 'collab_request',
+            title: 'Yangi sherikchilik taklifi',
+            message: `"${senderOrgName}" tashkiloti "${leagueToSend.name}" ligasi bo'yicha sherikchilik taklifi yubordi`,
+            is_read: false,
+            metadata: JSON.stringify({ league_id: leagueToSend.id, sender_org_id: orgId }),
+          });
+        } catch (notifErr) {
+          console.warn('Collab notification insert failed:', notifErr);
+        }
+
+        if (showToast) {
+          showToast({ message: `"${foundOrgName}" ga sheriklik taklifi yuborildi ✓`, type: 'success', duration: 3000 });
+        }
+
+        // Silent background sync without showing any loading spinner or page reload
+        fetchLeagues(true);
+      } catch (err: any) {
+        console.error('Send collab error:', err);
+        if (showToast) showToast({ message: 'Taklif yuborishda xatolik yuz berdi', type: 'error' });
+      }
+    });
   };
 
   useEffect(() => {
     fetchLeagues();
   }, [orgId]);
 
-  const fetchLeagues = async () => {
-    setLoading(true);
+  const fetchLeagues = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     try {
       const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('created_at', { ascending: false });
@@ -841,7 +886,7 @@ export const LeaguesScreen: React.FC = () => {
                 const updatedCollabs = (editingLeague.collabs || []).filter((c: any) => c.id !== collabId);
                 setEditingLeague({ ...editingLeague, collabs: updatedCollabs });
               }
-              await fetchLeagues();
+              await fetchLeagues(true);
             } catch (e: any) {
               console.error(e);
               Alert.alert('Xatolik', 'Collabni uzishda xatolik: ' + (e.message || ''));
@@ -855,6 +900,8 @@ export const LeaguesScreen: React.FC = () => {
   // Accept incoming collab request
   const handleAcceptCollab = async (collabRequest: any) => {
     setProcessingCollabId(collabRequest.id);
+    // Optimistic local remove from pending list
+    setPendingCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
     try {
       const dbClient = supabase;
       const { error } = await dbClient
@@ -880,7 +927,7 @@ export const LeaguesScreen: React.FC = () => {
       }
 
       showSuccessGlassAlert('Qabul qilindi!', `"${collabRequest.league?.name || 'Liga'}" ligasi bo'yicha sherikchilik muvaffaqiyatli qabul qilindi!`);
-      await fetchLeagues();
+      await fetchLeagues(true);
     } catch (e: any) {
       console.error(e);
       Alert.alert('Xatolik', 'Qabul qilishda xatolik: ' + (e.message || ''));
@@ -901,6 +948,8 @@ export const LeaguesScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             setProcessingCollabId(collabRequest.id);
+            // Optimistic local remove from pending list
+            setPendingCollabRequests(prev => prev.filter(r => r.id !== collabRequest.id));
             try {
               const dbClient = supabase;
               const { error } = await dbClient.from('league_collabs').delete().eq('id', collabRequest.id);
@@ -923,7 +972,7 @@ export const LeaguesScreen: React.FC = () => {
               }
 
               showToast({ message: 'Taklif rad etildi', type: 'info' });
-              await fetchLeagues();
+              await fetchLeagues(true);
             } catch (e: any) {
               console.error(e);
               Alert.alert('Xatolik', 'Rad etishda xatolik: ' + (e.message || ''));
