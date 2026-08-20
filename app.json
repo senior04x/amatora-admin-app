@@ -3,6 +3,7 @@
     "name": "Amatora Admin Mobile",
     "slug": "amatora-admin",
     "version": "1.0.0",
+    "scheme": "com.amatora.adminapp",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "ios": {
@@ -33,7 +34,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ]
   }
 }

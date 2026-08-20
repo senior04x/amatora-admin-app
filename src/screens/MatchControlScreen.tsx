@@ -14,12 +14,15 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import * as Crypto from 'expo-crypto';
-import { supabase } from '../supabaseClient';
+import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
   matchId: string | number;
+  initialMatch?: any;
   onBack: () => void;
 }
 
@@ -31,15 +34,26 @@ const EVENT_TYPES = [
   { id: 'substitution', icon: 'swap-horizontal-outline', label: 'Almashtirish', color: '#A855F7' },
 ];
 
-export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
+export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack }) => {
   const { orgId } = useOrg();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialMatch);
 
-  // Match, League & Team Data
-  const [match, setMatch] = useState<any>(null);
-  const [leagueData, setLeagueData] = useState<any>(null);
-  const [homeTeam, setHomeTeam] = useState<any>(null);
-  const [awayTeam, setAwayTeam] = useState<any>(null);
+  // Match, League & Team Data (Immediate initial render from cache - 0ms delay!)
+  const initialLeagueName = initialMatch?.league ? String(initialMatch.league).trim() : '';
+  const initialMatchDur = initialLeagueName.includes('7x7') ? 50 : 60;
+  const initialHalfDur = Math.round(initialMatchDur / 2);
+
+  const [match, setMatch] = useState<any>(
+    initialMatch
+      ? { ...initialMatch, match_duration: initialMatch.match_duration || initialMatchDur, half_duration: initialMatch.half_duration || initialHalfDur }
+      : null
+  );
+  const [leagueData, setLeagueData] = useState<any>({
+    match_duration: initialMatchDur,
+    half_duration: initialHalfDur,
+  });
+  const [homeTeam, setHomeTeam] = useState<any>(initialMatch?.home_team || null);
+  const [awayTeam, setAwayTeam] = useState<any>(initialMatch?.away_team || null);
   const [homePlayers, setHomePlayers] = useState<any[]>([]);
   const [awayPlayers, setAwayPlayers] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
@@ -97,14 +111,45 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   // Roster subtab ('home' vs 'away')
   const [activeRosterTab, setActiveRosterTab] = useState<'home' | 'away'>('home');
 
-  // Live Timer State & Background Sync Refs (1:1 Web Admin MatchControl.jsx logic)
-  const [timerSeconds, setTimerSeconds] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const timerRef = useRef<any>(null);
-  const timerStartedAtRef = useRef<string | null>(null);
-  const baseTimerSecondsRef = useRef<number>(0);
+  const getInitialTimerState = (payload: any) => {
+    if (!payload) return { baseSec: 1500, isRunning: false, startedAt: null, curSec: 1500 };
+    const isRunning =
+      payload.is_timer_running !== undefined && payload.is_timer_running !== null
+        ? String(payload.is_timer_running) === 'true' || payload.is_timer_running === true
+        : payload.isTimerRunning !== undefined && payload.isTimerRunning !== null
+        ? String(payload.isTimerRunning) === 'true' || payload.isTimerRunning === true
+        : false;
 
-  // Status Change Custom Confirmation Modal State
+    const startedAt = payload.timer_started_at || payload.timerStartedAt || null;
+    const baseSec =
+      payload.timer_seconds !== undefined && payload.timer_seconds !== null
+        ? Number(payload.timer_seconds)
+        : payload.timerSeconds !== undefined && payload.timerSeconds !== null
+        ? Number(payload.timerSeconds)
+        : 1500;
+
+    let curSec = baseSec;
+    if (isRunning && startedAt) {
+      const ms = new Date(startedAt).getTime();
+      if (!isNaN(ms)) {
+        const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+        curSec = Math.max(0, baseSec - elapsed);
+      }
+    }
+    return { baseSec, isRunning, startedAt, curSec };
+  };
+
+  const initialTimer = getInitialTimerState(initialMatch);
+
+  // Live Timer State & Background Sync Refs (1:1 Web Admin MatchControl.jsx logic)
+  const [timerSeconds, setTimerSeconds] = useState(initialTimer.curSec);
+  const [isTimerRunning, setIsTimerRunning] = useState(initialTimer.isRunning);
+  const timerRef = useRef<any>(null);
+  const timerStartedAtRef = useRef<string | null>(initialTimer.startedAt);
+  const baseTimerSecondsRef = useRef<number>(initialTimer.baseSec);
+
+  // Status Change Custom Confirmation Modal State & Loading State
+  const [isStatusChanging, setIsStatusChanging] = useState(false);
   const [statusConfirmModal, setStatusConfirmModal] = useState<{
     isOpen: boolean;
     targetStatus: string;
@@ -127,48 +172,61 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   const [eventMinute, setEventMinute] = useState<string>('1');
   const [savingEvent, setSavingEvent] = useState(false);
 
-  const dbClient = supabase;
+  const dbClient = supabaseAdmin;
 
-  // Dynamic Match Duration Calculation (League duration from DB / Settings or default 90 mins)
-  const matchDurationMins = Number(match?.match_duration || leagueData?.match_duration || 90);
-  const halfDurationMins = Math.round(matchDurationMins / 2);
+  // Dynamic Match Duration Calculation (From Match -> League -> Sponsors -> Default 50 mins for 7x7)
+  const matchDurationMins = Number(
+    match?.match_duration ||
+    leagueData?.match_duration ||
+    (leagueData?.half_duration ? leagueData.half_duration * 2 : 50)
+  );
+  const halfDurationMins = Number(
+    match?.half_duration ||
+    leagueData?.half_duration ||
+    Math.round(matchDurationMins / 2) ||
+    25
+  );
   const halfDurationSecs = halfDurationMins * 60;
 
-  // Helper to apply persistent timer payload dynamically (1:1 Web Admin logic)
+  // Helper to apply persistent timer payload in countdown mode (25:00 -> 00:00)
   const applyTimerPayload = (payload: any) => {
     if (!payload) return;
 
-    let baseSec = 0;
-    if (payload.timer_seconds !== undefined && payload.timer_seconds !== null) {
-      baseSec = Number(payload.timer_seconds) || 0;
-    } else if (payload.timerSeconds !== undefined && payload.timerSeconds !== null) {
-      baseSec = Number(payload.timerSeconds) || 0;
-    }
+    const isRunning =
+      payload.is_timer_running !== undefined && payload.is_timer_running !== null
+        ? String(payload.is_timer_running) === 'true' || payload.is_timer_running === true
+        : payload.isTimerRunning !== undefined && payload.isTimerRunning !== null
+        ? String(payload.isTimerRunning) === 'true' || payload.isTimerRunning === true
+        : false;
 
-    let isRunning = false;
-    if (payload.is_timer_running !== undefined && payload.is_timer_running !== null) {
-      isRunning = String(payload.is_timer_running) === 'true' || payload.is_timer_running === true;
-    } else if (payload.isTimerRunning !== undefined && payload.isTimerRunning !== null) {
-      isRunning = String(payload.isTimerRunning) === 'true' || payload.isTimerRunning === true;
-    } else if (payload.status === 'first_half' || payload.status === 'second_half' || payload.status === 'live') {
-      isRunning = true;
-    }
+    const startedAt = payload.timer_started_at || payload.timerStartedAt;
+    const defaultSec = halfDurationSecs;
 
-    let startedAt = payload.timer_started_at || payload.timerStartedAt;
+    let baseSec =
+      payload.timer_seconds !== undefined && payload.timer_seconds !== null
+        ? Number(payload.timer_seconds)
+        : payload.timerSeconds !== undefined && payload.timerSeconds !== null
+        ? Number(payload.timerSeconds)
+        : defaultSec;
+
+    if (baseSec === 0 && (payload.status === 'scheduled' || !isRunning)) {
+      baseSec = defaultSec;
+    }
 
     setIsTimerRunning(isRunning);
     baseTimerSecondsRef.current = baseSec;
     timerStartedAtRef.current = startedAt || null;
 
+    if (payload.status) {
+      setMatch((prev: any) => ({ ...prev, status: payload.status }));
+    }
+
     if (isRunning && startedAt) {
       const startedMs = new Date(startedAt).getTime();
       if (!isNaN(startedMs)) {
         const elapsedSec = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
-        if (elapsedSec < 14400) {
-          setTimerSeconds(baseSec + elapsedSec);
-        } else {
-          setTimerSeconds(baseSec);
-        }
+        const remaining = Math.max(0, baseSec - elapsedSec);
+        setTimerSeconds(remaining);
       } else {
         setTimerSeconds(baseSec);
       }
@@ -177,58 +235,92 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }
   };
 
-  // Maps app-level status to DB enum ('scheduled' | 'live' | 'finished')
+  // Maps app-level status to DB enum ('scheduled' | 'first_half' | 'half_time' | 'second_half' | 'finished')
   const mapStatusToDB = (appStatus: string): string => {
-    if (['first_half', 'half_time', 'second_half'].includes(appStatus)) return 'live';
-    return appStatus; // 'scheduled' | 'finished' map 1:1
+    return appStatus;
   };
 
   // INSTANT OPTIMISTIC TIMER UPDATE (RAM update first 0ms, DB sync in background)
-  const updateTimerDBAndState = async (baseSec: number, startedAtIso: string | null, isRunning: boolean, newStatus?: string) => {
-    // 1. INSTANT RAM state update (0ms latency for mobile responsiveness)
+  const updateTimerDBAndState = async (
+    baseSec: number,
+    startedAtIso: string | null,
+    isRunning: boolean,
+    newStatus?: string,
+    scoreOverride?: { home_score?: number; away_score?: number; home_penalty_score?: number; away_penalty_score?: number }
+  ) => {
     setTimerSeconds(baseSec);
     setIsTimerRunning(isRunning);
     baseTimerSecondsRef.current = baseSec;
     timerStartedAtRef.current = startedAtIso;
 
+    const targetOrgId = match?.organization_id || orgId || 1;
+    const nameKey = `MATCH_TIMER_${matchId}`;
+
+    const currentHomeScore = scoreOverride?.home_score ?? match?.home_score ?? 0;
+    const currentAwayScore = scoreOverride?.away_score ?? match?.away_score ?? 0;
+
     const timerPayload: any = {
       timer_seconds: baseSec,
       timer_started_at: startedAtIso,
       is_timer_running: isRunning,
+      home_score: currentHomeScore,
+      away_score: currentAwayScore,
       updated_at: new Date().toISOString(),
     };
     if (newStatus) {
       timerPayload.status = newStatus;
     }
 
+    const matchUpdate: any = {
+      updated_at: new Date().toISOString(),
+    };
+    if (newStatus) {
+      matchUpdate.status = newStatus;
+    }
+    if (scoreOverride?.home_score !== undefined) {
+      matchUpdate.home_score = scoreOverride.home_score;
+    }
+    if (scoreOverride?.away_score !== undefined) {
+      matchUpdate.away_score = scoreOverride.away_score;
+    }
+
     const payloadStr = JSON.stringify(timerPayload);
 
-    // 2. DB Sync for sponsors table
     try {
-      const nameKey = `MATCH_TIMER_${matchId}`;
-      const targetOrgId = match?.organization_id || orgId || null;
-      const { data: existing } = await dbClient.from('sponsors').select('id').eq('name', nameKey).maybeSingle();
-      if (existing) {
-        await dbClient.from('sponsors').update({ logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId }).eq('id', existing.id);
-      } else {
-        await dbClient.from('sponsors').insert({ name: nameKey, logo_url: payloadStr, image_url: payloadStr, organization_id: targetOrgId });
-      }
-    } catch (e) {}
+      // 1. Direct update to matches table via supabaseAdmin
+      await supabaseAdmin
+        .from('matches')
+        .update(matchUpdate)
+        .eq('id', matchId);
 
-    // 3. DB Sync for matches table — only update status (mapped to DB enum)
-    // Timer columns (timer_seconds, timer_started_at, is_timer_running) do NOT exist
-    // in the matches table schema, so we must NOT include them or PostgreSQL will
-    // reject the entire update and status won't be saved either.
-    if (newStatus) {
-      const dbStatus = mapStatusToDB(newStatus);
+      // Fast broadcast channel for instant OBS update (0 latency!)
       try {
-        let { data: updatedRows } = await supabase.from('matches').update({ status: dbStatus }).eq('id', matchId).select();
-        if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-          await supabase.from('matches').update({ status: dbStatus }).eq('id', Number(matchId)).select();
-        }
-      } catch (e) {
-        console.error('Match status DB update error:', e);
+        supabase.channel(`obs_fast_timer_${matchId}`).send({
+          type: 'broadcast',
+          event: 'timer_update',
+          payload: timerPayload,
+        });
+      } catch (bcErr) {}
+
+      // 2. Sync to sponsors timer cache reliably (Update first, insert if not exists)
+      const { data: existingSp } = await supabaseAdmin
+        .from('sponsors')
+        .select('id')
+        .eq('name', nameKey)
+        .limit(1);
+
+      if (existingSp && existingSp.length > 0) {
+        await supabaseAdmin
+          .from('sponsors')
+          .update({ logo_url: payloadStr, organization_id: targetOrgId })
+          .eq('id', existingSp[0].id);
+      } else {
+        await supabaseAdmin
+          .from('sponsors')
+          .insert({ name: nameKey, logo_url: payloadStr, organization_id: targetOrgId });
       }
+    } catch (e) {
+      console.warn('Fast timer sync error:', e);
     }
   };
 
@@ -244,13 +336,6 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (payload: any) => {
         setMatch((prev: any) => ({ ...prev, ...payload.new }));
-        if (
-          payload.new?.timer_seconds !== undefined ||
-          payload.new?.is_timer_running !== undefined ||
-          payload.new?.timer_started_at !== undefined
-        ) {
-          applyTimerPayload(payload.new);
-        }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sponsors', filter: `name=eq.MATCH_TIMER_${matchId}` }, (payload: any) => {
         const record = payload.new || payload.record;
@@ -264,13 +349,24 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
       })
       .subscribe();
 
+    // Fast Broadcast Channel for Instant 0ms Timer Sync
+    const fastChannel = supabase
+      .channel(`obs_fast_timer_${matchId}`)
+      .on('broadcast', { event: 'timer_update' }, (msg: any) => {
+        if (msg.payload) {
+          applyTimerPayload(msg.payload);
+        }
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(matchChannel);
+      supabase.removeChannel(fastChannel);
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [matchId, orgId]);
 
-  // Realtime Accurate Timer Interval (Cross-device timestamp calculated)
+  // Realtime Accurate Countdown Timer Interval (25:00 -> 00:00)
   useEffect(() => {
     if (isTimerRunning) {
       timerRef.current = setInterval(() => {
@@ -278,11 +374,21 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
           const startedMs = new Date(timerStartedAtRef.current).getTime();
           if (!isNaN(startedMs)) {
             const elapsedSec = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
-            setTimerSeconds(baseTimerSecondsRef.current + elapsedSec);
+            const remaining = Math.max(0, baseTimerSecondsRef.current - elapsedSec);
+            setTimerSeconds(remaining);
+            if (remaining === 0) {
+              setIsTimerRunning(false);
+            }
             return;
           }
         }
-        setTimerSeconds((prev) => prev + 1);
+        setTimerSeconds((prev) => {
+          if (prev <= 1) {
+            setIsTimerRunning(false);
+            return 0;
+          }
+          return prev - 1;
+        });
       }, 1000);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -294,107 +400,150 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   }, [isTimerRunning]);
 
   const fetchMatchControlData = async () => {
-    setLoading(true);
+    // Only show blocking loader if we have NO initial match data at all
+    if (!match && !initialMatch) setLoading(true);
     try {
-      // 1. Fetch match
-      const { data: matchData, error: mErr } = await dbClient
-        .from('matches')
-        .select('*')
-        .eq('id', matchId)
-        .single();
+      // 1. Fetch match and timer sponsor in parallel
+      const [mRes, timerSpRes] = await Promise.all([
+        dbClient.from('matches').select('*').eq('id', matchId).single(),
+        dbClient
+          .from('sponsors')
+          .select('name, logo_url')
+          .eq('name', `MATCH_TIMER_${matchId}`)
+          .order('created_at', { ascending: false })
+          .limit(1)
+      ]);
 
-      if (mErr || !matchData) {
-        Alert.alert("Xatolik", "O'yin ma'lumotlari topilmadi");
-        setLoading(false);
-        return;
-      }
+      const matchData = mRes.data;
+      const timerSpData = timerSpRes.data && timerSpRes.data.length > 0 ? timerSpRes.data[0] : null;
 
-      setMatch(matchData);
+      if (matchData) {
+        // 1. Fetch League Data & League Duration (Match -> League -> Sponsors LEAGUE_DURATION)
+        let matchDur = Number(matchData.match_duration || matchData.duration || 0) || null;
+        let halfDur = Number(matchData.half_duration || 0) || null;
+        let lData: any = null;
 
-      // Fetch persistent timer state from sponsors OR match (1:1 Web Admin logic)
-      const { data: timerSp } = await dbClient
-        .from('sponsors')
-        .select('*')
-        .eq('name', `MATCH_TIMER_${matchId}`)
-        .maybeSingle();
-
-      let loadedTimer = false;
-      if (timerSp) {
-        const jsonStr = timerSp.logo_url || timerSp.image_url || timerSp.url;
-        if (jsonStr) {
+        if (matchData.league) {
           try {
-            const parsed = JSON.parse(jsonStr);
-            applyTimerPayload({ ...matchData, ...parsed });
+            const leagueNameTrim = String(matchData.league).trim();
+            const targetOrgId = matchData.organization_id || orgId || 1;
+
+            const { data: orgLeague } = await dbClient
+              .from('leagues')
+              .select('*')
+              .eq('organization_id', targetOrgId)
+              .ilike('name', leagueNameTrim)
+              .maybeSingle();
+
+            lData = orgLeague;
+            if (!lData) {
+              const { data: fallbackLeague } = await dbClient
+                .from('leagues')
+                .select('*')
+                .ilike('name', leagueNameTrim)
+                .maybeSingle();
+              lData = fallbackLeague;
+            }
+
+            if (lData) {
+              if (!matchDur) {
+                matchDur = Number(lData.match_duration || lData.duration || lData.match_minutes || 0) || null;
+              }
+              if (!halfDur) {
+                halfDur = Number(lData.half_duration || lData.half_minutes || 0) || null;
+              }
+            }
+
+            // Check sponsors table for LEAGUE_DURATION_<id> or LEAGUE_DURATION_<name>
+            const spKeys = [
+              lData?.id ? `LEAGUE_DURATION_${lData.id}` : null,
+              `LEAGUE_DURATION_${targetOrgId}_${leagueNameTrim}`,
+              `LEAGUE_DURATION_${leagueNameTrim}`,
+            ].filter(Boolean) as string[];
+
+            const { data: spDurs } = await dbClient
+              .from('sponsors')
+              .select('name, logo_url')
+              .in('name', spKeys);
+
+            if (spDurs && spDurs.length > 0) {
+              const validSp = spDurs.find((s: any) => s.logo_url && !isNaN(Number(s.logo_url)) && Number(s.logo_url) > 0);
+              if (validSp) {
+                matchDur = Number(validSp.logo_url);
+              }
+            }
+          } catch (lErr) {
+            console.warn('Error loading league duration:', lErr);
+          }
+        }
+
+        if (halfDur && !matchDur) {
+          matchDur = halfDur * 2;
+        } else if (matchDur && !halfDur) {
+          halfDur = Math.round(matchDur / 2);
+        }
+
+        const finalMatchDuration = matchDur || (String(matchData.league).includes('7x7') ? 50 : 60);
+        const finalHalfDuration = halfDur || Math.round(finalMatchDuration / 2);
+
+        setLeagueData({
+          ...(lData || {}),
+          match_duration: finalMatchDuration,
+          half_duration: finalHalfDuration,
+        });
+
+        const mergedMatchData = {
+          ...matchData,
+          match_duration: finalMatchDuration,
+          half_duration: finalHalfDuration,
+        };
+
+        setMatch((prev: any) => ({ ...prev, ...mergedMatchData }));
+
+        let loadedTimer = false;
+        if (timerSpData?.logo_url) {
+          try {
+            const parsed = JSON.parse(timerSpData.logo_url);
+            applyTimerPayload({ ...mergedMatchData, ...parsed });
             loadedTimer = true;
           } catch (e) {}
         }
-      }
-
-      if (!loadedTimer) {
-        applyTimerPayload(matchData);
-      }
-
-      // Fetch League duration from DB or sponsors key (1:1 Web Admin logic)
-      if (matchData.league) {
-        try {
-          const { data: lData } = await dbClient
-            .from('leagues')
-            .select('*')
-            .ilike('name', matchData.league.trim())
-            .maybeSingle();
-
-          let dur = lData?.match_duration;
-
-          if (!dur && lData?.id) {
-            const { data: spDur } = await dbClient
-              .from('sponsors')
-              .select('logo_url')
-              .eq('name', `LEAGUE_DURATION_${lData.id}`)
-              .maybeSingle();
-            if (spDur?.logo_url) dur = Number(spDur.logo_url);
+        if (!loadedTimer) {
+          if (mergedMatchData.status) {
+            setMatch((prev: any) => ({ ...prev, status: mergedMatchData.status }));
           }
+        }
 
-          if (lData) {
-            setLeagueData({ ...lData, match_duration: dur || 90 });
-          }
-        } catch (e) {}
+        if (matchData.home_penalty_score !== undefined && matchData.away_penalty_score !== undefined) {
+          setHomePenalties(matchData.home_penalty_score || 0);
+          setAwayPenalties(matchData.away_penalty_score || 0);
+        }
+
+        // 3. Fetch Teams, Roster Applications and Events all in a single parallel roundtrip
+        const [teamsRes, homeAppsRes, awayAppsRes, eventsRes] = await Promise.all([
+          dbClient.from('teams').select('id, name, logo_url').in('id', [matchData.home_team_id, matchData.away_team_id].filter(Boolean)),
+          matchData.home_team_id
+            ? dbClient.from('applications').select('id, first_name, last_name, position, player_number, is_archived').eq('team_id', matchData.home_team_id).eq('status', 'approved')
+            : Promise.resolve({ data: [] }),
+          matchData.away_team_id
+            ? dbClient.from('applications').select('id, first_name, last_name, position, player_number, is_archived').eq('team_id', matchData.away_team_id).eq('status', 'approved')
+            : Promise.resolve({ data: [] }),
+          dbClient.from('match_events').select('*, player:player_id(first_name, last_name, player_number), team:team_id(name)').eq('match_id', matchId).order('minute', { ascending: true })
+        ]);
+
+        if (teamsRes.data) {
+          const ht = teamsRes.data.find((t: any) => t.id === matchData.home_team_id);
+          const at = teamsRes.data.find((t: any) => t.id === matchData.away_team_id);
+          if (ht) setHomeTeam(ht);
+          if (at) setAwayTeam(at);
+        }
+
+        setHomePlayers(((homeAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived));
+        setAwayPlayers(((awayAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived));
+        setEvents((eventsRes.data as any[]) || []);
       }
-
-      if (matchData.home_penalty_score !== undefined && matchData.away_penalty_score !== undefined) {
-        setHomePenalties(matchData.home_penalty_score || 0);
-        setAwayPenalties(matchData.away_penalty_score || 0);
-      }
-
-      // 2. Fetch Teams
-      const [homeRes, awayRes] = await Promise.all([
-        dbClient.from('teams').select('*').eq('id', matchData.home_team_id).single(),
-        dbClient.from('teams').select('*').eq('id', matchData.away_team_id).single(),
-      ]);
-
-      if (homeRes.data) setHomeTeam(homeRes.data);
-      if (awayRes.data) setAwayTeam(awayRes.data);
-
-      // 3. Fetch approved players
-      const [hpRes, apRes] = await Promise.all([
-        dbClient
-          .from('applications')
-          .select('id, first_name, last_name, position, player_number')
-          .eq('team_id', matchData.home_team_id)
-          .eq('status', 'approved'),
-        dbClient
-          .from('applications')
-          .select('id, first_name, last_name, position, player_number')
-          .eq('team_id', matchData.away_team_id)
-          .eq('status', 'approved'),
-      ]);
-
-      setHomePlayers(hpRes.data || []);
-      setAwayPlayers(apRes.data || []);
-
-      // 4. Fetch events
-      await fetchEvents(matchData.id);
     } catch (e) {
-      console.error(e);
+      console.error('Background fetchMatchControlData error:', e);
     } finally {
       setLoading(false);
     }
@@ -414,38 +563,55 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }
   };
 
-  // Current calculated minute
+  const queryClient = useQueryClient();
+
+  // Current calculated minute in countdown mode (25:00 -> 00:00)
   const getCurrentMinute = () => {
-    const min = Math.floor(timerSeconds / 60) + 1;
-    return Math.max(1, min);
+    const elapsedSec = Math.max(0, halfDurationSecs - timerSeconds);
+    const currentMin = Math.floor(elapsedSec / 60) + 1;
+    return Math.min(halfDurationMins, Math.max(1, currentMin));
   };
 
   // Format seconds to MM:SS
   const formatTimer = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+    const validSec = Math.max(0, Number(totalSeconds) || 0);
+    const mins = Math.floor(validSec / 60);
+    const secs = validSec % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Instant Manual Timer Toggle (0ms RAM response)
-  const toggleTimerManual = () => {
+  const [isTimerToggling, setIsTimerToggling] = useState(false);
+
+  // Instant Manual Timer Toggle (Play / Pause 0ms RAM response)
+  const toggleTimerManual = async () => {
+    if (isTimerToggling) return;
+    setIsTimerToggling(true);
     const newRunning = !isTimerRunning;
+    let curRemaining = timerSeconds;
+    if (curRemaining <= 0) curRemaining = halfDurationSecs;
     const nowIso = newRunning ? new Date().toISOString() : null;
-    updateTimerDBAndState(timerSeconds, nowIso, newRunning);
+    try {
+      await updateTimerDBAndState(curRemaining, nowIso, newRunning);
+      showToast(newRunning ? "Taymer davom ettirildi ▶️" : "Taymer to'xtatildi (Pauza) ⏸️");
+    } catch (e: any) {
+      console.warn('Toggle timer error:', e);
+    } finally {
+      setIsTimerToggling(false);
+    }
   };
 
   // Instant Reset Timer (0ms RAM response)
   const resetTimerManual = () => {
-    const defaultSec = match?.status === 'second_half' ? halfDurationSecs : 0;
-    updateTimerDBAndState(defaultSec, null, false);
+    updateTimerDBAndState(halfDurationSecs, null, false);
+    showToast("Taymer qayta o'rnatildi (Reset) 🔄");
   };
 
-  // Instant Optimistic Score Adjuster (+1 / -1)
+  // Instant Optimistic Score Adjuster (+1 / -1) with Rollback
   const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
     if (!match) return;
     const isHome = teamType === 'home';
-    const currentScore = isHome ? match.home_score || 0 : match.away_score || 0;
-    const newScore = Math.max(0, currentScore + delta);
+    const oldScore = isHome ? match.home_score || 0 : match.away_score || 0;
+    const newScore = Math.max(0, oldScore + delta);
 
     const updatePayload = isHome ? { home_score: newScore } : { away_score: newScore };
 
@@ -456,30 +622,28 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }));
 
     try {
-      let { data: updatedRows } = await supabase.from('matches').update(updatePayload).eq('id', matchId).select();
-      if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-        await supabase.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
-      }
-    } catch (e) {}
+      await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId);
+    } catch (e) {
+      console.warn('adjustScore DB update error:', e);
+    }
   };
 
-  // Instant Optimistic Penalty Score Adjuster (+1 / -1)
+  // Adjust Penalty Score
   const adjustPenaltyScore = async (teamType: 'home' | 'away', delta: number) => {
-    if (!match) return;
     const isHome = teamType === 'home';
-    const currentPen = isHome ? homePenalties : awayPenalties;
-    const newPen = Math.max(0, currentPen + delta);
+    const oldPen = isHome ? homePenalties : awayPenalties;
+    const newPen = Math.max(0, oldPen + delta);
 
     if (isHome) setHomePenalties(newPen);
     else setAwayPenalties(newPen);
 
-    const updatePayload = isHome ? { home_penalty_score: newPen } : { away_penalty_score: newPen };
     try {
-      let { data: updatedRows } = await supabase.from('matches').update(updatePayload).eq('id', matchId).select();
-      if ((!updatedRows || updatedRows.length === 0) && !isNaN(Number(matchId))) {
-        await supabase.from('matches').update(updatePayload).eq('id', Number(matchId)).select();
-      }
-    } catch (e) {}
+      const updatePayload = isHome ? { home_penalty_score: newPen } : { away_penalty_score: newPen };
+      await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId);
+    } catch (e) {
+      if (isHome) setHomePenalties(oldPen);
+      else setAwayPenalties(oldPen);
+    }
   };
 
   // Open Sleek Uzbek Confirmation Modal for Match Status Changes
@@ -489,19 +653,19 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
 
     if (newStatus === 'first_half') {
       title = "1-Taymni Boshlash 🚀";
-      message = `1-taym boshlanishini tasdiqlaysizmi? (${halfDurationMins} daqiqalik taym)`;
+      message = `1-taym boshlanishini tasdiqlaysizmi? (Taymer ${halfDurationMins}:00 dan teskari sanaydi)`;
     } else if (newStatus === 'half_time') {
       title = "Tanaffus E'lon Qilish ⏸️";
       message = `Uchrashuvda tanaffus e'lon qilishni tasdiqlaysizmi?`;
     } else if (newStatus === 'second_half') {
       title = "2-Taymni Boshlash 🚀";
-      message = `2-taym boshlanishini tasdiqlaysizmi? (Taymer ${halfDurationMins}-daqiqadan davom etadi)`;
+      message = `2-taym boshlanishini tasdiqlaysizmi? (Taymer ${halfDurationMins}:00 dan teskari sanaydi)`;
     } else if (newStatus === 'finished') {
       title = "O'yinni Yakunlash 🏁";
       message = `Uchrashuvni rasman yakunlashni tasdiqlaysizmi?`;
     } else if (newStatus === 'scheduled') {
       title = "Holatga Qaytarish (1-Taym Boshlashga) 🔄";
-      message = "Uchrashuvni boshlang'ich (Rejalashtirilgan) holatiga qaytarishni va taymerni 00:00 qilishni tasdiqlaysizmi?";
+      message = `Uchrashuvni boshlang'ich (Rejalashtirilgan) holatiga qaytarishni va taymerni ${halfDurationMins}:00 qilishni tasdiqlaysizmi?`;
     }
 
     setStatusConfirmModal({
@@ -515,61 +679,125 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
   // Execute Status Change
   const executeStatusChange = async (overrideStatus?: string) => {
     const newStatus = typeof overrideStatus === 'string' ? overrideStatus : statusConfirmModal.targetStatus;
-    if (!newStatus || typeof newStatus !== 'string') return;
-    setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
+    if (!newStatus || typeof newStatus !== 'string' || isStatusChanging) return;
 
-    let newBaseSec = timerSeconds;
-    let newRunning = isTimerRunning;
-    let nowIso: string | null = new Date().toISOString();
+    setIsStatusChanging(true);
 
-    if (newStatus === 'first_half') {
-      newBaseSec = 0;
-      newRunning = true;
-      nowIso = new Date().toISOString();
-    } else if (newStatus === 'half_time') {
-      newBaseSec = timerSeconds < halfDurationSecs ? halfDurationSecs : timerSeconds;
-      newRunning = false;
-      nowIso = null;
-    } else if (newStatus === 'second_half') {
-      newBaseSec = timerSeconds < halfDurationSecs ? halfDurationSecs : timerSeconds;
-      newRunning = true;
-      nowIso = new Date().toISOString();
-    } else if (newStatus === 'finished') {
-      newRunning = false;
-      nowIso = null;
-    } else if (newStatus === 'scheduled') {
-      newBaseSec = 0;
-      newRunning = false;
-      nowIso = null;
+    try {
+      let newBaseSec = timerSeconds;
+      let newRunning = isTimerRunning;
+      let nowIso: string | null = new Date().toISOString();
+
+      if (newStatus === 'first_half') {
+        newBaseSec = halfDurationSecs;
+        newRunning = true;
+        nowIso = new Date().toISOString();
+      } else if (newStatus === 'half_time') {
+        newBaseSec = timerSeconds;
+        newRunning = false;
+        nowIso = null;
+      } else if (newStatus === 'second_half') {
+        newBaseSec = halfDurationSecs;
+        newRunning = true;
+        nowIso = new Date().toISOString();
+      } else if (newStatus === 'finished') {
+        newRunning = false;
+        nowIso = null;
+      } else if (newStatus === 'scheduled') {
+        newBaseSec = halfDurationSecs;
+        newRunning = false;
+        nowIso = null;
+      }
+
+      let scoreOverride: any = undefined;
+      if (newStatus === 'finished') {
+        const homeGoals = events.filter(
+          (e) =>
+            (e.event_type === 'goal' || e.type === 'goal') &&
+            (e.team_id === match?.home_team_id || String(e.team_id) === String(match?.home_team_id))
+        ).length;
+        const awayGoals = events.filter(
+          (e) =>
+            (e.event_type === 'goal' || e.type === 'goal') &&
+            (e.team_id === match?.away_team_id || String(e.team_id) === String(match?.away_team_id))
+        ).length;
+
+        const finalHomeScore = homeGoals > 0 ? homeGoals : (match?.home_score || 0);
+        const finalAwayScore = awayGoals > 0 ? awayGoals : (match?.away_score || 0);
+
+        scoreOverride = {
+          home_score: finalHomeScore,
+          away_score: finalAwayScore,
+          home_penalty_score: homePenalties,
+          away_penalty_score: awayPenalties,
+        };
+      }
+
+      const localUpdateData: any = {
+        status: newStatus,
+        timer_seconds: newBaseSec,
+        timer_started_at: nowIso,
+        is_timer_running: newRunning,
+        ...(scoreOverride || {}),
+      };
+
+      await updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus, scoreOverride);
+      setMatch((prev: any) => ({ ...prev, ...localUpdateData }));
+
+      // Broadcast remote signal for OBS Replay clearing if match finished
+      if (newStatus === 'finished') {
+        const fieldNum = match?.location?.includes('2-maydon') ? 2 : 1;
+        const finishSignalName = `REMOTE_FINISH_MATCH_FIELD_${fieldNum}`;
+        try {
+          const signalPayload = JSON.stringify({
+            match_id: matchId,
+            action: 'finish_match',
+            timestamp: Date.now(),
+          });
+          const { data: existingSignal } = await supabase
+            .from('sponsors')
+            .select('id')
+            .eq('name', finishSignalName)
+            .maybeSingle();
+
+          if (existingSignal) {
+            await supabase.from('sponsors').update({ logo_url: signalPayload }).eq('id', existingSignal.id);
+          } else {
+            await supabase.from('sponsors').insert({
+              name: finishSignalName,
+              logo_url: signalPayload,
+              organization_id: match?.organization_id || orgId || null,
+            });
+          }
+        } catch (sigErr) {
+          console.warn(`[FIELD_${fieldNum}] Finish match signal error:`, sigErr);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['matches'] });
+      queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.refetchQueries({ queryKey: ['finishedMatches'] });
+      queryClient.refetchQueries({ queryKey: ['matches'] });
+
+      showToast(
+        newStatus === 'first_half'
+          ? "1-Taym Boshlandi 🚀"
+          : newStatus === 'half_time'
+          ? "Tanaffus E'lon Qilindi ⏸️"
+          : newStatus === 'second_half'
+          ? "2-Taym Boshlandi 🚀"
+          : newStatus === 'finished'
+          ? "Uchrashuv Yakunlandi 🏁"
+          : "Boshlang'ich Holatga Qaytildi 🔄"
+      );
+    } catch (err: any) {
+      console.error('Error in executeStatusChange:', err);
+      Alert.alert("Xatolik", err?.message || "Statusni saqlashda xatolik yuz berdi");
+    } finally {
+      setIsStatusChanging(false);
+      setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
     }
-
-    // Local state keeps app-level status (first_half/half_time/second_half) for timer logic
-    const localUpdateData: any = {
-      status: newStatus,
-      timer_seconds: newBaseSec,
-      timer_started_at: nowIso,
-      is_timer_running: newRunning,
-    };
-
-    // updateTimerDBAndState handles: 1) local timer state, 2) sponsors table sync, 3) matches.status DB update
-    await updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus);
-    setMatch((prev: any) => ({ ...prev, ...localUpdateData }));
-
-    showToast(
-      newStatus === 'first_half'
-        ? "1-Taym Boshlandi 🚀"
-        : newStatus === 'half_time'
-        ? "Tanaffus E'lon Qilindi ⏸️"
-        : newStatus === 'second_half'
-        ? "2-Taym Boshlandi 🚀"
-        : newStatus === 'finished'
-        ? "Uchrashuv Yakunlandi 🏁"
-        : "Boshlang'ich Holatga Qaytildi 🔄"
-    );
-
-    // NOTE: DB status update is already handled inside updateTimerDBAndState above.
-    // We do NOT send a separate matches.update here to avoid duplicating the call
-    // and to prevent sending timer columns that don't exist in the DB schema.
   };
 
   // Open Event Modal prefilled
@@ -582,7 +810,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     setShowEventModal(true);
   };
 
-  // Save Event with UUID Idempotency and Atomic RPC
+  // Save Event with UUID Idempotency, Instant Optimistic UI and Rollback
   const handleSaveEvent = async () => {
     if (!selectedTeamId || !selectedPlayerId || !eventMinute || savingEvent) {
       Alert.alert("Xatolik", "Iltimos jamoa, o'yinchi va minutni to'liq kiriting");
@@ -590,89 +818,80 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     }
 
     setSavingEvent(true);
-    try {
-      const minVal = parseInt(eventMinute, 10) || getCurrentMinute();
-      const eventUuid = Crypto.randomUUID();
+    const minVal = parseInt(eventMinute, 10) || getCurrentMinute();
+    const eventUuid = Crypto.randomUUID();
+    const isGoal = eventType === 'goal';
+    const isHome = selectedTeamId === match?.home_team_id;
 
-      // 1. Try atomic & idempotent PostgreSQL RPC first
+    // Snapshot for rollback
+    const prevEvents = [...events];
+    const prevMatch = { ...match };
+
+    // 1. Instant Optimistic UI (0ms response)
+    const optimisticEvent: any = {
+      id: eventUuid,
+      event_uuid: eventUuid,
+      match_id: matchId,
+      team_id: selectedTeamId,
+      player_id: selectedPlayerId,
+      event_type: eventType,
+      type: eventType,
+      minute: minVal,
+      created_at: new Date().toISOString(),
+      player: currentModalPlayers.find((p) => p.id === selectedPlayerId) || null,
+      team: selectedTeamId === match?.home_team_id ? homeTeam : awayTeam,
+    };
+
+    setEvents((prev) => [...prev, optimisticEvent]);
+
+    if (isGoal) {
+      setMatch((prev: any) => ({
+        ...prev,
+        home_score: (prev.home_score || 0) + (isHome ? 1 : 0),
+        away_score: (prev.away_score || 0) + (isHome ? 0 : 1),
+      }));
+    }
+
+    setShowEventModal(false);
+    showToast(isGoal ? "Gol saqlandi ⚽" : "Voqea qayd etildi ✅");
+
+    // 2. Background RPC with rollback on error
+    try {
       const { data: rpcRes, error: rpcErr } = await supabase.rpc('record_match_event', {
         p_event_uuid: eventUuid,
-        p_match_id: Number(matchId),
-        p_team_id: Number(selectedTeamId),
-        p_player_id: Number(selectedPlayerId),
+        p_match_id: matchId,
+        p_team_id: selectedTeamId,
+        p_player_id: selectedPlayerId,
         p_event_type: eventType,
         p_minute: minVal,
-        p_sub_in_player_id: eventType === 'substitution' && selectedSubInPlayerId ? Number(selectedSubInPlayerId) : null,
+        p_sub_in_player_id: eventType === 'substitution' && selectedSubInPlayerId ? selectedSubInPlayerId : null,
       });
 
-      if (!rpcErr && rpcRes) {
-        if (!rpcRes.success) {
-          Alert.alert("Xatolik", rpcRes.message || "Voqeani saqlashda xatolik");
-          return;
-        }
-
-        if (eventType === 'goal' && rpcRes.home_score !== undefined && rpcRes.away_score !== undefined) {
-          setMatch((prev: any) => ({
-            ...prev,
-            home_score: rpcRes.home_score,
-            away_score: rpcRes.away_score,
-          }));
-        }
-      } else {
-        // Fallback for direct insert with event_uuid
-        const insertPayload: any = {
-          event_uuid: eventUuid,
-          match_id: matchId,
-          team_id: selectedTeamId,
-          player_id: selectedPlayerId,
-          event_type: eventType,
-          minute: minVal,
-        };
-
-        const { error: insErr } = await supabase.from('match_events').insert([insertPayload]);
-        if (insErr) {
-          delete insertPayload.event_uuid;
-          const { error: retryErr } = await supabase.from('match_events').insert([insertPayload]);
-          if (retryErr) throw retryErr;
-        }
-
-        if (eventType === 'substitution' && selectedSubInPlayerId) {
-          await supabase.from('match_events').insert([
-            {
-              match_id: matchId,
-              team_id: selectedTeamId,
-              player_id: selectedSubInPlayerId,
-              event_type: 'substitution_in',
-              minute: minVal,
-            },
-          ]);
-        }
-
-        if (eventType === 'goal') {
-          const isHome = selectedTeamId === match.home_team_id;
-          const newHomeScore = (match.home_score || 0) + (isHome ? 1 : 0);
-          const newAwayScore = (match.away_score || 0) + (isHome ? 0 : 1);
-
-          await supabase
-            .from('matches')
-            .update({ home_score: newHomeScore, away_score: newAwayScore })
-            .eq('id', matchId);
-
-          setMatch((prev: any) => ({ ...prev, home_score: newHomeScore, away_score: newAwayScore }));
-        }
+      if (rpcErr || (rpcRes && !rpcRes.success)) {
+        throw new Error(rpcErr?.message || rpcRes?.message || 'Voqeani saqlashda xatolik');
       }
 
-      await fetchEvents();
-      setShowEventModal(false);
-      showToast(eventType === 'goal' ? "Gol saqlandi ⚽" : "Voqea qayd etildi ✅");
+      if (isGoal && rpcRes && rpcRes.home_score !== undefined) {
+        setMatch((prev: any) => ({
+          ...prev,
+          home_score: rpcRes.home_score,
+          away_score: rpcRes.away_score,
+        }));
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (err: any) {
-      Alert.alert("Xatolik", err.message || "Voqeani saqlashda xatolik");
+      // Rollback UI
+      setEvents(prevEvents);
+      setMatch(prevMatch);
+      Alert.alert("Xatolik", err.message || "Voqeani saqlashda xatolik yuz berdi");
     } finally {
       setSavingEvent(false);
     }
   };
 
-  // Delete Event with Atomic Score Decrement RPC
+  // Delete Event with Instant Optimistic UI and Rollback
   const handleDeleteEvent = (event: any) => {
     Alert.alert("Voqeani o'chirish", "Ushbu voqeani o'chirishni tasdiqlaysizmi?", [
       { text: "Bekor qilish", style: "cancel" },
@@ -680,39 +899,48 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
         text: "O'chirish",
         style: "destructive",
         onPress: async () => {
+          // Snapshot for rollback
+          const prevEvents = [...events];
+          const prevMatch = { ...match };
+          const isGoal = event.event_type === 'goal' || event.type === 'goal';
+          const isHome = event.team_id === match?.home_team_id;
+
+          // 1. Instant Optimistic UI
           setEvents((prev) => prev.filter((e) => e.id !== event.id));
+          if (isGoal) {
+            setMatch((prev: any) => ({
+              ...prev,
+              home_score: Math.max(0, (prev.home_score || 0) - (isHome ? 1 : 0)),
+              away_score: Math.max(0, (prev.away_score || 0) - (isHome ? 0 : 1)),
+            }));
+          }
+          showToast("Voqea o'chirildi 🗑️");
+
+          // 2. Background RPC with rollback on error
           try {
             const { data: rpcRes, error: rpcErr } = await supabase.rpc('delete_match_event', {
-              p_event_id: Number(event.id),
+              p_event_id: event.id,
             });
 
-            if (!rpcErr && rpcRes?.success) {
-              if (rpcRes.home_score !== undefined && rpcRes.away_score !== undefined) {
-                setMatch((prev: any) => ({
-                  ...prev,
-                  home_score: rpcRes.home_score,
-                  away_score: rpcRes.away_score,
-                }));
-              }
-            } else {
-              await supabase.from('match_events').delete().eq('id', event.id);
-              if (event.event_type === 'goal' || event.type === 'goal') {
-                const isHome = event.team_id === match.home_team_id;
-                const newHomeScore = Math.max(0, (match.home_score || 0) - (isHome ? 1 : 0));
-                const newAwayScore = Math.max(0, (match.away_score || 0) - (isHome ? 0 : 1));
-
-                await supabase
-                  .from('matches')
-                  .update({ home_score: newHomeScore, away_score: newAwayScore })
-                  .eq('id', matchId);
-
-                setMatch((prev: any) => ({ ...prev, home_score: newHomeScore, away_score: newAwayScore }));
-              }
+            if (rpcErr || (rpcRes && !rpcRes.success)) {
+              throw new Error(rpcErr?.message || rpcRes?.message || "O'chirishda xatolik");
             }
-            fetchEvents();
-            showToast("Voqea o'chirildi 🗑️");
-          } catch (e) {
-            console.error('Delete event error:', e);
+
+            if (isGoal && rpcRes && rpcRes.home_score !== undefined) {
+              setMatch((prev: any) => ({
+                ...prev,
+                home_score: rpcRes.home_score,
+                away_score: rpcRes.away_score,
+              }));
+            }
+
+            queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+          } catch (e: any) {
+            // Rollback UI
+            setEvents(prevEvents);
+            setMatch(prevMatch);
+            Alert.alert("Xatolik", e.message || "Voqeani o'chirishda xatolik yuz berdi");
           }
         },
       },
@@ -811,8 +1039,21 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
     );
   }
 
-  // Next status helper for main big action button
-  const matchStatus = match?.status || 'scheduled';
+  // Next status helper for main big action button (Resolves 'live' to exact half stage)
+  const resolveMatchStatus = () => {
+    const raw = match?.status || 'scheduled';
+    if (['first_half', 'half_time', 'second_half', 'finished', 'scheduled'].includes(raw)) {
+      return raw;
+    }
+    if (raw === 'live') {
+      if (timerSeconds >= halfDurationSecs && !isTimerRunning) return 'half_time';
+      if (timerSeconds >= halfDurationSecs) return 'second_half';
+      return 'first_half';
+    }
+    return 'scheduled';
+  };
+
+  const matchStatus = resolveMatchStatus();
 
   return (
     <View style={styles.container}>
@@ -934,12 +1175,15 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
                 <Text style={styles.timerPillText}>{formatTimer(timerSeconds)}</Text>
                 <Text style={styles.timerMinBadge}>{`(${getCurrentMinute()}')`}</Text>
 
-                <TouchableOpacity style={styles.pillIconBtn} onPress={toggleTimerManual}>
-                  <Ionicons name={isTimerRunning ? "pause" : "play"} size={13} color="#FFFFFF" />
+                <TouchableOpacity 
+                  style={[styles.pillIconBtn, { backgroundColor: isTimerRunning ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)' }]} 
+                  onPress={toggleTimerManual}
+                >
+                  <Ionicons name={isTimerRunning ? "pause" : "play"} size={13} color={isTimerRunning ? "#EF4444" : "#22C55E"} />
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.pillIconBtn} onPress={resetTimerManual}>
-                  <Ionicons name="refresh" size={13} color="#FFFFFF" />
+                  <Ionicons name="refresh" size={13} color="rgba(255,255,255,0.8)" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -992,41 +1236,69 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
         <View style={styles.mainActionBarRow}>
           {matchStatus === 'scheduled' && (
             <TouchableOpacity
-              style={styles.bigGreenActionBtn}
+              style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }]}
               onPress={() => promptStatusChange('first_half')}
+              disabled={isStatusChanging}
             >
-              <Ionicons name="play" size={18} color="#000000" />
-              <Text style={styles.bigGreenBtnText}>{"1-Taym Boshlash"}</Text>
+              {isStatusChanging ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <>
+                  <Ionicons name="play" size={18} color="#000000" />
+                  <Text style={styles.bigGreenBtnText}>{"1-Taym Boshlash"}</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
           {matchStatus === 'first_half' && (
             <TouchableOpacity
-              style={styles.bigOrangeActionBtn}
+              style={[styles.bigOrangeActionBtn, isStatusChanging && { opacity: 0.7 }]}
               onPress={() => promptStatusChange('half_time')}
+              disabled={isStatusChanging}
             >
-              <Ionicons name="pause" size={18} color="#000000" />
-              <Text style={styles.bigGreenBtnText}>{"Tanaffus e'lon qilish"}</Text>
+              {isStatusChanging ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <>
+                  <Ionicons name="pause" size={18} color="#000000" />
+                  <Text style={styles.bigGreenBtnText}>{"Tanaffus e'lon qilish"}</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
           {matchStatus === 'half_time' && (
             <TouchableOpacity
-              style={styles.bigGreenActionBtn}
+              style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }]}
               onPress={() => promptStatusChange('second_half')}
+              disabled={isStatusChanging}
             >
-              <Ionicons name="play" size={18} color="#000000" />
-              <Text style={styles.bigGreenBtnText}>{"2-Taym Boshlash"}</Text>
+              {isStatusChanging ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <>
+                  <Ionicons name="play" size={18} color="#000000" />
+                  <Text style={styles.bigGreenBtnText}>{"2-Taym Boshlash"}</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
           {matchStatus === 'second_half' && (
             <TouchableOpacity
-              style={styles.bigRedActionBtn}
+              style={[styles.bigRedActionBtn, isStatusChanging && { opacity: 0.7 }]}
               onPress={() => promptStatusChange('finished')}
+              disabled={isStatusChanging}
             >
-              <Ionicons name="flag" size={18} color="#FFFFFF" />
-              <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
+              {isStatusChanging ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="flag" size={18} color="#FFFFFF" />
+                  <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
 
@@ -1037,11 +1309,18 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
                 <Text style={styles.bigFinishedBtnText}>{"Uchrashuv Yakunlandi"}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.resetStatusBtn}
+                style={[styles.resetStatusBtn, isStatusChanging && { opacity: 0.7 }]}
                 onPress={() => promptStatusChange('scheduled')}
+                disabled={isStatusChanging}
               >
-                <Ionicons name="refresh" size={16} color="#F59E0B" />
-                <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
+                {isStatusChanging ? (
+                  <ActivityIndicator size="small" color="#F59E0B" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh" size={16} color="#F59E0B" />
+                    <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           )}
@@ -1246,6 +1525,42 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
         </View>
       </ScrollView>
 
+      {/* Solid Non-Glassmorphic Full-Width Pause/Play Button Directly Over Navbar */}
+      <View style={styles.stickyBottomTimerBar}>
+        <TouchableOpacity
+          style={[
+            styles.solidTimerFullBtn,
+            {
+              backgroundColor: isTimerRunning ? '#DC2626' : '#16A34A',
+            },
+          ]}
+          onPress={toggleTimerManual}
+          disabled={isTimerToggling}
+          activeOpacity={0.85}
+        >
+          {isTimerToggling ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <View style={styles.solidBtnContentRow}>
+              <View style={styles.solidBtnLeftGroup}>
+                <Ionicons
+                  name={isTimerRunning ? 'pause-circle' : 'play-circle'}
+                  size={26}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.solidBtnMainText}>
+                  {isTimerRunning ? "Taymerni To'xtatish (Pauza)" : "Taymerni Davom Ettirish"}
+                </Text>
+              </View>
+
+              <View style={styles.solidBtnTimeBadge}>
+                <Text style={styles.solidBtnTimeText}>{formatTimer(timerSeconds)}</Text>
+              </View>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
       {/* Modern Sleek Mobile Status Change Confirmation Modal */}
       <Modal visible={statusConfirmModal.isOpen} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -1256,13 +1571,22 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, onBack }) => {
             <Text style={styles.confirmModalMessage}>{statusConfirmModal.message}</Text>
             <View style={styles.confirmModalActionRow}>
               <TouchableOpacity
-                style={styles.confirmCancelBtn}
-                onPress={() => setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' })}
+                style={[styles.confirmCancelBtn, isStatusChanging && { opacity: 0.5 }]}
+                disabled={isStatusChanging}
+                onPress={() => !isStatusChanging && setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' })}
               >
                 <Text style={styles.confirmCancelText}>Bekor qilish</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmOkBtn} onPress={() => executeStatusChange()}>
-                <Text style={styles.confirmOkText}>Tasdiqlash • Ha</Text>
+              <TouchableOpacity
+                style={[styles.confirmOkBtn, isStatusChanging && { opacity: 0.8 }]}
+                disabled={isStatusChanging}
+                onPress={() => executeStatusChange()}
+              >
+                {isStatusChanging ? (
+                  <ActivityIndicator size="small" color="#000000" />
+                ) : (
+                  <Text style={styles.confirmOkText}>Tasdiqlash • Ha</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1587,7 +1911,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   scrollContent: {
-    paddingBottom: 130,
+    paddingBottom: 110,
     gap: 14,
   },
   /* Scoreboard Main Card (Zero Overlap Responsive Layout) */
@@ -2205,5 +2529,62 @@ const styles = StyleSheet.create({
     color: '#F59E0B',
     fontSize: 13,
     fontWeight: '700',
+  },
+  /* Sticky Bottom Floating Bar (Exact same position & dimensions as Navbar, Solid styling) */
+  stickyBottomTimerBar: {
+    position: 'absolute',
+    bottom: 24,
+    left: 16,
+    right: 16,
+    height: 66,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    elevation: 24,
+    zIndex: 99999,
+  },
+  solidTimerFullBtn: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  solidBtnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  solidBtnLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  solidBtnMainText: {
+    color: '#FFFFFF',
+    fontSize: 14.5,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  solidBtnTimeBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  solidBtnTimeText: {
+    color: '#FFFFFF',
+    fontSize: 15.5,
+    fontWeight: '900',
+    letterSpacing: 1,
   },
 });

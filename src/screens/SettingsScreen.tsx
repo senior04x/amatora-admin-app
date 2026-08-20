@@ -1,26 +1,203 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter, Alert, Image, ActivityIndicator, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
 import { hasSecurePin, deleteSecurePin } from '../utils/securePin';
+import {
+  getYtTokens,
+  saveYtTokens,
+  fetchYtChannelInfo,
+  getValidAccessToken,
+  disconnectYouTube,
+  loadYtChannelForOrg,
+  YT_SCOPES,
+  YtChannelInfo,
+} from '../utils/youtubeService';
 import pkg from '../../package.json';
 
+// Required for expo-auth-session warm-up
+WebBrowser.maybeCompleteAuthSession();
+
 const APP_VERSION = `v${pkg.version}`;
+
+// Google OAuth Client IDs
+// Web Client ID (existing - used for web admin)
+const GOOGLE_WEB_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
+// iOS Client ID — Google Console > Credentials > Create OAuth Client ID > iOS > Bundle ID: com.amatora.adminapp
+const GOOGLE_IOS_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
+// ⬆️ TODO: Replace GOOGLE_IOS_CLIENT_ID with the actual iOS client ID from Google Console
 
 interface SettingsScreenProps {
   onGoBack?: () => void;
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
-  const { currentOrg } = useOrg();
+  const { currentOrg, orgId, showToast } = useOrg();
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [hasPin, setHasPin] = useState(false);
+
+  // YouTube state
+  const [ytChannelInfo, setYtChannelInfo] = useState<YtChannelInfo | null>(null);
+  const [ytLoading, setYtLoading] = useState(false);
+  const [ytConnecting, setYtConnecting] = useState(false);
+
+  // ─── Google Auth Request (handles iOS/Android redirect URIs automatically) ──
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    iosClientId: GOOGLE_IOS_CLIENT_ID,
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    scopes: YT_SCOPES,
+    shouldAutoExchangeCode: false,
+    extraParams: {
+      access_type: 'offline',
+      prompt: 'consent select_account',
+    },
+  });
+
+  // ─── Handle OAuth Response ─────────────────────────────────────────
+  useEffect(() => {
+    if (response?.type === 'success' && response.params?.code) {
+      handleCodeExchange(response.params.code);
+    } else if (response?.type === 'error') {
+      console.error('YouTube OAuth error:', response.error);
+      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
+      setYtConnecting(false);
+    } else if (response?.type === 'dismiss' || response?.type === 'cancel') {
+      setYtConnecting(false);
+    }
+  }, [response]);
+
+  const handleCodeExchange = async (code: string) => {
+    setYtConnecting(true);
+    try {
+      // iOS OAuth clients are "public" — use PKCE instead of client_secret
+      const tokenRequestBody: Record<string, string> = {
+        code,
+        client_id: GOOGLE_IOS_CLIENT_ID,
+        redirect_uri: request?.redirectUri || '',
+        grant_type: 'authorization_code',
+      };
+
+      // PKCE code verifier (required for iOS OAuth clients)
+      if (request?.codeVerifier) {
+        tokenRequestBody.code_verifier = request.codeVerifier;
+      }
+
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(tokenRequestBody).toString(),
+      });
+
+      const tokenData = await tokenResponse.json();
+
+      if (tokenData.access_token) {
+        // Fetch channel info
+        const channelInfo = await fetchYtChannelInfo(tokenData.access_token);
+
+        // Save tokens to AsyncStorage + Supabase DB
+        await saveYtTokens(orgId, tokenData, channelInfo);
+
+        setYtChannelInfo(channelInfo);
+        showToast({
+          message: channelInfo
+            ? `YouTube ulandi: ${channelInfo.title}`
+            : 'YouTube muvaffaqiyatli ulandi!',
+          type: 'success',
+        });
+      } else {
+        console.error('YouTube token exchange failed:', tokenData);
+        Alert.alert('Xatolik', `YouTube token olishda xatolik: ${tokenData?.error || 'noma\'lum'}`);
+      }
+    } catch (err) {
+      console.error('Error exchanging YouTube code:', err);
+      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
+    } finally {
+      setYtConnecting(false);
+    }
+  };
+
+  // ─── Load YouTube channel on mount ─────────────────────────────────
+  useEffect(() => {
+    if (orgId) {
+      loadYouTubeStatus();
+    }
+  }, [orgId]);
+
+  // ─── Reload when app comes to foreground ───────────────────────────
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && orgId) {
+        loadYouTubeStatus();
+      }
+    });
+    return () => subscription.remove();
+  }, [orgId]);
+
+  const loadYouTubeStatus = async () => {
+    setYtLoading(true);
+    try {
+      const channelInfo = await loadYtChannelForOrg(orgId);
+      setYtChannelInfo(channelInfo);
+    } catch (e) {
+      console.error('Load YT status error:', e);
+      setYtChannelInfo(null);
+    } finally {
+      setYtLoading(false);
+    }
+  };
+
+  // ─── Connect YouTube ───────────────────────────────────────────────
+  const handleConnectYouTube = async () => {
+    if (!request) {
+      Alert.alert('Kutib turing', 'OAuth tayyorlanmoqda, bir necha soniya kutib qayta urinib ko\'ring.');
+      return;
+    }
+
+    setYtConnecting(true);
+    try {
+      await promptAsync();
+    } catch (err) {
+      console.error('YouTube connect error:', err);
+      setYtConnecting(false);
+      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
+    }
+  };
+
+  // ─── Disconnect YouTube ────────────────────────────────────────────
+  const handleDisconnectYouTube = () => {
+    Alert.alert(
+      'YouTube uzish',
+      `"${ytChannelInfo?.title || 'YouTube'}" kanalini uzmoqchimisiz?`,
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: 'Uzish',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await disconnectYouTube(orgId);
+              setYtChannelInfo(null);
+              showToast({
+                message: 'YouTube kanal uzildi',
+                type: 'warning',
+              });
+            } catch (e) {
+              console.error('Disconnect error:', e);
+              Alert.alert('Xatolik', 'YouTube uzishda xatolik yuz berdi.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   useEffect(() => {
     loadSettings();
@@ -299,6 +476,85 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         </TouchableOpacity>
       )}
 
+      {/* ─── YouTube Integration Section ──────────────────────────── */}
+      <Text style={styles.sectionHeader}>YouTube Integratsiya</Text>
+
+      {ytLoading ? (
+        <View style={styles.settingItem}>
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={styles.settingLeft}>
+            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+              <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+            </View>
+            <View>
+              <Text style={styles.settingTitle}>YouTube holati tekshirilmoqda...</Text>
+              <Text style={styles.settingSub}>Iltimos kuting</Text>
+            </View>
+          </View>
+          <ActivityIndicator size="small" color="rgba(255, 255, 255, 0.5)" />
+        </View>
+      ) : ytChannelInfo ? (
+        /* ─── Connected State ─── */
+        <View style={[styles.settingItem, { borderColor: 'rgba(0, 255, 102, 0.3)' }]}>
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={styles.settingLeft}>
+            {ytChannelInfo.thumbnail ? (
+              <Image
+                source={{ uri: ytChannelInfo.thumbnail }}
+                style={styles.ytAvatar}
+              />
+            ) : (
+              <View style={[styles.settingIcon, { backgroundColor: 'rgba(0, 255, 102, 0.15)' }]}>
+                <Ionicons name="checkmark-circle" size={20} color="#00FF66" />
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingTitle} numberOfLines={1}>{ytChannelInfo.title}</Text>
+              <Text style={[styles.settingSub, { color: 'rgba(0, 255, 102, 0.7)' }]}>
+                YouTube kanal ulangan ✓
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.ytDisconnectBtn}
+            activeOpacity={0.7}
+            onPress={handleDisconnectYouTube}
+          >
+            <Ionicons name="close-circle" size={16} color="#EF4444" />
+            <Text style={styles.ytDisconnectText}>Uzish</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        /* ─── Not Connected State ─── */
+        <TouchableOpacity
+          style={styles.settingItem}
+          activeOpacity={0.7}
+          onPress={handleConnectYouTube}
+          disabled={ytConnecting}
+        >
+          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={styles.settingLeft}>
+            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+              <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+            </View>
+            <View>
+              <Text style={styles.settingTitle}>YouTube Kanal Ulash</Text>
+              <Text style={styles.settingSub}>Translyatsiya boshqaruvi uchun</Text>
+            </View>
+          </View>
+          {ytConnecting ? (
+            <ActivityIndicator size="small" color="#FF0000" />
+          ) : (
+            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+          )}
+        </TouchableOpacity>
+      )}
+
+      <Text style={styles.ytInfoText}>
+        YouTube kanalini ulash orqali translyatsiya oblojkalarini avtomatik yangilash va jonli efirlarni boshqarish imkoniyatiga ega bo'lasiz.
+        {'\n\n'}Kanal ma'lumotlari serverda saqlanadi — ilovani qayta o'rnatganingizda ham uzilmaydi.
+      </Text>
+
       {/* App Info */}
       <Text style={styles.sectionHeader}>Ilova haqida</Text>
       <View style={styles.infoBox}>
@@ -354,6 +610,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     marginBottom: 14,
+    marginTop: 8,
   },
   settingItem: {
     flexDirection: 'row',
@@ -403,5 +660,36 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.65)',
     fontSize: 12,
     fontWeight: '600',
+  },
+  // ─── YouTube-specific styles ──────────────────────────────────────
+  ytAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 255, 102, 0.4)',
+  },
+  ytDisconnectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  ytDisconnectText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  ytInfoText: {
+    color: 'rgba(255, 255, 255, 0.35)',
+    fontSize: 11,
+    lineHeight: 16,
+    paddingHorizontal: 4,
+    marginBottom: 20,
   },
 });

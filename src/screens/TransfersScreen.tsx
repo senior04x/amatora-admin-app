@@ -20,6 +20,8 @@ import { BlurView } from 'expo-blur';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
+import { useTransfersData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -348,16 +350,26 @@ const TransferCardItem: React.FC<{
 
 export const TransfersScreen: React.FC = () => {
   const { orgId, currentOrg, transferWindowOpen, setTransferWindowOpen } = useOrg();
+  const queryClient = useQueryClient();
 
-  // Data State
-  const [transfers, setTransfers] = useState<any[]>([]);
-  const [allTeams, setAllTeams] = useState<any[]>([]);
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [page] = useState<number>(0);
+
+  // React Query Hooks
+  const {
+    data: transfersData,
+    isLoading: loading,
+    refetch: refetchTransfers,
+  } = useTransfersData(orgId, filter, page, 20);
+
+  const { data: allTeams = [] } = useTeamsData(orgId);
+  const { data: leagues = [] } = useLeaguesData(orgId);
+
+  const transfers = transfersData?.transfers ?? [];
+
   const [refreshing, setRefreshing] = useState(false);
   const [windowLoading, setWindowLoading] = useState(false);
   const [windowToggling, setWindowToggling] = useState(false);
-  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [showApprovedModal, setShowApprovedModal] = useState(false);
   const [showRejectedModal, setShowRejectedModal] = useState(false);
   const [approvedSearchQuery, setApprovedSearchQuery] = useState('');
@@ -392,33 +404,40 @@ export const TransfersScreen: React.FC = () => {
   const [statusModalItem, setStatusModalItem] = useState<any | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
+  // 1. Fetch Transfer Window Status with useCallback
+  const fetchWindowStatus = useCallback(async () => {
+    setWindowLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('transfer_window_open')
+        .eq('id', orgId || 1)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (data && data.transfer_window_open !== undefined && data.transfer_window_open !== null) {
+        setTransferWindowOpen(!!data.transfer_window_open);
+      }
+    } catch (e) {
+      console.error('Fetch window status error:', e);
+    } finally {
+      setWindowLoading(false);
+    }
+  }, [orgId, setTransferWindowOpen]);
+
   useEffect(() => {
-    fetchTransfers();
     fetchWindowStatus();
-
-    // Supabase Realtime subscription for transfers
-    const channel = supabase
-      .channel('admin_transfers_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'transfers' },
-        () => {
-          fetchTransfers(true);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [orgId]);
+  }, [fetchWindowStatus]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchTransfers(true);
-    await fetchWindowStatus();
+    await Promise.all([
+      refetchTransfers(),
+      fetchWindowStatus(),
+    ]);
     setRefreshing(false);
-  }, [orgId]);
+  }, [refetchTransfers, fetchWindowStatus]);
 
   const dbClient = supabase;
 
@@ -432,84 +451,6 @@ export const TransfersScreen: React.FC = () => {
       Alert.alert('Xatolik', e.message);
     } finally {
       setUpdatingStatus(false);
-    }
-  };
-
-  // 1. Fetch Transfer Window Status
-  const fetchWindowStatus = async () => {
-    setWindowLoading(true);
-    try {
-      const { data } = await dbClient
-        .from('organizations')
-        .select('transfer_window_open')
-        .eq('id', orgId || 1)
-        .maybeSingle();
-
-      if (data && data.transfer_window_open !== undefined && data.transfer_window_open !== null) {
-        setTransferWindowOpen(!!data.transfer_window_open);
-      }
-    } catch (e) {
-      console.error('Fetch window status error:', e);
-    } finally {
-      setWindowLoading(false);
-    }
-  };
-
-  // 2. Fetch Transfers, Teams, and Leagues (Matching amatora-organization logic)
-  const fetchTransfers = async (isRefreshing = false) => {
-    if (!isRefreshing) setLoading(true);
-    try {
-      const targetOrgId = orgId || 1;
-
-      // Fetch Teams
-      const { data: orgTeams } = await dbClient
-        .from('teams')
-        .select('id, name, logo_url, league, league_id, league_name')
-        .eq('organization_id', targetOrgId)
-        .order('name');
-
-      if (orgTeams) {
-        setAllTeams(orgTeams);
-      }
-
-      // Fetch Leagues
-      const { data: orgLeagues } = await dbClient
-        .from('leagues')
-        .select('id, name')
-        .eq('organization_id', targetOrgId)
-        .order('name');
-
-      if (orgLeagues) {
-        setLeagues(orgLeagues);
-      }
-
-      const teamIdSet = new Set((orgTeams || []).map((t) => String(t.id)));
-
-      const { data, error } = await dbClient
-        .from('transfers')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching transfers:', error);
-        setTransfers([]);
-      } else {
-        const allTransfers = data || [];
-        const orgTransfers = allTransfers.filter((t: any) => {
-          if (t.organization_id && Number(t.organization_id) === Number(targetOrgId)) return true;
-          const oldMatch = t.old_team_id && teamIdSet.has(String(t.old_team_id));
-          const newMatch = t.new_team_id && teamIdSet.has(String(t.new_team_id));
-          if (oldMatch || newMatch) return true;
-          if (!t.organization_id && (Number(targetOrgId) === 1 || teamIdSet.size === 0)) return true;
-          return false;
-        });
-        setTransfers(orgTransfers);
-      }
-    } catch (e) {
-      console.error('Fetch transfers error:', e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
   };
 
@@ -641,7 +582,8 @@ export const TransfersScreen: React.FC = () => {
         status: newStatus,
       });
 
-      fetchTransfers();
+      queryClient.invalidateQueries({ queryKey: ['transfers', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (err: any) {
       console.error('Error updating transfer status:', err);
       Alert.alert('Xatolik', err.message || "Statusni o'zgartirishda xatolik yuz berdi");
@@ -678,7 +620,8 @@ export const TransfersScreen: React.FC = () => {
       if (error) throw error;
 
       setTransferToDelete(null);
-      fetchTransfers();
+      queryClient.invalidateQueries({ queryKey: ['transfers', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (err: any) {
       console.error('Error deleting transfer:', err);
       Alert.alert('Xatolik', "O'chirishda xatolik yuz berdi");
@@ -757,7 +700,8 @@ export const TransfersScreen: React.FC = () => {
       }
 
       setEditingTransfer(null);
-      fetchTransfers();
+      queryClient.invalidateQueries({ queryKey: ['transfers', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (err: any) {
       console.error('Error saving transfer edit:', err);
       Alert.alert('Xatolik', 'Saqlashda xatolik yuz berdi: ' + (err.message || ''));
@@ -810,15 +754,12 @@ export const TransfersScreen: React.FC = () => {
     setActivePicker(null);
   };
 
-  // Filtered List
-  const filteredTransfers = transfers.filter((t) => {
-    if (filter === 'all') return true;
-    return t.status === filter;
-  });
+  // Filtered List (Server-filtered transfers from RPC)
+  const filteredTransfers = transfers;
 
-  const pendingCount = transfers.filter((t) => t.status === 'pending').length;
-  const approvedCount = transfers.filter((t) => t.status === 'approved').length;
-  const rejectedCount = transfers.filter((t) => t.status === 'rejected').length;
+  const pendingCount = transfers.filter((t: any) => t.status === 'pending').length;
+  const approvedCount = transfers.filter((t: any) => t.status === 'approved').length;
+  const rejectedCount = transfers.filter((t: any) => t.status === 'rejected').length;
 
   const filterTabs = [
     { key: 'pending', label: 'Kutilmoqda', count: pendingCount, color: '#F59E0B' },
@@ -939,7 +880,7 @@ export const TransfersScreen: React.FC = () => {
           </View>
         ) : (
           <View style={{ gap: 14 }}>
-            {filteredTransfers.map((item) => {
+            {filteredTransfers.map((item: any) => {
               const isApproved = item.status === 'approved';
               const isRejected = item.status === 'rejected';
               const isPending = item.status === 'pending';
@@ -1408,7 +1349,7 @@ export const TransfersScreen: React.FC = () => {
             showsVerticalScrollIndicator={false}
           >
             {transfers
-              .filter((t) => {
+              .filter((t: any) => {
                 if (t.status !== 'approved') return false;
                 if (approvedSearchQuery.trim()) {
                   const q = approvedSearchQuery.toLowerCase();
@@ -1417,7 +1358,7 @@ export const TransfersScreen: React.FC = () => {
                 }
                 return true;
               })
-              .map((item) => (
+              .map((item: any) => (
                 <TransferCardItem
                   key={item.id}
                   item={item}
@@ -1428,9 +1369,9 @@ export const TransfersScreen: React.FC = () => {
                   isRejected={false}
                   onApprove={() => {}}
                   onReject={() => {}}
-                  onDeletePress={(t, anim) => handleDeleteWithAnim(t, anim)}
-                  onEditPress={(t) => handleOpenEdit(t)}
-                  onStatusClick={(t) => setStatusModalItem(t)}
+                  onDeletePress={(t: any, anim: any) => handleDeleteWithAnim(t, anim)}
+                  onEditPress={(t: any) => handleOpenEdit(t)}
+                  onStatusClick={(t: any) => setStatusModalItem(t)}
                 />
               ))}
           </ScrollView>
@@ -1485,7 +1426,7 @@ export const TransfersScreen: React.FC = () => {
             showsVerticalScrollIndicator={false}
           >
             {transfers
-              .filter((t) => {
+              .filter((t: any) => {
                 if (t.status !== 'rejected') return false;
                 if (rejectedSearchQuery.trim()) {
                   const q = rejectedSearchQuery.toLowerCase();
@@ -1494,7 +1435,7 @@ export const TransfersScreen: React.FC = () => {
                 }
                 return true;
               })
-              .map((item) => (
+              .map((item: any) => (
                 <TransferCardItem
                   key={item.id}
                   item={item}
@@ -1505,9 +1446,9 @@ export const TransfersScreen: React.FC = () => {
                   isRejected={true}
                   onApprove={() => {}}
                   onReject={() => {}}
-                  onDeletePress={(t, anim) => handleDeleteWithAnim(t, anim)}
-                  onEditPress={(t) => handleOpenEdit(t)}
-                  onStatusClick={(t) => setStatusModalItem(t)}
+                  onDeletePress={(t: any, anim: any) => handleDeleteWithAnim(t, anim)}
+                  onEditPress={(t: any) => handleOpenEdit(t)}
+                  onStatusClick={(t: any) => setStatusModalItem(t)}
                 />
               ))}
           </ScrollView>

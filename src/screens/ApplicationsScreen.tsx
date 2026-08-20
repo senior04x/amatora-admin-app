@@ -18,6 +18,8 @@ import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
+import { useApplicationsData, useApplicationsCountsData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
   initialTab?: 'players' | 'teams';
@@ -155,11 +157,10 @@ const SwipeableCard: React.FC<{
 
 export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', onNavigate }) => {
   const { orgId, collabLeagueNames } = useOrg();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialTab);
-  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [dbCounts, setDbCounts] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
 
   // Pagination Constants
   const PLAYER_PAGE_SIZE = 20;
@@ -167,20 +168,52 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
   const [playerPage, setPlayerPage] = useState(0);
   const [teamPage, setTeamPage] = useState(0);
-  const [hasMorePlayerApps, setHasMorePlayerApps] = useState(true);
-  const [hasMoreTeamApps, setHasMoreTeamApps] = useState(true);
-
-  // Raw Data State
-  const [playerApps, setPlayerApps] = useState<any[]>([]);
-  const [teamApps, setTeamApps] = useState<any[]>([]);
-  const [teamsMap, setTeamsMap] = useState<Map<any, any>>(new Map());
-  const [leagues, setLeagues] = useState<any[]>([]);
 
   // Filters State
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'qisman'>('all');
   const [leagueFilter, setLeagueFilter] = useState<string>('all');
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showLeagueDropdown, setShowLeagueDropdown] = useState(false);
+
+  const currentPage = activeTab === 'players' ? playerPage : teamPage;
+  const currentPageSize = activeTab === 'players' ? PLAYER_PAGE_SIZE : TEAM_PAGE_SIZE;
+
+  // 1. React Query Hooks
+  const {
+    data: applicationsData,
+    isLoading: loadingApps,
+    refetch: refetchApplications,
+  } = useApplicationsData(
+    orgId,
+    activeTab,
+    statusFilter,
+    leagueFilter,
+    currentPage,
+    currentPageSize,
+    collabLeagueNames
+  );
+
+  const { data: dbCounts = { pending: 0, approved: 0, rejected: 0, total: 0 }, refetch: refetchCounts } =
+    useApplicationsCountsData(orgId, activeTab, collabLeagueNames);
+
+  const { data: allTeams = [], isLoading: loadingTeams } = useTeamsData(orgId);
+  const { data: leagues = [] } = useLeaguesData(orgId);
+
+  const loading = loadingApps || loadingTeams;
+  const rawItems = applicationsData?.items ?? [];
+  const hasMore = applicationsData?.hasMore ?? false;
+  const hasMorePlayerApps = activeTab === 'players' && hasMore;
+  const hasMoreTeamApps = activeTab === 'teams' && hasMore;
+
+  // Fast Teams Map for fast team name resolution
+  const teamsMap = React.useMemo(() => {
+    const map = new Map<string, any>();
+    allTeams.forEach((t: any) => {
+      map.set(String(t.id), t);
+      if (t.name) map.set(t.name.trim().toLowerCase(), t);
+    });
+    return map;
+  }, [allTeams]);
 
   // Fullscreen Image Lightbox Modal State
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
@@ -189,6 +222,29 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const [selectedDetailItem, setSelectedDetailItem] = useState<any | null>(null);
   const [loadingTeamRoster, setLoadingTeamRoster] = useState(false);
   const [teamRosterPlayers, setTeamRosterPlayers] = useState<any[]>([]);
+
+  // Realtime Subscription for Applications and Teams
+  useEffect(() => {
+    const channel = supabase
+      .channel('applications_realtime_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [orgId, queryClient]);
 
   // Fetch Team's Players directly from DB when a team card is clicked
   const fetchTeamRoster = async (teamItem: any) => {
@@ -374,239 +430,23 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     }, 2800);
   };
 
-  const fetchDbCounts = async () => {
-    try {
-      const dbClient = supabase;
-      const table = activeTab === 'players' ? 'applications' : 'teams';
-      
-      const baseQuery = dbClient.from(table).select('*', { count: 'exact', head: true });
-      if (orgId) {
-        baseQuery.eq('organization_id', orgId);
-      }
-      
-      const pendingQ = dbClient.from(table).select('*', { count: 'exact', head: true }).in('status', ['pending', 'kutilmoqda']);
-      if (orgId) pendingQ.eq('organization_id', orgId);
-
-      const approvedQ = dbClient.from(table).select('*', { count: 'exact', head: true }).in('status', ['approved', 'tasdiqlangan', 'partially_approved', 'qisman']);
-      if (orgId) approvedQ.eq('organization_id', orgId);
-
-      const rejectedQ = dbClient.from(table).select('*', { count: 'exact', head: true }).in('status', ['rejected', 'rad etilgan', 'rad_etilgan']);
-      if (orgId) rejectedQ.eq('organization_id', orgId);
-
-      const [totalRes, pendingRes, approvedRes, rejectedRes] = await Promise.all([
-        baseQuery,
-        pendingQ,
-        approvedQ,
-        rejectedQ
-      ]);
-
-      setDbCounts({
-        total: totalRes.count || 0,
-        pending: pendingRes.count || 0,
-        approved: approvedRes.count || 0,
-        rejected: rejectedRes.count || 0,
-      });
-    } catch (e) {
-      console.error('Error fetching db counts:', e);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-    fetchDbCounts();
-  }, [orgId]);
-
-  useEffect(() => {
-    fetchDbCounts();
-  }, [activeTab]);
-
-  const loadData = async () => {
-    setLoading(true);
-    await fetchLeagues();
-    const tMap = await fetchTeamsMap();
-
-    if (activeTab === 'players') {
-      setPlayerPage(0);
-      setHasMorePlayerApps(true);
-      await fetchPlayerApplicationsPage(0, true, tMap);
-    } else {
-      setTeamPage(0);
-      setHasMoreTeamApps(true);
-      await fetchTeamApplicationsPage(0, true);
-    }
-    setLoading(false);
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchLeagues();
-    const tMap = await fetchTeamsMap();
-
-    if (activeTab === 'players') {
-      setPlayerPage(0);
-      setHasMorePlayerApps(true);
-      await fetchPlayerApplicationsPage(0, true, tMap);
-    } else {
-      setTeamPage(0);
-      setHasMoreTeamApps(true);
-      await fetchTeamApplicationsPage(0, true);
-    }
+    await Promise.all([
+      refetchApplications(),
+      refetchCounts(),
+    ]);
     setRefreshing(false);
   };
 
-  // Fetch Leagues
-  const fetchLeagues = async () => {
-    try {
-      const dbClient = supabase;
-      let query = dbClient.from('leagues').select('*').order('name');
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-      const { data } = await query;
-      if (data) setLeagues(data);
-    } catch (e) {}
-  };
-
-  // Fetch Teams Map
-  const fetchTeamsMap = async () => {
-    try {
-      const dbClient = supabase;
-      let query = dbClient.from('teams').select('*').order('name');
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-      const { data } = await query;
-      const map = new Map();
-      if (data) {
-        data.forEach((t: any) => {
-          map.set(String(t.id), t);
-          if (t.name) map.set(t.name.trim().toLowerCase(), t);
-        });
-      }
-      setTeamsMap(map);
-      return map;
-    } catch (e) {
-      return new Map();
-    }
-  };
-
-  // Fetch Player Applications Page (50 items chunk)
-  const fetchPlayerApplicationsPage = async (pageIdx: number, isReset = false, currentTeamsMap?: Map<any, any>) => {
-    try {
-      const tMap = currentTeamsMap || teamsMap;
-      const dbClient = supabase;
-      const from = pageIdx * PLAYER_PAGE_SIZE;
-      const to = from + PLAYER_PAGE_SIZE - 1;
-
-      let query = dbClient
-        .from('applications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-
-      const { data } = await query;
-
-      if (data) {
-        const filtered = data
-          .filter((item: any) => !item.comment || !item.comment.includes('[PROFILE_UPDATE]'))
-          .map((item: any) => {
-            let teamObj = null;
-            if (item.team_id) teamObj = tMap.get(String(item.team_id));
-            if (!teamObj && item.team_name) teamObj = tMap.get(item.team_name.trim().toLowerCase());
-
-            const resolvedTeamName =
-              item.team_name ||
-              teamObj?.name ||
-              (item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon');
-
-            const resolvedLeague =
-              item.league ||
-              item.league_name ||
-              item.team_league ||
-              teamObj?.league ||
-              '';
-
-            return {
-              ...item,
-              resolvedLeague,
-              resolvedTeamName,
-            };
-          });
-
-        if (isReset) {
-          setPlayerApps(filtered);
-        } else {
-          setPlayerApps((prev) => [...prev, ...filtered]);
-        }
-
-        if (data.length < PLAYER_PAGE_SIZE) {
-          setHasMorePlayerApps(false);
-        }
-      } else {
-        setHasMorePlayerApps(false);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Fetch Team Applications Page (10 items chunk)
-  const fetchTeamApplicationsPage = async (pageIdx: number, isReset = false) => {
-    try {
-      const dbClient = supabase;
-      const from = pageIdx * TEAM_PAGE_SIZE;
-      const to = from + TEAM_PAGE_SIZE - 1;
-
-      let query = dbClient
-        .from('teams')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-
-      const { data } = await query;
-
-      if (data) {
-        if (isReset) {
-          setTeamApps(data);
-        } else {
-          setTeamApps((prev) => [...prev, ...data]);
-        }
-
-        if (data.length < TEAM_PAGE_SIZE) {
-          setHasMoreTeamApps(false);
-        }
-      } else {
-        setHasMoreTeamApps(false);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   // Load More Button Handler
-  const handleLoadMoreBtn = async () => {
+  const handleLoadMoreBtn = () => {
     if (loadingMore || loading) return;
 
     if (activeTab === 'players' && hasMorePlayerApps) {
-      setLoadingMore(true);
-      const nextPage = playerPage + 1;
-      setPlayerPage(nextPage);
-      await fetchPlayerApplicationsPage(nextPage, false);
-      setLoadingMore(false);
+      setPlayerPage((prev) => prev + 1);
     } else if (activeTab === 'teams' && hasMoreTeamApps) {
-      setLoadingMore(true);
-      const nextPage = teamPage + 1;
-      setTeamPage(nextPage);
-      await fetchTeamApplicationsPage(nextPage, false);
-      setLoadingMore(false);
+      setTeamPage((prev) => prev + 1);
     }
   };
 
@@ -663,15 +503,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
       if (teamId) {
         await dbClient.from('teams').update({ status: newStatus }).eq('id', teamId);
-
-        setTeamApps((prev) =>
-          prev.map((t) =>
-            t.id === teamId ||
-            (t.name && teamName && t.name.trim().toLowerCase() === teamName.trim().toLowerCase())
-              ? { ...t, status: newStatus }
-              : t
-          )
-        );
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
       }
     } catch (e) {
       console.error(e);
@@ -681,10 +514,6 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   // INSTANT OPTIMISTIC status change for individual roster player
   const handleSetPlayerStatus = (item: any, newStatus: string) => {
     setStatusPickerPlayer(null);
-
-    setPlayerApps((prev) =>
-      prev.map((p) => (p.id === item.id ? { ...p, status: newStatus } : p))
-    );
 
     setTeamRosterPlayers((prev) =>
       prev.map((p) => (p.id === item.id ? { ...p, status: newStatus } : p))
@@ -750,6 +579,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           const tName = item.team_name || item.resolvedTeamName || '';
           await syncTeamStatusFromPlayers(tId, tName);
         }
+
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
       } catch (err: any) {
         console.error('Background set player status error:', err);
       }
@@ -765,18 +599,6 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   };
 
   const handleApproveTeamApp = (item: any) => {
-    setTeamApps((prev) =>
-      prev.map((t) => (t.id === item.id ? { ...t, status: 'approved' } : t))
-    );
-    setPlayerApps((prev) =>
-      prev.map((p) =>
-        String(p.team_id) === String(item.id) ||
-        (p.team_name && item.name && p.team_name.trim().toLowerCase() === item.name.trim().toLowerCase())
-          ? { ...p, status: 'approved' }
-          : p
-      )
-    );
-
     if (selectedDetailItem?.id === item.id) {
       setSelectedDetailItem((prev: any) => ({ ...prev, status: 'approved' }));
     }
@@ -790,6 +612,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           .from('applications')
           .update({ status: 'approved' })
           .or(`team_id.eq.${item.id},team_name.eq.${item.name}`);
+
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
       } catch (err: any) {
         console.error('Background approve team app error:', err);
       }
@@ -797,18 +624,6 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   };
 
   const handleRejectTeamApp = (item: any) => {
-    setTeamApps((prev) =>
-      prev.map((t) => (t.id === item.id ? { ...t, status: 'rejected' } : t))
-    );
-    setPlayerApps((prev) =>
-      prev.map((p) =>
-        String(p.team_id) === String(item.id) ||
-        (p.team_name && item.name && p.team_name.trim().toLowerCase() === item.name.trim().toLowerCase())
-          ? { ...p, status: 'rejected' }
-          : p
-      )
-    );
-
     if (selectedDetailItem?.id === item.id) {
       setSelectedDetailItem((prev: any) => ({ ...prev, status: 'rejected' }));
     }
@@ -822,6 +637,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           .from('applications')
           .update({ status: 'rejected' })
           .or(`team_id.eq.${item.id},team_name.eq.${item.name}`);
+
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
       } catch (err: any) {
         console.error('Background reject team app error:', err);
       }
@@ -846,18 +666,20 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
             try {
               const dbClient = supabase;
               if (isPlayer) {
-                setPlayerApps((prev) => prev.filter((p) => p.id !== item.id));
                 await dbClient.from('applications').delete().eq('id', item.id);
                 showToast("O'yinchi arizasi o'chirildi");
               } else {
-                setTeamApps((prev) => prev.filter((t) => t.id !== item.id));
                 await dbClient.from('teams').delete().eq('id', item.id);
                 showToast("Jamoa arizasi o'chirildi");
               }
               if (selectedDetailItem?.id === item.id) {
                 setSelectedDetailItem(null);
               }
-              fetchDbCounts();
+              queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+              queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
+              queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+              queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+              queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
             } catch (err) {
               console.error('Delete error:', err);
               showToast("O'chirishda xatolik yuz berdi");
@@ -908,43 +730,50 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     return '';
   };
 
-  const currentRawList = activeTab === 'players' ? playerApps : teamApps;
+  const filteredList = React.useMemo(() => {
+    return rawItems
+      .map((item: any) => {
+        let teamObj = null;
+        if (item.team_id) teamObj = teamsMap.get(String(item.team_id));
+        if (!teamObj && item.team_name) teamObj = teamsMap.get(item.team_name.trim().toLowerCase());
 
-  const filteredList = currentRawList
-    .filter((item) => {
-      const st = (item.status || 'pending').toLowerCase();
-      if (statusFilter === 'pending' && st !== 'pending' && st !== 'kutilmoqda') return false;
-      if (statusFilter === 'approved' && st !== 'approved' && st !== 'tasdiqlangan' && st !== 'partially_approved' && st !== 'qisman') return false;
-      if (statusFilter === 'rejected' && st !== 'rejected' && st !== 'rad etilgan') return false;
-      if (statusFilter === 'qisman' && st !== 'qisman' && st !== 'partially_approved') return false;
+        const resolvedTeamName =
+          item.team_name ||
+          teamObj?.name ||
+          (item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon');
 
-      if (leagueFilter !== 'all') {
-        const rawLeague = item.resolvedLeague || item.league || item.league_name || '';
-        const leagueList = rawLeague.split(',').map((s: string) => s.trim().toLowerCase());
-        const targetFilter = leagueFilter.trim().toLowerCase();
-        if (!leagueList.includes(targetFilter)) return false;
-      }
+        const resolvedLeague =
+          item.league ||
+          item.league_name ||
+          item.team_league ||
+          teamObj?.league ||
+          '';
 
-      return true;
-    })
-    .sort((a, b) => {
-      const stA = (a.status || 'pending').toLowerCase();
-      const stB = (b.status || 'pending').toLowerCase();
-      const isPendingA = stA === 'pending' || stA === 'kutilmoqda' ? 0 : 1;
-      const isPendingB = stB === 'pending' || stB === 'kutilmoqda' ? 0 : 1;
+        return {
+          ...item,
+          resolvedLeague,
+          resolvedTeamName,
+        };
+      })
+      .sort((a: any, b: any) => {
+        const stA = (a.status || 'pending').toLowerCase();
+        const stB = (b.status || 'pending').toLowerCase();
+        const isPendingA = stA === 'pending' || stA === 'kutilmoqda' ? 0 : 1;
+        const isPendingB = stB === 'pending' || stB === 'kutilmoqda' ? 0 : 1;
 
-      if (isPendingA !== isPendingB) {
-        return isPendingA - isPendingB;
-      }
+        if (isPendingA !== isPendingB) {
+          return isPendingA - isPendingB;
+        }
 
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : (Number(a.id) || 0);
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : (Number(b.id) || 0);
-      return timeB - timeA;
-    });
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : (Number(a.id) || 0);
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : (Number(b.id) || 0);
+        return timeB - timeA;
+      });
+  }, [rawItems, teamsMap]);
 
   const getTeamRosterPlayers = (teamItem: any) => {
     if (!teamItem) return [];
-    return playerApps.filter((p) => {
+    return rawItems.filter((p: any) => {
       if (String(p.team_id) === String(teamItem.id)) return true;
       if (
         p.team_name &&

@@ -23,6 +23,8 @@ import { useOrg } from '../context/OrgContext';
 import { SwipeRow } from '../components/SwipeRow';
 import { MatchControlScreen } from './MatchControlScreen';
 import { adminNotificationService } from '../utils/adminNotificationService';
+import { useMatchesData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Match {
   id: string | number;
@@ -84,23 +86,30 @@ const MatchCardSkeleton: React.FC = () => {
 
 export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ onNavigateToCreate }) => {
   const { orgId, collabLeagueNames } = useOrg();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const queryClient = useQueryClient();
 
-  const [matches, setMatches] = useState<Match[]>([]);
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [teams, setTeams] = useState<any[]>([]);
-
-  // 3 Select Filters: Liga, Tur, Holat
+  // 3 Select Filters: Liga, Tur, Holat (Only Active Matches: Live & Scheduled)
   const [selectedLeague, setSelectedLeague] = useState<string>('all');
   const [selectedRound, setSelectedRound] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<'all' | 'scheduled' | 'live' | 'finished'>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'live' | 'scheduled'>('all');
+
+  // React Query Hooks
+  const {
+    data: matches = [],
+    isLoading: loading,
+    refetch: refetchMatches,
+  } = useMatchesData(orgId, selectedLeague, collabLeagueNames);
+
+  const { data: leagues = [] } = useLeaguesData(orgId);
+  const { data: teams = [] } = useTeamsData(orgId);
+
+  const [refreshing, setRefreshing] = useState(false);
 
   // Dropdown open states
   const [activeDropdown, setActiveDropdown] = useState<'none' | 'league' | 'round' | 'status'>('none');
 
-  // Active Control Match Screen State
-  const [activeControlMatchId, setActiveControlMatchId] = useState<string | number | null>(null);
+  // Active Control Match Object State (0ms instant transition without blocking spinner)
+  const [activeControlMatch, setActiveControlMatch] = useState<Match | null>(null);
 
   // Active Swiped Row ID State
   const [activeSwipedId, setActiveSwipedId] = useState<string | number | null>(null);
@@ -141,153 +150,28 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     return () => clearInterval(timerInterval);
   }, []);
 
+  // Supabase Realtime Subscription: Invalidate queries instead of full re-fetch
   useEffect(() => {
-    loadData();
-
-    // Supabase Realtime Subscription for Live Updates on Matches List & Timer Payloads
     const matchesChannel = supabase
       .channel('matches_list_live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        fetchMatches();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sponsors' }, () => {
-        fetchMatches();
+        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_events' }, () => {
-        fetchMatches();
+        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(matchesChannel);
     };
-  }, [orgId]);
-
-  const loadData = async () => {
-    setLoading(true);
-    await Promise.all([fetchLeagues(), fetchTeams(), fetchMatches()]);
-    setLoading(false);
-  };
+  }, [orgId, queryClient]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([fetchLeagues(), fetchTeams(), fetchMatches()]);
+    await refetchMatches();
     setRefreshing(false);
-  }, [orgId]);
-
-  const fetchLeagues = async () => {
-    try {
-      let query = supabase.from('leagues').select('*').order('name');
-      if (orgId) {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-      const { data } = await query;
-      if (data) setLeagues(data);
-    } catch (e) {
-      console.error('Error fetching leagues:', e);
-    }
-  };
-
-  const fetchTeams = async () => {
-    try {
-      let query = supabase.from('teams').select('id, name, logo_url, league').eq('status', 'approved');
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-      const { data } = await query;
-      if (data) setTeams(data);
-    } catch (e) {
-      console.error('Error fetching teams:', e);
-    }
-  };
-
-  const fetchMatches = async () => {
-    try {
-      const dbClient = supabase;
-      let query = dbClient
-        .from('matches')
-        .select(`
-          *,
-          home_team:home_team_id (id, name, logo_url),
-          away_team:away_team_id (id, name, logo_url)
-        `)
-        .order('id', { ascending: false });
-
-      if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', orgId);
-        }
-      }
-
-      const { data, error } = await query;
-      let rawMatches = data || [];
-
-      if (error || !data) {
-        const { data: fallbackData } = await dbClient.from('matches').select('*');
-        if (fallbackData) {
-          const { data: teamsData } = await dbClient.from('teams').select('id, name, logo_url');
-          const teamsMap = new Map((teamsData || []).map((t) => [t.id, t]));
-          rawMatches = fallbackData.map((m) => ({
-            ...m,
-            home_team: teamsMap.get(m.home_team_id),
-            away_team: teamsMap.get(m.away_team_id),
-          }));
-        }
-      }
-
-      // Fetch live timer payloads from sponsors table for active live matches
-      const { data: timerSponsors } = await dbClient
-        .from('sponsors')
-        .select('*')
-        .like('name', 'MATCH_TIMER_%');
-
-      const timerMap = new Map();
-      if (timerSponsors) {
-        timerSponsors.forEach((sp: any) => {
-          try {
-            const matchIdFromKey = sp.name.replace('MATCH_TIMER_', '');
-            const jsonStr = sp.logo_url || sp.image_url || sp.url;
-            if (jsonStr) {
-              const parsed = JSON.parse(jsonStr);
-              timerMap.set(String(matchIdFromKey), parsed);
-            }
-          } catch (e) {}
-        });
-      }
-
-      const enrichedMatches = rawMatches.map((m: any) => {
-        const livePayload = timerMap.get(String(m.id));
-        const isLive = m.status === 'first_half' || m.status === 'second_half' || m.status === 'live';
-
-        const baseSec = livePayload?.timer_seconds !== undefined && livePayload?.timer_seconds !== null
-          ? Number(livePayload.timer_seconds)
-          : (m.timer_seconds !== undefined && m.timer_seconds !== null ? Number(m.timer_seconds) : 0);
-
-        const isRunning = livePayload?.is_timer_running !== undefined && livePayload?.is_timer_running !== null
-          ? (String(livePayload.is_timer_running) === 'true' || livePayload.is_timer_running === true)
-          : (m.is_timer_running !== undefined && m.is_timer_running !== null ? (String(m.is_timer_running) === 'true' || m.is_timer_running === true) : isLive);
-
-        const startedAt = livePayload?.timer_started_at || m.timer_started_at || null;
-
-        return {
-          ...m,
-          timer_seconds: baseSec,
-          timer_started_at: startedAt,
-          is_timer_running: isRunning,
-          status: livePayload?.status || m.status,
-          home_score: livePayload?.home_score ?? m.home_score,
-          away_score: livePayload?.away_score ?? m.away_score,
-        };
-      });
-
-      setMatches(enrichedMatches as Match[]);
-    } catch (err: any) {
-      console.error('Error fetching matches:', err);
-    }
-  };
+  }, [refetchMatches]);
 
   // Open Full Edit Match Modal
   const handleOpenEditModal = (match: Match) => {
@@ -345,10 +229,6 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       is_postponed: editIsPostponed,
     };
 
-    setMatches((prev) =>
-      prev.map((m) => (m.id === editingMatch.id ? { ...m, ...fullUpdatePayload } : m))
-    );
-
     try {
       const dbClient = supabase;
       let { error } = await dbClient.from('matches').update(fullUpdatePayload).eq('id', editingMatch.id);
@@ -373,10 +253,11 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       });
 
       setEditingMatch(null);
-      fetchMatches();
+      queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (e: any) {
       Alert.alert("Xatolik", e.message || "Tahrirlashda xatolik yuz berdi");
-      fetchMatches();
+      queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
     } finally {
       setSavingEdit(false);
     }
@@ -393,9 +274,6 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     const targetId = matchToDelete.id;
     setDeletingMatch(true);
 
-    // Optimistic UI update
-    setMatches((prev) => prev.filter((m) => m.id !== targetId));
-
     try {
       const dbClient = supabase;
 
@@ -407,22 +285,31 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       await dbClient.from('match_stats').delete().eq('match_id', targetId);
 
       // 3. Delete match from matches table
-      const { error } = await dbClient.from('matches').delete().eq('id', targetId);
-      if (error) {
+      let { error } = await dbClient.from('matches').delete().eq('id', targetId);
+      if (error && !isNaN(Number(targetId))) {
+        const { error: errNum } = await dbClient.from('matches').delete().eq('id', Number(targetId));
+        if (errNum) throw errNum;
+      } else if (error) {
         throw error;
       }
+
       setMatchToDelete(null);
-      fetchMatches();
+      queryClient.invalidateQueries({ queryKey: ['matches'] });
+      queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.refetchQueries({ queryKey: ['matches'] });
+      queryClient.refetchQueries({ queryKey: ['finishedMatches'] });
+      refetchMatches();
     } catch (e: any) {
       console.error('Error deleting match:', e);
       Alert.alert("Xatolik", e?.message || "O'yinni o'chirishda xatolik yuz berdi");
-      fetchMatches();
+      queryClient.invalidateQueries({ queryKey: ['matches'] });
     } finally {
       setDeletingMatch(false);
     }
   };
 
-  // Countdown & Live Running Time Helper Calculation (No emojis)
+  // Unified Live Forward Time Helper Calculation (00:00 -> 45:00 -> 90:00)
   const getMatchTimeRemainingText = (
     mDate?: string,
     mTime?: string,
@@ -433,9 +320,6 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   ) => {
     if (status === 'finished') return { text: 'Uchrashuv Yakunlangan', color: '#10B981' };
     if (status === 'first_half' || status === 'second_half' || status === 'half_time' || status === 'live') {
-      if (status === 'half_time') {
-        return { text: 'TANAFFUS (JONLI)', color: '#F59E0B' };
-      }
       let sec = timerSecs || 0;
       if (isRunning && startedAt) {
         const ms = new Date(startedAt).getTime();
@@ -447,7 +331,14 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         }
       }
       const min = Math.max(1, Math.floor(sec / 60) + 1);
+      if (status === 'half_time') {
+        const halfMin = Math.floor(sec / 60) || 30;
+        return { text: `TANAFFUS (${halfMin}')`, color: '#F59E0B' };
+      }
       const halfLabel = status === 'second_half' ? '2-Taym' : '1-Taym';
+      if (!isRunning && (timerSecs || 0) > 0) {
+        return { text: `PAUZA • ${halfLabel} (${min}')`, color: '#F59E0B' };
+      }
       return { text: `JONLI • ${halfLabel} (${min}')`, color: '#EF4444' };
     }
     if (!mDate || !mTime) return { text: 'Boshlanish vaqti belgilanmagan', color: 'rgba(255,255,255,0.4)' };
@@ -458,7 +349,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       const diffMs = matchDateTime.getTime() - now.getTime();
 
       if (diffMs <= 0) {
-        return { text: 'O\'yin vaqti kelgan / Jonli', color: '#3B82F6' };
+        return { text: "O'yin vaqti kelgan / Jonli", color: '#3B82F6' };
       }
 
       const hours = Math.floor(diffMs / (1000 * 60 * 60));
@@ -475,7 +366,6 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   };
 
   const getLiveTimerFormattedText = (status?: string, timerSecs?: number, startedAt?: string, isRunning?: boolean) => {
-    if (status === 'half_time') return 'Tanaffus';
     let sec = timerSecs || 0;
     if (isRunning && startedAt) {
       const ms = new Date(startedAt).getTime();
@@ -492,48 +382,63 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   };
 
   // Render MatchControlScreen if active
-  if (activeControlMatchId) {
+  if (activeControlMatch) {
     return (
       <MatchControlScreen
-        matchId={activeControlMatchId}
+        matchId={activeControlMatch.id}
+        initialMatch={activeControlMatch}
         onBack={() => {
-          setActiveControlMatchId(null);
-          fetchMatches();
+          setActiveControlMatch(null);
+          queryClient.invalidateQueries({ queryKey: ['matches'] });
+          queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard'] });
         }}
       />
     );
   }
 
-  // Filtered and Sorted Matches
+  // Helper to match status groups accurately
+  const isMatchLive = (st?: string) => ['first_half', 'second_half', 'half_time', 'live', 'in_progress'].includes(st || '');
+  const isMatchScheduled = (st?: string) => ['scheduled', 'upcoming', 'not_started', 'pending'].includes(st || '') || !st;
+
+  // Filtered and Sorted Active Matches (Strictly EXCLUDING Finished matches, Live TOP #1)
   const filteredMatches = matches.filter((m) => {
+    // 1. NEVER show finished matches in this screen
+    if (m.status === 'finished' || m.status === 'FINISHED' || m.status === 'tugagan' || m.status === 'yakunlangan') return false;
+
     if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
     if (selectedRound !== 'all' && String(m.round) !== selectedRound) return false;
-    if (selectedStatus !== 'all' && m.status !== selectedStatus) return false;
+    
+    if (selectedStatus === 'live') {
+      if (!isMatchLive(m.status)) return false;
+    } else if (selectedStatus === 'scheduled') {
+      if (!isMatchScheduled(m.status)) return false;
+    }
     return true;
   }).sort((a, b) => {
     const statusOrder: Record<string, number> = {
+      'first_half': 1,
+      'second_half': 1,
+      'half_time': 1,
       'live': 1,
+      'in_progress': 1,
       'scheduled': 2,
+      'upcoming': 2,
+      'not_started': 2,
+      'pending': 2,
       'postponed': 3,
-      'finished': 4
     };
     
-    const getOrder = (status?: string) => statusOrder[status || 'scheduled'] || 5;
+    const getOrder = (status?: string) => statusOrder[status || 'scheduled'] || 3;
     const orderA = getOrder(a.status);
     const orderB = getOrder(b.status);
     
     if (orderA !== orderB) return orderA - orderB;
     
-    // If same status, sort by Date and Time
+    // If same status, sort by Date and Time (closest matches first)
     const dateA = new Date(`${a.match_date || '2099-01-01'}T${a.match_time || '00:00:00'}`).getTime();
     const dateB = new Date(`${b.match_date || '2099-01-01'}T${b.match_time || '00:00:00'}`).getTime();
     
-    // For finished matches, sort descending (most recently finished first)
-    if (a.status === 'finished') {
-      return dateB - dateA;
-    }
-    
-    // For live/scheduled matches, sort ascending (closest matches first)
     return dateA - dateB;
   });
 
@@ -597,11 +502,9 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
           <Text style={styles.filterSelectText} numberOfLines={1}>
             {selectedStatus === 'all'
               ? 'Barcha Holat'
-              : selectedStatus === 'scheduled'
-              ? 'Rejalangan'
               : selectedStatus === 'live'
               ? 'Jonli'
-              : 'Tugagan'}
+              : 'Rejalashtirilgan'}
           </Text>
           <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.5)" />
         </TouchableOpacity>
@@ -693,9 +596,8 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         <View style={styles.dropdownMenuCard}>
           {[
             { id: 'all', title: 'Barcha Holatlar' },
-            { id: 'scheduled', title: 'Rejalashtirilgan' },
             { id: 'live', title: 'Jonli (Live)' },
-            { id: 'finished', title: 'Tugagan' },
+            { id: 'scheduled', title: 'Rejalashtirilgan' },
           ].map((st) => (
             <TouchableOpacity
               key={st.id}
@@ -892,18 +794,18 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                   {/* PROMINENT CENTERED "BOSHQARISH" ACTION BUTTON */}
                   <TouchableOpacity
                     style={styles.centralManageBtn}
-                    onPress={() => setActiveControlMatchId(item.id)}
+                    onPress={() => setActiveControlMatch(item)}
                     activeOpacity={0.8}
                   >
                     <Ionicons name="settings-outline" size={18} color="#000000" />
                     <Text style={styles.centralManageBtnText}>{"O'YINNI BOSHQARISH"}</Text>
                   </TouchableOpacity>
-                </View>
-              </SwipeRow>
-            );
-          }}
-        />
-      )}
+                  </View>
+                </SwipeRow>
+              );
+            }}
+          />
+        )}
 
       {/* FULL EDIT MATCH MODAL (11 Fields 1:1 Matching Admin Web) */}
       <Modal visible={!!editingMatch} transparent animationType="slide">
@@ -1912,5 +1814,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     color: '#FFFFFF',
+  },
+  loadMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#00FF66',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    shadowColor: '#00FF66',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  loadMoreBtnText: {
+    color: '#000000',
+    fontSize: 13,
+    fontWeight: '900',
   },
 });

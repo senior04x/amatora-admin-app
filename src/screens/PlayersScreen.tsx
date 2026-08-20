@@ -23,6 +23,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
+import { usePlayersData, useTeamsPaginatedData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
   onNavigate?: (screen: string) => void;
@@ -160,16 +162,12 @@ const SwipeablePlayerCard = ({
     ? item.avatar_url || item.photo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'
     : item.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop';
 
-  const foundTeam = item.team_id && allTeamsList.length > 0
-    ? allTeamsList.find((t: any) => String(t.id) === String(item.team_id))
-    : null;
-
-  let displayTeam = item.team_name;
+  let displayTeam = item.team?.name || item.team_name;
   if (!displayTeam || !isNaN(Number(displayTeam))) {
-    displayTeam = foundTeam ? foundTeam.name : (item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon');
+    displayTeam = item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon';
   }
 
-  const displayLeague = item.league || item.league_name || item.resolvedLeague || foundTeam?.league;
+  const displayLeague = item.team?.league || item.league || item.league_name;
 
   const deleteOpacity = panX.interpolate({
     inputRange: [-85, 0],
@@ -305,34 +303,88 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearchQuery(searchQuery.trim());
-    }, 500);
+      setPlayerPage(0);
+      setTeamPage(0);
+      setAccumulatedPlayers([]);
+      setAccumulatedTeams([]);
+    }, 300);
     return () => clearTimeout(handler);
   }, [searchQuery]);
 
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Pagination Constants
-  const PLAYER_PAGE_SIZE = 20;
-  const TEAM_PAGE_SIZE = 10;
+  // Pagination Constants (15 items per page)
+  const PLAYER_PAGE_SIZE = 15;
+  const TEAM_PAGE_SIZE = 15;
 
   const [playerPage, setPlayerPage] = useState(0);
+  const [accumulatedPlayers, setAccumulatedPlayers] = useState<any[]>([]);
   const [teamPage, setTeamPage] = useState(0);
-  const [hasMorePlayers, setHasMorePlayers] = useState(true);
-  const [hasMoreTeams, setHasMoreTeams] = useState(true);
-
-  // Total Database Counters State
-  const [totalPlayersCount, setTotalPlayersCount] = useState<number>(0);
-  const [totalTeamsCount, setTotalTeamsCount] = useState<number>(0);
-
-  // Data State
-  const [players, setPlayers] = useState<any[]>([]);
-  const [teams, setTeams] = useState<any[]>([]);
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [allTeamsList, setAllTeamsList] = useState<any[]>([]);
+  const [accumulatedTeams, setAccumulatedTeams] = useState<any[]>([]);
 
   const [showArchived, setShowArchived] = useState<boolean>(false);
+
+  // 1. React Query Hooks
+  const {
+    data: playersData,
+    isLoading: loadingPlayers,
+    refetch: refetchPlayers,
+  } = usePlayersData(orgId, debouncedSearchQuery, playerPage, PLAYER_PAGE_SIZE, showArchived);
+
+  const {
+    data: teamsData,
+    isLoading: loadingTeams,
+    refetch: refetchTeams,
+  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, teamPage, TEAM_PAGE_SIZE, showArchived);
+
+  const { data: allTeamsList = [] } = useTeamsData(orgId);
+  const { data: leagues = [] } = useLeaguesData(orgId);
+
+  useEffect(() => {
+    setPlayerPage(0);
+    setTeamPage(0);
+    setAccumulatedPlayers([]);
+    setAccumulatedTeams([]);
+  }, [debouncedSearchQuery, showArchived, orgId]);
+
+  useEffect(() => {
+    if (playersData?.players) {
+      if (playerPage === 0) {
+        setAccumulatedPlayers(playersData.players);
+      } else {
+        setAccumulatedPlayers((prev) => {
+          const existingIds = new Set(prev.map((p) => String(p.id)));
+          const uniqueNew = playersData.players.filter((p: any) => !existingIds.has(String(p.id)));
+          return [...prev, ...uniqueNew];
+        });
+      }
+    }
+  }, [playersData?.players, playerPage]);
+
+  useEffect(() => {
+    if (teamsData?.teams) {
+      if (teamPage === 0) {
+        setAccumulatedTeams(teamsData.teams);
+      } else {
+        setAccumulatedTeams((prev) => {
+          const existingIds = new Set(prev.map((t) => String(t.id)));
+          const uniqueNew = teamsData.teams.filter((t: any) => !existingIds.has(String(t.id)));
+          return [...prev, ...uniqueNew];
+        });
+      }
+    }
+  }, [teamsData?.teams, teamPage]);
+
+  const players = accumulatedPlayers;
+  const teams = accumulatedTeams;
+  const hasMorePlayers = playersData?.hasMore ?? false;
+  const hasMoreTeams = teamsData?.hasMore ?? false;
+
+  const loading = activeTab === 'players' ? (loadingPlayers && playerPage === 0) : (loadingTeams && teamPage === 0);
+  const [totalTeamsCount, setTotalTeamsCount] = useState<number>(0);
 
   // Archive Full-Page Modal State & Tabs
   const [showArchiveModal, setShowArchiveModal] = useState<boolean>(false);
@@ -409,9 +461,20 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     city: '',
   });
 
+  // Realtime Subscription for Applications
   useEffect(() => {
-    loadInitialData();
-  }, [orgId, debouncedSearchQuery]);
+    const channel = supabase
+      .channel('players_realtime_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [orgId, queryClient]);
 
   useEffect(() => {
     if (showArchiveModal) {
@@ -491,8 +554,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
       setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
-      fetchTotalCounts();
-      fetchPlayers(0, true);
+      queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (e) {
       console.error(e);
     }
@@ -507,87 +570,28 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
       setToastMsg("Jamoa arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
-      fetchTotalCounts();
-      fetchTeams(0, true);
+      queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['paginatedTeams', Number(orgId) || 1] });
+      refetchTeams();
     } catch (e) {
       console.error(e);
     }
   };
 
-  const loadInitialData = async () => {
-    setLoading(true);
-    await fetchRegistrationStatus();
-    await fetchLeagues();
-    await fetchAllTeamsList();
-    await fetchTotalCounts();
-
-    if (activeTab === 'players') {
-      setPlayerPage(0);
-      setHasMorePlayers(true);
-      await fetchPlayers(0, true);
-    } else {
-      setTeamPage(0);
-      setHasMoreTeams(true);
-      await fetchTeams(0, true);
-    }
-    setLoading(false);
-  };
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchRegistrationStatus();
-    await fetchLeagues();
-    await fetchAllTeamsList();
-    await fetchTotalCounts();
-
-    if (activeTab === 'players') {
-      setPlayerPage(0);
-      setHasMorePlayers(true);
-      await fetchPlayers(0, true);
-    } else {
-      setTeamPage(0);
-      setHasMoreTeams(true);
-      await fetchTeams(0, true);
-    }
+    await Promise.all([
+      refetchPlayers(),
+      refetchTeams(),
+      fetchRegistrationStatus(),
+    ]);
     setRefreshing(false);
-  };
-
-  // Fetch All Teams List for Select Dropdown & Name Resolution
-  const fetchAllTeamsList = async () => {
-    try {
-      const dbClient = supabase;
-      let query = dbClient.from('teams').select('id, name, league').order('name');
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-      const { data } = await query;
-      if (data) setAllTeamsList(data);
-    } catch (e) {}
   };
 
   // Fetch Total Database Counters
   const fetchTotalCounts = async () => {
     try {
       const dbClient = supabase;
-
-      // Approved Players Total Count
-      let pQuery = dbClient
-        .from('applications')
-        .select('id', { count: 'exact', head: true })
-        .or('status.eq.approved,status.eq.tasdiqlangan');
-
-      if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map(n => `"${n.replace(/"/g, '""')}"`).join(',');
-          pQuery = pQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          pQuery = pQuery.eq('organization_id', orgId);
-        }
-      }
-      const { count: pCount } = await pQuery;
-      if (pCount !== null && pCount !== undefined) {
-        setTotalPlayersCount(pCount);
-      }
 
       // Approved Teams Total Count
       let tQuery = dbClient
@@ -630,141 +634,15 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     }
   };
 
-  // Fetch Approved Players Page with Deduplication & Archive Filter
-  const fetchPlayers = async (pageIdx: number, isReset = false, isArchivedMode = showArchived) => {
-    try {
-      const from = pageIdx * PLAYER_PAGE_SIZE;
-      const to = from + PLAYER_PAGE_SIZE - 1;
-      const dbClient = supabase;
 
-      let query = dbClient
-        .from('applications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (!isArchivedMode) {
-        query = query.or('status.eq.approved,status.eq.tasdiqlangan');
-      }
-
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-
-      if (debouncedSearchQuery) {
-        const search = `%${debouncedSearchQuery}%`;
-        query = query.or(
-          `first_name.ilike.${search},last_name.ilike.${search},passport_series.ilike.${search},passport_number.ilike.${search},phone.ilike.${search}`
-        );
-      }
-
-      const { data: appData } = await query;
-
-      if (appData && appData.length > 0) {
-        const filtered = appData.filter((app: any) => {
-          if (app.comment && app.comment.includes('[PROFILE_UPDATE]')) return false;
-          if (isArchivedMode) {
-            return app.is_archived === true || app.status === 'archived';
-          } else {
-            return !app.is_archived && app.status !== 'archived';
-          }
-        });
-
-        if (isReset) {
-          setPlayers(filtered);
-        } else {
-          setPlayers((prev) => {
-            const existingIds = new Set(prev.map((p) => String(p.id)));
-            const uniqueNew = filtered.filter((p: any) => !existingIds.has(String(p.id)));
-            return [...prev, ...uniqueNew];
-          });
-        }
-
-        if (appData.length < PLAYER_PAGE_SIZE) {
-          setHasMorePlayers(false);
-        } else {
-          setHasMorePlayers(true);
-        }
-      } else {
-        if (isReset) setPlayers([]);
-        setHasMorePlayers(false);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Fetch Teams Page with Deduplication
-  const fetchTeams = async (pageIdx: number, isReset = false) => {
-    try {
-      const from = pageIdx * TEAM_PAGE_SIZE;
-      const to = from + TEAM_PAGE_SIZE - 1;
-      const dbClient = supabase;
-
-      let query = dbClient
-        .from('teams')
-        .select('*')
-        .or('status.eq.approved,status.eq.qisman,status.is.null')
-        .order('name')
-        .range(from, to);
-
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-
-      if (debouncedSearchQuery) {
-        query = query.ilike('name', `%${debouncedSearchQuery}%`);
-      }
-
-      const { data } = await query;
-
-      if (data && data.length > 0) {
-        if (isReset) {
-          setTeams(data);
-        } else {
-          setTeams((prev) => {
-            const existingIds = new Set(prev.map((t) => String(t.id)));
-            const uniqueNew = data.filter((t: any) => !existingIds.has(String(t.id)));
-            return [...prev, ...uniqueNew];
-          });
-        }
-
-        if (data.length < TEAM_PAGE_SIZE) {
-          setHasMoreTeams(false);
-        } else {
-          setHasMoreTeams(true);
-        }
-      } else {
-        setHasMoreTeams(false);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchLeagues = async () => {
-    try {
-      const { data } = await supabase.from('leagues').select('*').order('name');
-      if (data) setLeagues(data);
-    } catch (e) {}
-  };
-
-  // Manual Button Trigger to Load Next Batch
-  const handleLoadMoreBtn = async () => {
+  // Manual Button Trigger to Load Next Batch (15 + 15)
+  const handleLoadMoreBtn = () => {
     if (loadingMore || loading) return;
 
     if (activeTab === 'players' && hasMorePlayers) {
-      setLoadingMore(true);
-      const nextPage = playerPage + 1;
-      setPlayerPage(nextPage);
-      await fetchPlayers(nextPage, false);
-      setLoadingMore(false);
+      setPlayerPage((prev) => prev + 1);
     } else if (activeTab === 'teams' && hasMoreTeams) {
-      setLoadingMore(true);
-      const nextPage = teamPage + 1;
-      setTeamPage(nextPage);
-      await fetchTeams(nextPage, false);
-      setLoadingMore(false);
+      setTeamPage((prev) => prev + 1);
     }
   };
 
@@ -779,7 +657,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     return '';
   };
 
-  // Open Detail Modal and Resolve Team Name (No Team ID) & Separate Names
+  // Open Detail Modal and Resolve Team Name (from item.team relation)
   const handleOpenItem = (item: any, isPlayer: boolean) => {
     setSelectedItem({ ...item, isPlayer });
     setIsEditing(false);
@@ -796,18 +674,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       fatName = parts.slice(2).join(' ') || '';
     }
 
-    // Resolve team name and league from allTeamsList if team_id exists
-    let foundTeam = null;
-    if (item.team_id && allTeamsList.length > 0) {
-      foundTeam = allTeamsList.find((t: any) => String(t.id) === String(item.team_id));
-    }
-
-    let resolvedTeamName = item.team_name;
+    let resolvedTeamName = item.team?.name || item.team_name;
     if (!resolvedTeamName || !isNaN(Number(resolvedTeamName))) {
-      resolvedTeamName = foundTeam ? foundTeam.name : (item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon');
+      resolvedTeamName = item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon';
     }
 
-    let resolvedLeague = item.league || item.league_name || item.resolvedLeague || foundTeam?.league || '';
+    let resolvedLeague = item.team?.league || item.league || item.league_name || '';
 
     setEditForm({
       first_name: fName,
@@ -820,14 +692,14 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       position: item.position || '',
       player_number: item.player_number ? String(item.player_number) : (item.number ? String(item.number) : ''),
       league: resolvedLeague,
-      team_id: item.team_id || (foundTeam ? foundTeam.id : ''),
+      team_id: item.team_id || (item.team ? item.team.id : ''),
       team_name: resolvedTeamName,
       citizenship: item.citizenship || "O'zbekiston",
       height: item.height ? String(item.height) : '',
       weight: item.weight ? String(item.weight) : '',
       instagram_username: item.instagram_username || getInstagramUser(item),
       name: item.name || '',
-      city: item.city || item.region || '',
+      city: item.city || '',
     });
   };
 
@@ -883,13 +755,10 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     const dbClient = supabase;
 
     if (isPlayer) {
-      // 1. Remove from active RAM list instantly
-      setPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToArchive.id)));
-
-      // 2. Add to archived list in RAM
+      // 1. Add to archived list in RAM
       setArchivedPlayers((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
 
-      // 3. Update DB in background
+      // 2. Update DB in background
       try {
         await dbClient.from('applications').update({ is_archived: true, status: 'archived' }).eq('id', itemToArchive.id);
       } catch (e) {
@@ -900,7 +769,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         await dbClient.from('players').update({ is_archived: true }).eq('id', itemToArchive.id);
       } catch (e) {}
     } else {
-      setTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToArchive.id)));
+      setAccumulatedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToArchive.id)));
       setArchivedTeams((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
 
       try {
@@ -910,6 +779,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
     setToastMsg("Muvaffaqiyatli arxivlandi! 📦");
     setTimeout(() => setToastMsg(null), 2500);
+    queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     fetchTotalCounts();
   };
 
@@ -928,14 +799,16 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       const dbClient = supabase;
       const isPlayer = activeTab === 'players' || !itemToDelete.isTeam;
       if (isPlayer) {
-        setPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
         setArchivedPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
         await dbClient.from('applications').delete().eq('id', itemToDelete.id);
         await dbClient.from('players').delete().eq('id', itemToDelete.id);
+        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
       } else {
-        setTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
+        setAccumulatedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
         setArchivedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
         await dbClient.from('teams').delete().eq('id', itemToDelete.id);
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
       }
       setItemToDelete(null);
       setToastMsg("Muvaffaqiyatli o'chirildi! 🗑️");
@@ -967,7 +840,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const handleRestorePlayer = async (playerItem: any) => {
     try {
       const dbClient = supabase;
-      setPlayers((prev) => prev.filter((p) => p.id !== playerItem.id));
 
       try {
         await dbClient.from('applications').update({ is_archived: false, status: 'approved' }).eq('id', playerItem.id);
@@ -981,7 +853,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
       setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
-      fetchPlayers(0, true, showArchived);
+      queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
     } catch (e) {
       console.error(e);
     }
@@ -1000,34 +873,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         const combinedFullName = [editForm.first_name, editForm.last_name, editForm.father_name]
           .filter(Boolean)
           .join(' ');
-
-        // Optimistically update players list state
-        setPlayers((prev) =>
-          prev.map((p) =>
-            p.id === selectedItem.id
-              ? {
-                  ...p,
-                  first_name: editForm.first_name,
-                  last_name: editForm.last_name,
-                  father_name: editForm.father_name,
-                  full_name: combinedFullName,
-                  team_name: editForm.team_name,
-                  team_id: editForm.team_id || null,
-                  position: editForm.position,
-                  phone: editForm.phone,
-                  league: editForm.league,
-                  birth_date: editForm.birth_date,
-                  passport_series: editForm.passport_series,
-                  passport_number: editForm.passport_number,
-                  player_number: editForm.player_number ? Number(editForm.player_number) : null,
-                  citizenship: editForm.citizenship,
-                  height: editForm.height,
-                  weight: editForm.weight,
-                  instagram_username: editForm.instagram_username,
-                }
-              : p
-          )
-        );
 
         // Update applications table
         await dbClient
@@ -1060,9 +905,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             phone: editForm.phone,
           })
           .eq('id', selectedItem.id);
+
+        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
       } else {
         // Optimistically update teams list state
-        setTeams((prev) =>
+        setAccumulatedTeams((prev) =>
           prev.map((t) =>
             t.id === selectedItem.id
               ? {
@@ -1086,6 +934,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             city: editForm.city,
           })
           .eq('id', selectedItem.id);
+
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
       }
 
       setToastMsg("Ma'lumotlar muvaffaqiyatli saqlandi! ✨");

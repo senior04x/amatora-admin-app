@@ -26,7 +26,8 @@ import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons, MaterialIcons, Feather, FontAwesome } from '@expo/vector-icons';
+import * as Font from 'expo-font';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { appQueryClient } from './src/api/queryClient';
 import { OrgProvider, useOrg } from './src/context/OrgContext';
@@ -50,6 +51,7 @@ import { ProfileUpdatesScreen } from './src/screens/ProfileUpdatesScreen';
 import { SponsorsScreen } from './src/screens/SponsorsScreen';
 import { NewsScreen } from './src/screens/NewsScreen';
 import { OrganizersScreen } from './src/screens/OrganizersScreen';
+import { FinishedMatchesScreen } from './src/screens/FinishedMatchesScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 import { hasSecurePin } from './src/utils/securePin';
 
@@ -74,12 +76,12 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, userRole } = useOrg();
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers'
+    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers'
   >('dashboard');
   const [playersSubTab, setPlayersSubTab] = useState<'players' | 'teams'>('players');
 
   const handleNavigate = (
-    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers',
+    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers',
     subTab?: 'players' | 'teams'
   ) => {
     if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers'].includes(tab)) {
@@ -99,6 +101,23 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const orgColors = Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : [];
   const hasGradient = orgColors.length > 0;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Reorder state for Dashboard menu items
+  const [isEditingDashboardOrder, setIsEditingDashboardOrder] = useState(false);
+  const saveDashboardOrderRef = useRef<(() => void) | null>(null);
+
+  // Preload Ionicons font explicitly so icons never appear as question marks
+  const [iconsLoaded, setIconsLoaded] = useState(false);
+
+  useEffect(() => {
+    async function loadAllIcons() {
+      try {
+        await Font.loadAsync(Ionicons.font);
+      } catch (e) {}
+      setIconsLoaded(true);
+    }
+    loadAllIcons();
+  }, []);
 
   // Realtime Pending Unconfirmed Count for "Ma'lumot Almashinuvi" (Updates / Applications)
   const [pendingCount, setPendingCount] = useState(0);
@@ -220,10 +239,26 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         </Animated.View>
       )}
 
-      <Header />
+      <Header
+        isEditingOrder={activeTab === 'dashboard' && isEditingDashboardOrder}
+        onSaveOrder={() => {
+          if (saveDashboardOrderRef.current) {
+            saveDashboardOrderRef.current();
+          }
+        }}
+      />
 
       <View style={styles.screenContainer}>
-        <LazyScreen isActive={activeTab === 'dashboard'}><DashboardScreen onNavigate={handleNavigate} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'dashboard'}>
+          <DashboardScreen
+            onNavigate={handleNavigate}
+            isEditingOrder={isEditingDashboardOrder}
+            setIsEditingOrder={setIsEditingDashboardOrder}
+            onRegisterSaveOrder={(fn) => {
+              saveDashboardOrderRef.current = fn;
+            }}
+          />
+        </LazyScreen>
         <LazyScreen isActive={activeTab === 'export'}><ExportScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'applications'}><ApplicationsScreen initialTab={playersSubTab} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'players'}><PlayersScreen initialSegmentTab={playersSubTab} /></LazyScreen>
@@ -235,6 +270,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onNavigateToOrganizers={() => setActiveTab('organizers')} onLogout={onLogout} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'finished-matches'}><FinishedMatchesScreen onGoBack={() => setActiveTab('dashboard')} onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => setActiveTab('matches')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
@@ -349,7 +385,27 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
   const [pinState, setPinState] = useState<'checking' | 'locked' | 'not_set' | 'unlocked' | 'editing'>('checking');
+
+  useEffect(() => {
+    async function loadFonts() {
+      try {
+        await Font.loadAsync({
+          ...Ionicons.font,
+          ...MaterialCommunityIcons.font,
+          ...MaterialIcons.font,
+          ...Feather.font,
+          ...FontAwesome.font,
+        });
+      } catch (e) {
+        console.warn('Vector icons font loading error:', e);
+      } finally {
+        setFontsLoaded(true);
+      }
+    }
+    loadFonts();
+  }, []);
 
   useEffect(() => {
     async function onFetchUpdateAsync() {
@@ -442,7 +498,7 @@ function App() {
           resizeMode="cover"
         />
 
-        {authLoading ? (
+        {authLoading || !fontsLoaded ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <ActivityIndicator size="large" color="#00FF66" />
           </View>

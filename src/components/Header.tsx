@@ -45,7 +45,10 @@ const HeaderSkeletonLoader: React.FC<{ width?: number | string; height?: number;
   );
 };
 
-export const Header: React.FC = () => {
+export const Header: React.FC<{
+  isEditingOrder?: boolean;
+  onSaveOrder?: () => void;
+}> = ({ isEditingOrder = false, onSaveOrder }) => {
   const { currentOrg, loading, userRole } = useOrg();
   const [userName, setUserName] = React.useState<string | null>(null);
   const [userAvatar, setUserAvatar] = React.useState<string | null>(null);
@@ -122,10 +125,21 @@ export const Header: React.FC = () => {
       </View>
 
       <View style={styles.rightRow}>
-        <TouchableOpacity style={{ position: 'relative', padding: 4 }}>
-          <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
-          <View style={styles.notifBadge} />
-        </TouchableOpacity>
+        {isEditingOrder ? (
+          <TouchableOpacity
+            style={styles.saveOrderBtn}
+            onPress={onSaveOrder}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="checkmark-outline" size={17} color="#FFFFFF" />
+            <Text style={styles.saveOrderBtnText}>{"Tayyor"}</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={{ position: 'relative', padding: 4 }}>
+            <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+            <View style={styles.notifBadge} />
+          </TouchableOpacity>
+        )}
       </View>
     </BlurView>
   );
@@ -213,5 +227,22 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#EF4444',
+  },
+  saveOrderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  saveOrderBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
 });

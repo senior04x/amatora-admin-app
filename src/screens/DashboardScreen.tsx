@@ -1,18 +1,359 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl, Platform, PanResponder, Easing, LayoutAnimation, UIManager, useWindowDimensions } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useOrg } from '../context/OrgContext';
 import { supabase } from '../supabaseClient';
 import { Image } from 'react-native';
 import { MatchControlScreen } from './MatchControlScreen';
+import { triggerHapticMedium, triggerHapticSuccess } from '../utils/haptics';
+import { useDashboardCountsData, useMatchesData } from '../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 interface Props {
   onNavigate: (
-    tab: 'dashboard' | 'players' | 'matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news',
+    tab: 'dashboard' | 'players' | 'matches' | 'finished-matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news',
     subTab?: 'players' | 'teams'
   ) => void;
+  isEditingOrder?: boolean;
+  setIsEditingOrder?: (val: boolean) => void;
+  onRegisterSaveOrder?: (saveFn: () => void) => void;
 }
+
+export const getSlotPosition = (index: number, cardWidth: number, cardHeight: number, gridGap: number = 10) => {
+  const col = index % 3;
+  const row = Math.floor(index / 3);
+  return {
+    x: col * (cardWidth + gridGap),
+    y: row * (cardHeight + gridGap),
+  };
+};
+
+interface DraggableCardProps {
+  item: any;
+  index: number;
+  totalCount: number;
+  cardWidth: number;
+  cardHeight: number;
+  gridGap: number;
+  isEditingOrder: boolean;
+  activeDragId: string | null;
+  wiggleAnim: Animated.Value;
+  onEnableEditMode: (id: string, startPos?: { x: number; y: number }) => void;
+  onStartDrag: (id: string, startPos?: { x: number; y: number }) => void;
+  onDragMove: (id: string, dx: number, dy: number) => void;
+  onEndDrag: (id?: string) => void;
+  onPressItem: (item: any) => void;
+  getFinalPosition: (id: string) => { x: number; y: number };
+  pendingUpdatesCount: number;
+}
+
+const DraggableCard: React.FC<DraggableCardProps> = ({
+  item,
+  index,
+  totalCount,
+  cardWidth,
+  cardHeight,
+  gridGap,
+  isEditingOrder,
+  activeDragId,
+  wiggleAnim,
+  onEnableEditMode,
+  onStartDrag,
+  onDragMove,
+  onEndDrag,
+  onPressItem,
+  getFinalPosition,
+  pendingUpdatesCount,
+}) => {
+  const isDragging = activeDragId === item.id;
+  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+
+  // Har bir cardning slot koordinatasi Animated.ValueXY sifatida
+  const initialPos = getSlotPosition(index, cardWidth, cardHeight, gridGap);
+  const positionAnim = useRef(new Animated.ValueXY(initialPos)).current;
+
+  const dragScale = useRef(new Animated.Value(1)).current;
+  const dragVisualProgress = useRef(new Animated.Value(0)).current;
+
+  const dragSessionRef = useRef(0);
+  const startCardSlotPosRef = useRef<{ x: number; y: number }>({ x: initialPos.x, y: initialPos.y });
+  const longPressTimerRef = useRef<any>(null);
+  const touchStartTimeRef = useRef(0);
+  const isDragActiveRef = useRef(false);
+  isDragActiveRef.current = isDragging;
+
+  const propsRef = useRef({
+    item,
+    index,
+    isEditingOrder,
+    activeDragId,
+    cardWidth,
+    cardHeight,
+    gridGap,
+    getFinalPosition,
+    onEnableEditMode,
+    onStartDrag,
+    onDragMove,
+    onEndDrag,
+    onPressItem,
+  });
+  propsRef.current = {
+    item,
+    index,
+    isEditingOrder,
+    activeDragId,
+    cardWidth,
+    cardHeight,
+    gridGap,
+    getFinalPosition,
+    onEnableEditMode,
+    onStartDrag,
+    onDragMove,
+    onEndDrag,
+    onPressItem,
+  };
+
+  const resetDragVisuals = useCallback(() => {
+    dragScale.stopAnimation();
+    dragVisualProgress.stopAnimation();
+    dragScale.setValue(1);
+    dragVisualProgress.setValue(0);
+  }, [dragScale, dragVisualProgress]);
+
+  // Agar bu karta drag qilinmayotgan bo'lsa (yoki drag yakunlansa), visual state majburan 0 va 1 ga tozalanadi
+  useEffect(() => {
+    if (activeDragId !== item.id) {
+      resetDragVisuals();
+    }
+  }, [activeDragId, item.id, resetDragVisuals]);
+
+  // Index yoki o'lchamlar o'zgarganda (boshqa kartochkalar) yangi slotga silliq siljiydi
+  useEffect(() => {
+    if (isDragging) return;
+
+    const targetPos = getSlotPosition(index, cardWidth, cardHeight, gridGap);
+
+    if (activeDragId) {
+      // Boshqa kartochka drag qilinayotgan paytda silliq siljiydi
+      Animated.spring(positionAnim, {
+        toValue: targetPos,
+        useNativeDriver: true,
+        bounciness: 4,
+        speed: 16,
+      }).start();
+    } else {
+      // Drag yo'q bo'lganda (release dan keyin yoki tinch holatda) to'g'ridan to'g'ri yangi slotda qotadi
+      positionAnim.stopAnimation();
+      positionAnim.setValue(targetPos);
+    }
+  }, [index, isDragging, activeDragId, cardWidth, cardHeight, gridGap]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        return propsRef.current.isEditingOrder || Math.abs(gs.dx) > 6 || Math.abs(gs.dy) > 6;
+      },
+      onMoveShouldSetPanResponderCapture: () => false,
+      onPanResponderTerminationRequest: () => {
+        return !propsRef.current.isEditingOrder && !isDragActiveRef.current;
+      },
+      onPanResponderGrant: () => {
+        // 1. Eski animatsiyalarni darhol to'xtatish va tozalash
+        pan.stopAnimation();
+        positionAnim.stopAnimation();
+        resetDragVisuals();
+        pan.setValue({ x: 0, y: 0 });
+
+        // 2. Yangi session
+        dragSessionRef.current += 1;
+
+        touchStartTimeRef.current = Date.now();
+        const currentProps = propsRef.current;
+
+        // 3. Drag boshlanayotgan paytdagi real live slot
+        const startPos = currentProps.getFinalPosition(currentProps.item.id);
+
+        // 4. Bitta Source of Truth
+        startCardSlotPosRef.current = startPos;
+
+        // 5. Position ham shu slotga darhol sinxron qotiriladi (Freezing)
+        positionAnim.setValue(startPos);
+
+        const startVisualFeedback = () => {
+          Animated.parallel([
+            Animated.spring(dragScale, {
+              toValue: 1.12,
+              useNativeDriver: true,
+              bounciness: 0,
+              speed: 20,
+            }),
+            Animated.timing(dragVisualProgress, {
+              toValue: 1,
+              duration: 150,
+              useNativeDriver: false,
+            }),
+          ]).start();
+        };
+
+        // Birinchi marta bosganda ham, tahrirlash rejimida ham bir xil biroz (350ms) bosib turib keyin siljitiladi
+        const holdDuration = 350;
+
+        longPressTimerRef.current = setTimeout(() => {
+          triggerHapticMedium();
+          startVisualFeedback();
+          if (!currentProps.isEditingOrder) {
+            currentProps.onEnableEditMode(currentProps.item.id, startPos);
+          }
+          currentProps.onStartDrag(currentProps.item.id, startPos);
+        }, holdDuration);
+      },
+      onPanResponderMove: (_, gs) => {
+        const currentProps = propsRef.current;
+        // Agar foydalanuvchi hold timer bitmasdan barmog'ini harakatlantirsa (scroll qilmoqchi bo'lsa), bekor qilamiz
+        if (!isDragActiveRef.current && currentProps.activeDragId !== currentProps.item.id && longPressTimerRef.current) {
+          if (Math.hypot(gs.dx, gs.dy) > 10) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+        }
+
+        if (currentProps.activeDragId === currentProps.item.id || isDragActiveRef.current) {
+          pan.setValue({ x: gs.dx, y: gs.dy });
+          currentProps.onDragMove(currentProps.item.id, gs.dx, gs.dy);
+        }
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+
+        const currentProps = propsRef.current;
+        const duration = Date.now() - touchStartTimeRef.current;
+        const dist = Math.hypot(gs.dx, gs.dy);
+
+        if (currentProps.activeDragId === currentProps.item.id || isDragActiveRef.current) {
+          // 1. Darhol final slotni aniqlaymiz
+          const finalPos = currentProps.getFinalPosition(currentProps.item.id);
+
+          // 2. Eski barcha animatsiyalarni darhol to'xtatib, final slotga o'rnatamiz
+          pan.stopAnimation();
+          positionAnim.stopAnimation();
+
+          positionAnim.setValue(finalPos);
+          pan.setValue({ x: 0, y: 0 });
+
+          // 3. Visual feedbackni darhol 100% normal holatga qaytaramiz
+          resetDragVisuals();
+
+          // 4. Dragni darhol yakunlaymiz (asinxron kechikishlar kutib o'tirilmaydi)
+          currentProps.onEndDrag(currentProps.item.id);
+        } else if (!currentProps.isEditingOrder && duration < 380 && dist < 12) {
+          currentProps.onPressItem(currentProps.item);
+        }
+      },
+      onPanResponderTerminate: () => {
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
+        const currentProps = propsRef.current;
+        if (currentProps.activeDragId === currentProps.item.id || isDragActiveRef.current) {
+          const finalPos = currentProps.getFinalPosition(currentProps.item.id);
+
+          pan.stopAnimation();
+          positionAnim.stopAnimation();
+
+          positionAnim.setValue(finalPos);
+          pan.setValue({ x: 0, y: 0 });
+
+          resetDragVisuals();
+
+          currentProps.onEndDrag(currentProps.item.id);
+        }
+      },
+    })
+  ).current;
+
+  // Jiggle rotate
+  const rotateInterpolate = wiggleAnim.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: [index % 2 === 0 ? '-3.5deg' : '3.5deg', '0deg', index % 2 === 0 ? '3.5deg' : '-3.5deg'],
+  });
+
+  const cardBorderColor = dragVisualProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.35)'],
+  });
+
+  const cardBackgroundColor = dragVisualProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', 'rgba(255, 255, 255, 0.08)'],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.gridCardWrapper,
+        {
+          width: cardWidth,
+          height: cardHeight,
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          zIndex: isDragging ? 9999 : 1,
+          elevation: isDragging ? 25 : 1,
+          transform: isDragging
+            ? [
+                { translateX: Animated.add(positionAnim.x, pan.x) },
+                { translateY: Animated.add(positionAnim.y, pan.y) },
+                { scale: dragScale },
+              ]
+            : [
+                { translateX: positionAnim.x },
+                { translateY: positionAnim.y },
+                { rotate: rotateInterpolate },
+              ],
+        },
+      ]}
+      {...panResponder.panHandlers}
+    >
+      <Animated.View
+        style={[
+          styles.gridCard,
+          {
+            borderColor: cardBorderColor,
+            backgroundColor: cardBackgroundColor,
+          },
+        ]}
+      >
+        <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+
+        <View style={{ position: 'relative', marginBottom: 2 }}>
+          <Ionicons name={item.icon as any} size={30} color={item.color} />
+          {item.id === 'updates' && pendingUpdatesCount > 0 && (
+            <View style={styles.badgeCircle}>
+              <Text style={styles.badgeText}>
+                {pendingUpdatesCount > 99 ? '99+' : pendingUpdatesCount}
+              </Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.gridCardTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+      </Animated.View>
+    </Animated.View>
+  );
+};
 
 const SkeletonLoader: React.FC<{ width?: number; height?: number }> = ({ width = 60, height = 24 }) => {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -48,234 +389,362 @@ const SkeletonLoader: React.FC<{ width?: number; height?: number }> = ({ width =
   );
 };
 
-export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
+export const DashboardScreen: React.FC<Props> = ({
+  onNavigate,
+  isEditingOrder: isEditingOrderProp,
+  setIsEditingOrder: setIsEditingOrderProp,
+  onRegisterSaveOrder,
+}) => {
   const { orgId, userRole } = useOrg();
-  const [counts, setCounts] = useState({ players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0, pendingUpdates: 0 });
-  const [userMatches, setUserMatches] = useState<any[]>([]);
-  const [matchesLoading, setMatchesLoading] = useState(false);
+  const queryClient = useQueryClient();
+
+  // 1. React Query Hooks for Dashboard Counts & Matches (0ms cache hit)
+  const {
+    data: counts = { players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0, pendingUpdates: 0 },
+    isLoading: loading,
+    refetch: refetchCounts,
+  } = useDashboardCountsData(orgId);
+
+  const {
+    data: matchesList = [],
+    isLoading: matchesLoading,
+    refetch: refetchMatches,
+  } = useMatchesData(orgId);
+
   const [activeControlMatchId, setActiveControlMatchId] = useState<string | number | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Active sorted matches for user role (computed from shared matches cache)
+  const userMatches = React.useMemo(() => {
+    const activeMatches = (matchesList || []).filter((m: any) => m.status !== 'finished');
+    return [...activeMatches].sort((a: any, b: any) => {
+      const statusOrder: Record<string, number> = {
+        'live': 1,
+        'first_half': 1,
+        'second_half': 1,
+        'half_time': 1,
+        'scheduled': 2,
+        'postponed': 3,
+      };
+      const getOrder = (st?: string) => statusOrder[st || 'scheduled'] || 5;
+      const orderA = getOrder(a.status);
+      const orderB = getOrder(b.status);
+      if (orderA !== orderB) return orderA - orderB;
+
+      const dateA = new Date(`${a.match_date || a.date || '2099-01-01'}T${a.match_time || a.time || '00:00:00'}`).getTime();
+      const dateB = new Date(`${b.match_date || b.date || '2099-01-01'}T${b.match_time || b.time || '00:00:00'}`).getTime();
+      return dateA - dateB;
+    });
+  }, [matchesList]);
+
+  const { width: screenWidth } = useWindowDimensions();
+  const gridGap = 10;
+  const gridPadding = 20;
+  const availableWidth = screenWidth - gridPadding * 2;
+  const cardWidth = Math.floor((availableWidth - gridGap * 2) / 3);
+  const cardHeight = Math.floor(cardWidth * 0.78); // Kichraytirilgan ixcham height
+
+  // Reorder & Jiggle Animation State
+  const [localIsEditingOrder, setLocalIsEditingOrder] = useState(false);
+  const isEditingOrder = isEditingOrderProp !== undefined ? isEditingOrderProp : localIsEditingOrder;
+  const setIsEditingOrder = setIsEditingOrderProp || setLocalIsEditingOrder;
+
+  const [orderedItemIds, setOrderedItemIds] = useState<string[]>([]);
+  const orderedItemIdsRef = useRef<string[]>([]);
+
+  const updateOrderedItems = useCallback((updated: string[]) => {
+    orderedItemIdsRef.current = updated;
+    setOrderedItemIds(updated);
+  }, []);
+
+  const allMenuNavItems = React.useMemo(() => [
+    {
+      id: 'export',
+      title: 'Export',
+      icon: 'image-outline',
+      color: '#38BDF8',
+      action: () => onNavigate && onNavigate('export'),
+      adminOnly: true,
+    },
+    {
+      id: 'finished-matches',
+      title: "Yakunlangan O'yinlar",
+      icon: 'checkmark-done-circle-outline',
+      color: '#10B981',
+      action: () => onNavigate && onNavigate('finished-matches' as any),
+      adminOnly: false,
+    },
+    {
+      id: 'ligalar',
+      title: 'Ligalar',
+      icon: 'trophy-outline',
+      color: '#FBBF24',
+      action: () => onNavigate && onNavigate('leagues'),
+      adminOnly: false,
+    },
+    {
+      id: 'transferlar',
+      title: 'Transferlar',
+      icon: 'swap-horizontal-outline',
+      color: '#2DD4BF',
+      action: () => onNavigate && onNavigate('transfers'),
+      adminOnly: true,
+    },
+    {
+      id: 'updates',
+      title: "Ma'lumotlar",
+      icon: 'refresh-outline',
+      color: '#A78BFA',
+      action: () => onNavigate && onNavigate('updates'),
+      adminOnly: true,
+    },
+    {
+      id: 'schedule',
+      title: "O'yinlar",
+      icon: 'calendar-outline',
+      color: '#FB7185',
+      action: () => onNavigate('matches'),
+      adminOnly: false,
+    },
+    {
+      id: 'standings',
+      title: 'Turnirlar',
+      icon: 'grid-outline',
+      color: '#38BDF8',
+      action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
+      adminOnly: true,
+    },
+    {
+      id: 'sponsors',
+      title: 'Homiylar',
+      icon: 'business-outline',
+      color: '#FB923C',
+      action: () => onNavigate && onNavigate('sponsors'),
+      adminOnly: true,
+    },
+    {
+      id: 'news',
+      title: 'Yangiliklar',
+      icon: 'newspaper-outline',
+      color: '#F87171',
+      action: () => onNavigate && onNavigate('news'),
+      adminOnly: true,
+    },
+  ], [onNavigate]);
+
+  const baseMenuNavItems = React.useMemo(() => (
+    userRole === 'user' 
+      ? allMenuNavItems.filter(item => !item.adminOnly)
+      : allMenuNavItems
+  ), [userRole, allMenuNavItems]);
+
+  // Sorted items based on orderedItemIds
+  const menuNavItems = React.useMemo(() => {
+    if (!orderedItemIds || orderedItemIds.length === 0) return baseMenuNavItems;
+    const itemsMap = new Map(baseMenuNavItems.map(it => [it.id, it]));
+    const sorted: typeof baseMenuNavItems = [];
+
+    // 1. Append cached ordered items
+    orderedItemIds.forEach(id => {
+      const it = itemsMap.get(id);
+      if (it) {
+        sorted.push(it);
+        itemsMap.delete(id);
+      }
+    });
+
+    // 2. Append any new items not yet present in cache
+    itemsMap.forEach(it => {
+      sorted.push(it);
+    });
+
+    return sorted;
+  }, [baseMenuNavItems, orderedItemIds]);
+
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const startDragSlotIndexRef = useRef<number>(0);
+  const startDragPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const getCurrentMenuIds = useCallback(() => {
+    const visibleIds = new Set(baseMenuNavItems.map(item => item.id));
+    const cachedIds = orderedItemIdsRef.current.filter(id => visibleIds.has(id));
+    const cachedSet = new Set(cachedIds);
+    const newVisibleIds = baseMenuNavItems
+      .map(item => item.id)
+      .filter(id => !cachedSet.has(id));
+    return [...cachedIds, ...newVisibleIds];
+  }, [baseMenuNavItems]);
+
+  const getFinalPosition = useCallback((id: string) => {
+    const currentList = getCurrentMenuIds();
+    const finalIdx = currentList.indexOf(id);
+    return getSlotPosition(finalIdx !== -1 ? finalIdx : 0, cardWidth, cardHeight, gridGap);
+  }, [cardWidth, cardHeight, gridGap, getCurrentMenuIds]);
+
+  const handleEnableEditMode = useCallback((id: string, startPos?: { x: number; y: number }) => {
+    setIsEditingOrder(true);
+    setActiveDragId(id);
+    if (startPos) {
+      startDragPosRef.current = startPos;
+    } else {
+      const currentList = getCurrentMenuIds();
+      const idx = currentList.indexOf(id);
+      const validIdx = idx !== -1 ? idx : 0;
+      startDragSlotIndexRef.current = validIdx;
+      startDragPosRef.current = getSlotPosition(validIdx, cardWidth, cardHeight, gridGap);
+    }
+  }, [setIsEditingOrder, cardWidth, cardHeight, gridGap, getCurrentMenuIds]);
+
+  const handleStartDrag = useCallback((id: string, startPos?: { x: number; y: number }) => {
+    setActiveDragId(id);
+    if (startPos) {
+      startDragPosRef.current = startPos;
+    } else {
+      const currentList = getCurrentMenuIds();
+      const idx = currentList.indexOf(id);
+      const validIdx = idx !== -1 ? idx : 0;
+      startDragSlotIndexRef.current = validIdx;
+      startDragPosRef.current = getSlotPosition(validIdx, cardWidth, cardHeight, gridGap);
+    }
+  }, [cardWidth, cardHeight, gridGap, getCurrentMenuIds]);
+
+  const handleEndDrag = useCallback((id?: string) => {
+    setActiveDragId(prev => (id ? (prev === id ? null : prev) : null));
+  }, []);
+
+  // Wiggle Animated Value (Slower, gentle and organic iPhone-like jiggle)
+  const wiggleAnim = useRef(new Animated.Value(0)).current;
+  const loopAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+
   useEffect(() => {
-    fetchDashboardCounts();
-    fetchUserMatches();
-  }, [orgId]);
+    if (isEditingOrder) {
+      if (loopAnimRef.current) {
+        loopAnimRef.current.stop();
+        loopAnimRef.current = null;
+      }
+      wiggleAnim.setValue(0);
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(wiggleAnim, {
+            toValue: 1,
+            duration: 115,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+          Animated.timing(wiggleAnim, {
+            toValue: -1,
+            duration: 115,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loopAnimRef.current = loop;
+      loop.start();
+    } else {
+      if (loopAnimRef.current) {
+        loopAnimRef.current.stop();
+        loopAnimRef.current = null;
+      }
+      Animated.timing(wiggleAnim, {
+        toValue: 0,
+        duration: 150,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+      setActiveDragId(null);
+    }
+
+    return () => {
+      if (loopAnimRef.current) {
+        loopAnimRef.current.stop();
+        loopAnimRef.current = null;
+      }
+    };
+  }, [isEditingOrder]);
+
+  // Load Saved Order from local storage cache
+  useEffect(() => {
+    const loadCachedOrder = async () => {
+      try {
+        const cached = await AsyncStorage.getItem('@amatora_dashboard_menu_order_v1');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            updateOrderedItems(parsed);
+          }
+        }
+      } catch (e) {}
+    };
+    loadCachedOrder();
+  }, [updateOrderedItems]);
+
+  // Save Order to local storage cache with smooth return to 0 position
+  const saveOrderToCache = useCallback(async () => {
+    try {
+      if (orderedItemIds.length > 0) {
+        await AsyncStorage.setItem('@amatora_dashboard_menu_order_v1', JSON.stringify(orderedItemIds));
+      }
+    } catch (e) {}
+
+    // Smooth animated return of cards to initial 0deg position
+    if (loopAnimRef.current) {
+      loopAnimRef.current.stop();
+      loopAnimRef.current = null;
+    }
+    Animated.timing(wiggleAnim, {
+      toValue: 0,
+      duration: 150,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setIsEditingOrder(false);
+      setActiveDragId(null);
+    });
+  }, [orderedItemIds, setIsEditingOrder]);
+
+  useEffect(() => {
+    if (onRegisterSaveOrder) {
+      onRegisterSaveOrder(saveOrderToCache);
+    }
+  }, [onRegisterSaveOrder, saveOrderToCache]);
+
+  // Realtime Subscription for all dashboard entities
+  useEffect(() => {
+    const channel = supabase
+      .channel('dashboard_realtime_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leagues' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['leagues', Number(orgId) || 1] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [orgId, queryClient]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([
-      fetchDashboardCounts(true),
-      fetchUserMatches()
+      refetchCounts(),
+      refetchMatches(),
     ]);
     setRefreshing(false);
-  }, [orgId]);
-
-  const fetchDashboardCounts = async (isRefreshing = false) => {
-    if (!isRefreshing) setLoading(true);
-    try {
-      // 1. Fetch collab league IDs for active orgId
-      let collabIds: any[] = [];
-      if (orgId) {
-        try {
-          const { data: myCollabs } = await supabase
-            .from('league_collabs')
-            .select('league_id')
-            .eq('status', 'accepted')
-            .or(`sender_org_id.eq.${orgId},receiver_org_id.eq.${orgId}`);
-          collabIds = (myCollabs || []).map((c: any) => c.league_id).filter(Boolean);
-        } catch (e) {}
-      }
-
-      // 2. Build filtered queries for APPROVED teams & players
-      let leaguesQuery = supabase.from('leagues').select('id', { count: 'exact', head: true });
-      if (orgId) {
-        if (collabIds.length > 0) {
-          leaguesQuery = leaguesQuery.or(`organization_id.eq.${orgId},organization_id.is.null,id.in.(${collabIds.join(',')})`);
-        } else {
-          leaguesQuery = leaguesQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        }
-      }
-
-      let teamsQuery = supabase
-        .from('teams')
-        .select('id', { count: 'exact', head: true })
-        .in('status', ['approved', 'tasdiqlangan']);
-      if (orgId) {
-        teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-
-      let playersQuery = supabase
-        .from('players')
-        .select('id', { count: 'exact', head: true });
-      if (orgId) {
-        playersQuery = playersQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-
-      let approvedAppsQuery = supabase
-        .from('applications')
-        .select('id', { count: 'exact', head: true })
-        .in('status', ['approved', 'tasdiqlangan']);
-      if (orgId) {
-        approvedAppsQuery = approvedAppsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-
-      let pendingAppsQuery = supabase
-        .from('applications')
-        .select('id', { count: 'exact', head: true })
-        .in('status', ['pending', 'kutilmoqda']);
-      if (orgId) {
-        pendingAppsQuery = pendingAppsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-
-      let pendingTeamsQuery = supabase
-        .from('teams')
-        .select('id', { count: 'exact', head: true })
-        .in('status', ['pending', 'kutilmoqda']);
-      if (orgId) {
-        pendingTeamsQuery = pendingTeamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-
-      let pendingUpdatesQuery = supabase
-        .from('applications')
-        .select('id', { count: 'exact', head: true })
-        .ilike('comment', '%[PROFILE_UPDATE]%');
-      if (orgId) {
-        pendingUpdatesQuery = pendingUpdatesQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-      }
-
-      const [playersRes, leaguesRes, teamsRes, approvedAppsRes, pendingAppsRes, pendingTeamsRes, pendingUpdatesRes] = await Promise.all([
-        playersQuery,
-        leaguesQuery,
-        teamsQuery,
-        approvedAppsQuery,
-        pendingAppsQuery,
-        pendingTeamsQuery,
-        pendingUpdatesQuery,
-      ]);
-
-      let pCount = playersRes.count || 0;
-      if (pCount === 0) {
-        pCount = approvedAppsRes.count || 0;
-      }
-
-      setCounts({
-        players: pCount,
-        leagues: leaguesRes.count || 0,
-        teams: teamsRes.count || 0,
-        applications: pendingAppsRes.count || 0,
-        pendingTeams: pendingTeamsRes.count || 0,
-        pendingUpdates: pendingUpdatesRes.count || 0,
-      });
-    } catch (e) {
-      console.error('Fetch dashboard counts error:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchUserMatches = async () => {
-    setMatchesLoading(true);
-    try {
-      const dbClient = supabase;
-      let query = dbClient
-        .from('matches')
-        .select(`
-          *,
-          home_team:home_team_id (id, name, logo_url),
-          away_team:away_team_id (id, name, logo_url)
-        `)
-        .order('id', { ascending: false });
-
-      if (orgId) {
-        query = query.eq('organization_id', orgId);
-      }
-
-      const { data, error } = await query;
-      let rawMatches = data || [];
-
-      if (error || !data) {
-        const { data: fallbackData } = await dbClient.from('matches').select('*');
-        if (fallbackData) {
-          const { data: teamsData } = await dbClient.from('teams').select('id, name, logo_url');
-          const teamsMap = new Map((teamsData || []).map((t) => [t.id, t]));
-          rawMatches = fallbackData.map((m) => ({
-            ...m,
-            home_team: teamsMap.get(m.home_team_id),
-            away_team: teamsMap.get(m.away_team_id),
-          }));
-        }
-      }
-
-      const { data: timerSponsors } = await dbClient
-        .from('sponsors')
-        .select('*')
-        .like('name', 'MATCH_TIMER_%');
-
-      const timerMap = new Map();
-      if (timerSponsors) {
-        timerSponsors.forEach((sp: any) => {
-          try {
-            const matchIdFromKey = sp.name.replace('MATCH_TIMER_', '');
-            const jsonStr = sp.logo_url || sp.image_url || sp.url;
-            if (jsonStr) {
-              const parsed = JSON.parse(jsonStr);
-              timerMap.set(String(matchIdFromKey), parsed);
-            }
-          } catch (e) {}
-        });
-      }
-
-      const enriched = rawMatches.map((m: any) => {
-        const timerInfo = timerMap.get(String(m.id)) || {};
-        const isLive = m.status === 'first_half' || m.status === 'second_half' || m.status === 'live';
-
-        const baseSec = timerInfo.timer_seconds !== undefined && timerInfo.timer_seconds !== null
-          ? Number(timerInfo.timer_seconds)
-          : (m.timer_seconds !== undefined && m.timer_seconds !== null ? Number(m.timer_seconds) : 0);
-
-        const isRunning = timerInfo.is_timer_running !== undefined && timerInfo.is_timer_running !== null
-          ? (String(timerInfo.is_timer_running) === 'true' || timerInfo.is_timer_running === true)
-          : (m.is_timer_running !== undefined && m.is_timer_running !== null ? (String(m.is_timer_running) === 'true' || m.is_timer_running === true) : isLive);
-
-        const startedAt = timerInfo.timer_started_at || m.timer_started_at || null;
-
-        return {
-          ...m,
-          timer_seconds: baseSec,
-          timer_started_at: startedAt,
-          is_timer_running: isRunning,
-        };
-      });
-
-      const activeMatches = enriched.filter((m: any) => m.status !== 'finished');
-
-      const sorted = [...activeMatches].sort((a: any, b: any) => {
-        const statusOrder: Record<string, number> = {
-          'live': 1,
-          'first_half': 1,
-          'second_half': 1,
-          'half_time': 1,
-          'scheduled': 2,
-          'postponed': 3,
-        };
-        const getOrder = (st?: string) => statusOrder[st || 'scheduled'] || 5;
-        const orderA = getOrder(a.status);
-        const orderB = getOrder(b.status);
-        if (orderA !== orderB) return orderA - orderB;
-
-        const dateA = new Date(`${a.match_date || a.date || '2099-01-01'}T${a.match_time || a.time || '00:00:00'}`).getTime();
-        const dateB = new Date(`${b.match_date || b.date || '2099-01-01'}T${b.match_time || b.time || '00:00:00'}`).getTime();
-        return dateA - dateB;
-      });
-
-      setUserMatches(sorted);
-    } catch (e) {
-      console.error('Error fetching user matches for dashboard:', e);
-    } finally {
-      setMatchesLoading(false);
-    }
-  };
+  }, [refetchCounts, refetchMatches]);
 
   const getMatchTimeRemainingText = (
     mDate?: string,
@@ -351,90 +820,56 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         matchId={activeControlMatchId}
         onBack={() => {
           setActiveControlMatchId(null);
-          fetchUserMatches();
+          queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
         }}
       />
     );
   }
 
-  const allMenuNavItems = [
-    {
-      id: 'export',
-      title: 'Export',
-      icon: 'image-outline',
-      color: '#38BDF8',
-      action: () => onNavigate && onNavigate('export'),
-      adminOnly: true,
-    },
-    {
-      id: 'jamoalar',
-      title: 'Jamoalar',
-      icon: 'shirt-outline',
-      color: '#4ADE80',
-      action: () => onNavigate && onNavigate('players', 'teams'),
-      adminOnly: false,
-    },
-    {
-      id: 'ligalar',
-      title: 'Ligalar',
-      icon: 'trophy-outline',
-      color: '#FBBF24',
-      action: () => onNavigate && onNavigate('leagues'),
-      adminOnly: false,
-    },
-    {
-      id: 'transferlar',
-      title: 'Transferlar',
-      icon: 'swap-horizontal-outline',
-      color: '#2DD4BF',
-      action: () => onNavigate && onNavigate('transfers'),
-      adminOnly: true,
-    },
-    {
-      id: 'updates',
-      title: "Ma'lumotlar",
-      icon: 'refresh-outline',
-      color: '#A78BFA',
-      action: () => onNavigate && onNavigate('updates'),
-      adminOnly: true,
-    },
-    {
-      id: 'schedule',
-      title: "O'yinlar",
-      icon: 'calendar-outline',
-      color: '#FB7185',
-      action: () => onNavigate('matches'),
-      adminOnly: false,
-    },
-    {
-      id: 'standings',
-      title: 'Turnirlar',
-      icon: 'grid-outline',
-      color: '#38BDF8',
-      action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
-      adminOnly: true,
-    },
-    {
-      id: 'sponsors',
-      title: 'Homiylar',
-      icon: 'business-outline',
-      color: '#FB923C',
-      action: () => onNavigate && onNavigate('sponsors'),
-      adminOnly: true,
-    },
-    {
-      id: 'news',
-      title: 'Yangiliklar',
-      icon: 'newspaper-outline',
-      color: '#F87171',
-      action: () => onNavigate && onNavigate('news'),
-      adminOnly: true,
-    },
-  ];
 
-  const menuNavItems = userRole === 'user' 
-    ? allMenuNavItems.filter(item => !item.adminOnly)
-    : allMenuNavItems;
+
+  const handleDragMove = useCallback(
+    (draggingId: string, dx: number, dy: number) => {
+      const currentList = getCurrentMenuIds();
+
+      const currentIdx = currentList.indexOf(draggingId);
+      if (currentIdx === -1) return;
+
+      // Barmoqning grid ichidagi joriy markaziy nuqtasi
+      const currentCenterX = startDragPosRef.current.x + cardWidth / 2 + dx;
+      const currentCenterY = startDragPosRef.current.y + cardHeight / 2 + dy;
+
+      // iOS Home Screen Grid Bounding Box: qaysi ustun va qatorda ekanligi
+      const col = Math.min(2, Math.max(0, Math.floor(currentCenterX / (cardWidth + gridGap))));
+      const maxRows = Math.ceil(currentList.length / 3) - 1;
+      const row = Math.min(maxRows, Math.max(0, Math.floor(currentCenterY / (cardHeight + gridGap))));
+      const targetIndex = Math.min(currentList.length - 1, row * 3 + col);
+
+      if (targetIndex === currentIdx) return;
+
+      // Yangi slot markaziga yaqinlik tekshiruvi (Hysteresis)
+      const targetSlot = getSlotPosition(targetIndex, cardWidth, cardHeight, gridGap);
+      const targetCenterX = targetSlot.x + cardWidth / 2;
+      const targetCenterY = targetSlot.y + cardHeight / 2;
+
+      const distanceToTarget = Math.hypot(
+        currentCenterX - targetCenterX,
+        currentCenterY - targetCenterY
+      );
+
+      // Kartochka markazi yangi slot katagining ichki maydoniga kirganda
+      const threshold = Math.min(cardWidth, cardHeight) * 0.48;
+      if (distanceToTarget > threshold) return;
+
+      const updated = [...currentList];
+      const [moved] = updated.splice(currentIdx, 1);
+      updated.splice(targetIndex, 0, moved);
+
+      updateOrderedItems(updated);
+    },
+    [cardWidth, cardHeight, gridGap, getCurrentMenuIds, updateOrderedItems]
+  );
 
   return (
     <View style={styles.root}>
@@ -442,6 +877,7 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         style={styles.container}
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!isEditingOrder}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />}
       >
       {/* Main Stats Cards (Kutilayotgan Arizalar, Qabul Qilingan O'yinchilar, Jami Ligalar, Qabul Qilingan Jamoalar) */}
@@ -528,32 +964,32 @@ export const DashboardScreen: React.FC<Props> = ({ onNavigate }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Admin Menu Grid (3 Columns) */}
+      {/* Admin Menu Grid (Slot-Based Absolute Grid) */}
       <Text style={styles.sectionTitle}>{"Admin Menyusi Sahifalari"}</Text>
-      <View style={styles.menuGrid}>
-        {menuNavItems.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={styles.gridCard}
-            activeOpacity={0.7}
-            onPress={item.action}
-          >
-            <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={{ position: 'relative' }}>
-              <Ionicons name={item.icon as any} size={28} color={item.color} style={{ marginBottom: 8 }} />
-              {item.id === 'updates' && counts.pendingUpdates > 0 && (
-                <View style={styles.badgeCircle}>
-                  <Text style={styles.badgeText}>
-                    {counts.pendingUpdates > 99 ? '99+' : counts.pendingUpdates}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.gridCardTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      <View style={[styles.menuGrid, { height: Math.ceil(menuNavItems.length / 3) * (cardHeight + gridGap) }]}>
+        {menuNavItems.map((item, index) => {
+          return (
+            <DraggableCard
+              key={item.id}
+              item={item}
+              index={index}
+              totalCount={menuNavItems.length}
+              cardWidth={cardWidth}
+              cardHeight={cardHeight}
+              gridGap={gridGap}
+              isEditingOrder={isEditingOrder}
+              activeDragId={activeDragId}
+              wiggleAnim={wiggleAnim}
+              onEnableEditMode={handleEnableEditMode}
+              onStartDrag={handleStartDrag}
+              onDragMove={handleDragMove}
+              onEndDrag={handleEndDrag}
+              onPressItem={(it) => it.action()}
+              getFinalPosition={getFinalPosition}
+              pendingUpdatesCount={counts.pendingUpdates}
+            />
+          );
+        })}
       </View>
 
       {/* Real Live & Chronological Matches Section at the VERY BOTTOM */}
@@ -747,21 +1183,36 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   menuGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'space-between',
+    position: 'relative',
+    width: '100%',
+    marginBottom: 16,
+  },
+  gridCardWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   gridCard: {
-    width: '31%',
+    width: '100%',
+    height: '100%',
     backgroundColor: 'transparent',
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
+    borderRadius: 18,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
     overflow: 'hidden',
+    position: 'relative',
+  },
+  gridCardDragging: {
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 20,
   },
   gridIconBox: {
     width: 44,
