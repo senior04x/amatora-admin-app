@@ -293,7 +293,7 @@ const LeagueSkeletonLoader = () => {
 
 // Leagues Screen Component
 export const LeaguesScreen: React.FC = () => {
-  const { orgId, userRole, collabLeagueIds, showToast } = useOrg();
+  const { orgId, userRole, collabLeagueIds, showToast, currentOrg } = useOrg();
   const isReadOnlyUser = userRole === 'user';
   const [leagues, setLeagues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -343,6 +343,11 @@ export const LeaguesScreen: React.FC = () => {
   const [selectedLeagueForCollab, setSelectedLeagueForCollab] = useState<any>(null);
   const [targetOrgEmail, setTargetOrgEmail] = useState('');
   const [sendingCollab, setSendingCollab] = useState(false);
+
+  // Pending incoming collab requests (where this org is receiver)
+  const [pendingCollabRequests, setPendingCollabRequests] = useState<any[]>([]);
+  const [processingCollabId, setProcessingCollabId] = useState<number | null>(null);
+  const [viewingLeagueDetail, setViewingLeagueDetail] = useState<any | null>(null);
 
   const handleOpenCollabModal = (league: any) => {
     if (isReadOnlyUser) return;
@@ -428,6 +433,21 @@ export const LeaguesScreen: React.FC = () => {
       });
 
       if (error) throw error;
+
+      // Notify receiver organization about the collab request
+      try {
+        const senderOrgName = currentOrg?.name || 'Tashkilot';
+        await dbClient.from('admin_notifications').insert({
+          organization_id: foundOrgId,
+          type: 'collab_request',
+          title: 'Yangi sherikchilik taklifi',
+          message: `"${senderOrgName}" tashkiloti "${selectedLeagueForCollab.name}" ligasi bo'yicha sherikchilik taklifi yubordi`,
+          is_read: false,
+          metadata: JSON.stringify({ league_id: selectedLeagueForCollab.id, sender_org_id: orgId }),
+        });
+      } catch (notifErr) {
+        console.warn('Collab notification insert failed (table may not exist):', notifErr);
+      }
 
       showSuccessGlassAlert('Muvaffaqiyatli yuborildi', `"${selectedLeagueForCollab.name}" ligasi bo'yicha sherikchilik taklifi "${foundOrgName}" (${targetOrgEmail}) tashkilotiga muvaffaqiyatli yuborildi!`);
       setShowCollabModal(false);
@@ -546,6 +566,50 @@ export const LeaguesScreen: React.FC = () => {
         setLeagues(merged);
       } else {
         setLeagues([]);
+      }
+
+      // 3. Fetch pending incoming collab requests (where this org is receiver)
+      try {
+        const dbClient = supabase;
+        const { data: pendingCollabs } = await dbClient
+          .from('league_collabs')
+          .select('*, sender_org:organizations!sender_org_id(id, name, logo_url), league:leagues!league_id(id, name, logo_url, export_bg_url, season, organization_id)')
+          .eq('receiver_org_id', orgId)
+          .eq('status', 'pending');
+
+        if (pendingCollabs && pendingCollabs.length > 0) {
+          setPendingCollabRequests(pendingCollabs);
+        } else {
+          // Fallback without joins
+          const { data: plainPending } = await dbClient
+            .from('league_collabs')
+            .select('*')
+            .eq('receiver_org_id', orgId)
+            .eq('status', 'pending');
+
+          if (plainPending && plainPending.length > 0) {
+            // Fetch related data manually
+            const senderOrgIds = [...new Set(plainPending.map((p: any) => p.sender_org_id))];
+            const leagueIds = [...new Set(plainPending.map((p: any) => p.league_id))];
+            const { data: senderOrgs } = await dbClient.from('organizations').select('id, name, logo_url').in('id', senderOrgIds);
+            const { data: leaguesInfo } = await dbClient.from('leagues').select('id, name, logo_url, export_bg_url, season, organization_id').in('id', leagueIds);
+            const senderMap: any = {};
+            (senderOrgs || []).forEach((o: any) => { senderMap[o.id] = o; });
+            const leagueMap: any = {};
+            (leaguesInfo || []).forEach((l: any) => { leagueMap[l.id] = l; });
+
+            setPendingCollabRequests(plainPending.map((p: any) => ({
+              ...p,
+              sender_org: senderMap[p.sender_org_id] || null,
+              league: leagueMap[p.league_id] || null,
+            })));
+          } else {
+            setPendingCollabRequests([]);
+          }
+        }
+      } catch (pendingErr) {
+        console.warn('Pending collabs fetch error:', pendingErr);
+        setPendingCollabRequests([]);
       }
     } catch (e) {
       console.error(e);
@@ -732,11 +796,20 @@ export const LeaguesScreen: React.FC = () => {
     );
   };
 
-  // Disconnect / Delete Collab Connection
-  const handleDisconnectCollab = (collabId: any) => {
+  // Disconnect / Delete Collab Connection (only by league creator)
+  const handleDisconnectCollab = (collabItem: any) => {
+    const collabId = collabItem.id || collabItem;
+    const partnerOrgId = Number(collabItem.sender_org_id) === Number(orgId) 
+      ? collabItem.receiver_org_id 
+      : collabItem.sender_org_id;
+    const partnerOrgName = (Number(collabItem.sender_org_id) === Number(orgId) 
+      ? collabItem.receiver_org?.name 
+      : collabItem.sender_org?.name) || 'Hamkor tashkilot';
+    const leagueName = editingLeague?.name || '';
+
     Alert.alert(
       "Collabni uzish",
-      "Ushbu tashkilot bilan sherikchilikni uzishni xohlaysizmi?",
+      `"${partnerOrgName}" tashkiloti bilan "${leagueName}" ligasidagi sherikchilikni uzishni xohlaysizmi?`,
       [
         { text: 'Bekor qilish', style: 'cancel' },
         {
@@ -748,6 +821,21 @@ export const LeaguesScreen: React.FC = () => {
               const { error } = await dbClient.from('league_collabs').delete().eq('id', collabId);
               if (error) throw error;
 
+              // Notify partner organization about disconnection
+              try {
+                const myOrgName = currentOrg?.name || 'Tashkilot';
+                await dbClient.from('admin_notifications').insert({
+                  organization_id: partnerOrgId,
+                  type: 'collab_disconnected',
+                  title: 'Sherikchilik uzildi',
+                  message: `"${myOrgName}" tashkiloti "${leagueName}" ligasidagi sherikchilikni uzdi`,
+                  is_read: false,
+                  metadata: JSON.stringify({ league_name: leagueName, disconnected_by_org_id: orgId }),
+                });
+              } catch (notifErr) {
+                console.warn('Disconnect notification failed:', notifErr);
+              }
+
               showSuccessGlassAlert("Collab uzildi", "Sherikchilik muvaffaqiyatli uzildi!");
               if (editingLeague) {
                 const updatedCollabs = (editingLeague.collabs || []).filter((c: any) => c.id !== collabId);
@@ -757,6 +845,90 @@ export const LeaguesScreen: React.FC = () => {
             } catch (e: any) {
               console.error(e);
               Alert.alert('Xatolik', 'Collabni uzishda xatolik: ' + (e.message || ''));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Accept incoming collab request
+  const handleAcceptCollab = async (collabRequest: any) => {
+    setProcessingCollabId(collabRequest.id);
+    try {
+      const dbClient = supabase;
+      const { error } = await dbClient
+        .from('league_collabs')
+        .update({ status: 'accepted' })
+        .eq('id', collabRequest.id);
+      if (error) throw error;
+
+      // Notify sender organization that collab was accepted
+      try {
+        const myOrgName = currentOrg?.name || 'Tashkilot';
+        const leagueName = collabRequest.league?.name || collabRequest.league_name || 'Liga';
+        await dbClient.from('admin_notifications').insert({
+          organization_id: collabRequest.sender_org_id,
+          type: 'collab_accepted',
+          title: 'Sherikchilik qabul qilindi',
+          message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni qabul qildi`,
+          is_read: false,
+          metadata: JSON.stringify({ league_id: collabRequest.league_id, accepted_by_org_id: orgId }),
+        });
+      } catch (notifErr) {
+        console.warn('Accept notification failed:', notifErr);
+      }
+
+      showSuccessGlassAlert('Qabul qilindi!', `"${collabRequest.league?.name || 'Liga'}" ligasi bo'yicha sherikchilik muvaffaqiyatli qabul qilindi!`);
+      await fetchLeagues();
+    } catch (e: any) {
+      console.error(e);
+      Alert.alert('Xatolik', 'Qabul qilishda xatolik: ' + (e.message || ''));
+    } finally {
+      setProcessingCollabId(null);
+    }
+  };
+
+  // Reject incoming collab request
+  const handleRejectCollab = (collabRequest: any) => {
+    Alert.alert(
+      "Taklifni rad etish",
+      `"${collabRequest.sender_org?.name || 'Tashkilot'}" tashkilotining "${collabRequest.league?.name || 'Liga'}" ligasi bo'yicha sherikchilik taklifini rad etmoqchimisiz?`,
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: 'Rad etish',
+          style: 'destructive',
+          onPress: async () => {
+            setProcessingCollabId(collabRequest.id);
+            try {
+              const dbClient = supabase;
+              const { error } = await dbClient.from('league_collabs').delete().eq('id', collabRequest.id);
+              if (error) throw error;
+
+              // Notify sender organization that collab was rejected
+              try {
+                const myOrgName = currentOrg?.name || 'Tashkilot';
+                const leagueName = collabRequest.league?.name || collabRequest.league_name || 'Liga';
+                await dbClient.from('admin_notifications').insert({
+                  organization_id: collabRequest.sender_org_id,
+                  type: 'collab_rejected',
+                  title: 'Sherikchilik rad etildi',
+                  message: `"${myOrgName}" tashkiloti "${leagueName}" ligasi bo'yicha sherikchilik taklifingizni rad etdi`,
+                  is_read: false,
+                  metadata: JSON.stringify({ league_id: collabRequest.league_id, rejected_by_org_id: orgId }),
+                });
+              } catch (notifErr) {
+                console.warn('Reject notification failed:', notifErr);
+              }
+
+              showToast({ message: 'Taklif rad etildi', type: 'info' });
+              await fetchLeagues();
+            } catch (e: any) {
+              console.error(e);
+              Alert.alert('Xatolik', 'Rad etishda xatolik: ' + (e.message || ''));
+            } finally {
+              setProcessingCollabId(null);
             }
           },
         },
@@ -979,6 +1151,8 @@ export const LeaguesScreen: React.FC = () => {
     const duration = item.match_duration || 60;
     const halves = item.half_count || 2;
     const halfTime = Math.round(duration / halves);
+    // Collab league = not created by this org (read-only: no edit, no collab, no upload)
+    const isCollabLeague = item.organization_id && Number(item.organization_id) !== Number(orgId);
 
     return (
       <View style={s.card}>
@@ -989,13 +1163,22 @@ export const LeaguesScreen: React.FC = () => {
           resizeMode="cover"
         >
           <View style={s.cardDarkOverlay}>
-            {/* Top Row: Upload BG (Only for Admins) */}
-            {!isReadOnlyUser && (
+            {/* Top Row: Upload BG (Only for Admins of own leagues) */}
+            {!isReadOnlyUser && !isCollabLeague && (
               <View style={s.cardTopRow}>
                 <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleUploadBgImage(item)} activeOpacity={0.8}>
                   <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
                   <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
                 </TouchableOpacity>
+              </View>
+            )}
+            {/* Collab League Badge */}
+            {isCollabLeague && (
+              <View style={s.cardTopRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,170,255,0.25)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(0,170,255,0.4)' }}>
+                  <Ionicons name="link-outline" size={12} color="#00AAFF" />
+                  <Text style={{ color: '#00AAFF', fontSize: 10, fontWeight: '800', marginLeft: 4 }}>{"HAMKOR LIGA"}</Text>
+                </View>
               </View>
             )}
 
@@ -1066,8 +1249,8 @@ export const LeaguesScreen: React.FC = () => {
               )}
             </View>
 
-            {/* Bottom: Action Tabs — Collab & Edit */}
-            {!isReadOnlyUser && (
+            {/* Bottom: Action Tabs — Collab & Edit (only for own leagues) */}
+            {!isReadOnlyUser && !isCollabLeague && (
               <View style={s.actionTabs}>
                 <TouchableOpacity style={s.actionTab} onPress={() => handleOpenCollabModal(item)} activeOpacity={0.7}>
                   <Ionicons name="paper-plane-outline" size={14} color="rgba(255,255,255,0.8)" />
@@ -1087,7 +1270,8 @@ export const LeaguesScreen: React.FC = () => {
 
   // Render each item wrapped in SwipeableLeagueCard
   const renderLeagueCard = ({ item }: { item: any }) => {
-    if (isReadOnlyUser) {
+    const isCollabItem = item.organization_id && Number(item.organization_id) !== Number(orgId);
+    if (isReadOnlyUser || isCollabItem) {
       return renderLeagueCardContent(item);
     }
     return (
@@ -1135,6 +1319,104 @@ export const LeaguesScreen: React.FC = () => {
           }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />}
           renderItem={renderLeagueCard}
+          ListHeaderComponent={
+            pendingCollabRequests.length > 0 ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[s.sectionLabel, { marginTop: 0, marginBottom: 8 }]}>{`📩 KIRUVCHI SHERIKCHILIK TAKLIFLARI (${pendingCollabRequests.length})`}</Text>
+                {pendingCollabRequests.map((req: any) => {
+                  const leagueInfo = req.league || {};
+                  const senderOrg = req.sender_org || {};
+                  const isProcessing = processingCollabId === req.id;
+                  return (
+                    <View key={req.id} style={[s.card, { borderWidth: 1, borderColor: 'rgba(0,170,255,0.4)', marginBottom: 12 }]}>
+                      <ImageBackground
+                        source={leagueInfo.export_bg_url ? { uri: leagueInfo.export_bg_url } : undefined}
+                        style={s.cardFullBg}
+                        imageStyle={s.cardFullBgImage}
+                        resizeMode="cover"
+                      >
+                        <View style={s.cardDarkOverlay}>
+                          {/* Top: Taklif badge */}
+                          <View style={s.cardTopRow}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,170,255,0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(0,170,255,0.5)' }}>
+                              <Ionicons name="mail-unread-outline" size={12} color="#00AAFF" />
+                              <Text style={{ color: '#00AAFF', fontSize: 10, fontWeight: '800', marginLeft: 4 }}>{"SHERIKCHILIK TAKLIFI"}</Text>
+                            </View>
+                          </View>
+
+                          {/* Center: League info (Clickable to view details) */}
+                          <TouchableOpacity
+                            style={s.cardCenterContent}
+                            activeOpacity={0.8}
+                            onPress={() => setViewingLeagueDetail(req)}
+                          >
+                            {leagueInfo.logo_url ? (
+                              <View style={s.freeLogoWrap}>
+                                <Image source={{ uri: leagueInfo.logo_url }} style={s.freeLogoImg} resizeMode="contain" />
+                              </View>
+                            ) : (
+                              <View style={s.freeLogoWrap}>
+                                <Ionicons name="trophy" size={38} color="#FFFFFF" />
+                              </View>
+                            )}
+                            <Text style={s.cardTitle} numberOfLines={2}>{leagueInfo.name || 'Liga'}</Text>
+
+                            {/* Sender org info */}
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                              {senderOrg.logo_url ? (
+                                <Image source={{ uri: senderOrg.logo_url }} style={{ width: 18, height: 18, borderRadius: 9, marginRight: 6 }} resizeMode="contain" />
+                              ) : (
+                                <Ionicons name="business-outline" size={14} color="rgba(255,255,255,0.7)" style={{ marginRight: 6 }} />
+                              )}
+                              <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' }}>{`${senderOrg.name || 'Tashkilot'} dan taklif`}</Text>
+                            </View>
+
+                            {leagueInfo.season && (
+                              <View style={[s.badgesRow, { marginTop: 6 }]}>
+                                <View style={s.badgeSeason}>
+                                  <Text style={s.badgeIcon}>{"📅"}</Text>
+                                  <Text style={s.badgeSeasonText}>{leagueInfo.season}</Text>
+                                </View>
+                              </View>
+                            )}
+                            <Text style={{ color: '#00AAFF', fontSize: 11, fontWeight: '600', marginTop: 6 }}>{"Ma'lumotlarni ko'rish 👆"}</Text>
+                          </TouchableOpacity>
+
+                          {/* Bottom: Accept / Reject buttons */}
+                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, paddingBottom: 12, paddingHorizontal: 16 }}>
+                            <TouchableOpacity
+                              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,255,102,0.2)', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(0,255,102,0.5)' }}
+                              onPress={() => handleAcceptCollab(req)}
+                              disabled={isProcessing}
+                              activeOpacity={0.7}
+                            >
+                              {isProcessing ? (
+                                <ActivityIndicator size="small" color="#00FF66" />
+                              ) : (
+                                <>
+                                  <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
+                                  <Text style={{ color: '#00FF66', fontSize: 13, fontWeight: '800', marginLeft: 6 }}>{"Qabul qilish"}</Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,59,48,0.15)', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,59,48,0.4)' }}
+                              onPress={() => handleRejectCollab(req)}
+                              disabled={isProcessing}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="close-circle" size={18} color="#FF3B30" />
+                              <Text style={{ color: '#FF3B30', fontSize: 13, fontWeight: '800', marginLeft: 6 }}>{"Rad etish"}</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </ImageBackground>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null
+          }
           ListFooterComponent={
             !isReadOnlyUser ? (
               <TouchableOpacity style={s.addBtn} onPress={handleCreateLeague} activeOpacity={0.8}>
@@ -1384,7 +1666,7 @@ export const LeaguesScreen: React.FC = () => {
                           </View>
                           <TouchableOpacity
                             style={s.disconnectCollabBtn}
-                            onPress={() => handleDisconnectCollab(c.id)}
+                            onPress={() => handleDisconnectCollab(c)}
                             activeOpacity={0.7}
                           >
                             <Ionicons name="unlink-outline" size={14} color="#EF4444" />
@@ -1504,6 +1786,103 @@ export const LeaguesScreen: React.FC = () => {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* View Collab League Details Modal */}
+      <Modal visible={!!viewingLeagueDetail} transparent animationType="fade" onRequestClose={() => setViewingLeagueDetail(null)}>
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: '85%' }]}>
+            <View style={s.modalHeader}>
+              <View style={s.modalHeaderTitleRow}>
+                <Ionicons name="information-circle-outline" size={20} color="#00AAFF" />
+                <Text style={s.modalTitle} numberOfLines={1}>
+                  {"Sherikchilik Taklifi Tafsilotlari"}
+                </Text>
+              </View>
+              <TouchableOpacity style={s.modalClose} onPress={() => setViewingLeagueDetail(null)}>
+                <Ionicons name="close" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            {viewingLeagueDetail && (
+              <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
+                {/* League Preview Banner */}
+                <View style={[s.card, { height: 160, marginBottom: 16 }]}>
+                  <ImageBackground
+                    source={viewingLeagueDetail.league?.export_bg_url ? { uri: viewingLeagueDetail.league.export_bg_url } : undefined}
+                    style={s.cardFullBg}
+                    imageStyle={s.cardFullBgImage}
+                    resizeMode="cover"
+                  >
+                    <View style={[s.cardDarkOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+                      {viewingLeagueDetail.league?.logo_url ? (
+                        <Image source={{ uri: viewingLeagueDetail.league.logo_url }} style={{ width: 56, height: 56, borderRadius: 28, marginBottom: 8 }} resizeMode="contain" />
+                      ) : (
+                        <Ionicons name="trophy" size={42} color="#FFFFFF" style={{ marginBottom: 8 }} />
+                      )}
+                      <Text style={[s.cardTitle, { fontSize: 18 }]}>{viewingLeagueDetail.league?.name || 'Liga'}</Text>
+                      <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4 }}>{viewingLeagueDetail.league?.season || '2026/2027'}</Text>
+                    </View>
+                  </ImageBackground>
+                </View>
+
+                {/* Sender Org Details */}
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.05)', padding: 14, borderRadius: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                  <Text style={{ color: '#00AAFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 }}>{"YUBORUVCHI TASHKILOT"}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {viewingLeagueDetail.sender_org?.logo_url ? (
+                      <Image source={{ uri: viewingLeagueDetail.sender_org.logo_url }} style={{ width: 36, height: 36, borderRadius: 18, marginRight: 12 }} resizeMode="contain" />
+                    ) : (
+                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                        <Ionicons name="business-outline" size={20} color="#00FF66" />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700' }}>{viewingLeagueDetail.sender_org?.name || 'Tashkilot'}</Text>
+                      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 2 }}>{"Co-host (sheriklik) taklif qilmoqda"}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Note about Co-hosting */}
+                <View style={{ backgroundColor: 'rgba(0,170,255,0.08)', padding: 12, borderRadius: 10, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(0,170,255,0.2)' }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, lineHeight: 17 }}>
+                    {"ℹ️ Ushbu sheriklikni qabul qilsangiz, mazkur liga sizning tashkilot ilovangizda va boshqaruv panelingizda to'liq ko'rinadi. Liga sozlamalarini faqat uni yaratgan tashkilot boshqarishi mumkin."}
+                  </Text>
+                </View>
+              </ScrollView>
+            )}
+
+            {/* Modal Actions: Accept & Reject */}
+            {viewingLeagueDetail && (
+              <View style={[s.modalActions, { gap: 10 }]}>
+                <TouchableOpacity
+                  style={[s.cancelSquareBtn, { flex: 1, backgroundColor: 'rgba(255,59,48,0.15)', borderColor: 'rgba(255,59,48,0.4)', borderRadius: 10, paddingVertical: 12 }]}
+                  onPress={() => {
+                    const req = viewingLeagueDetail;
+                    setViewingLeagueDetail(null);
+                    handleRejectCollab(req);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ color: '#FF3B30', fontSize: 13, fontWeight: '800' }}>{"Rad etish"}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.saveFullBtn, { flex: 1.5, backgroundColor: '#00FF66' }]}
+                  onPress={async () => {
+                    const req = viewingLeagueDetail;
+                    setViewingLeagueDetail(null);
+                    await handleAcceptCollab(req);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.saveFullBtnText, { color: '#000000' }]}>{"Qabul qilish"}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </Modal>

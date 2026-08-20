@@ -426,6 +426,17 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return st === 'pending' || st === 'kutilmoqda' || st === 'yangi';
       });
 
+      // 3. Fetch pending collab requests for this organization
+      let pendingCollabs: any[] = [];
+      try {
+        const { data: collabsRaw } = await dbClient
+          .from('league_collabs')
+          .select('id, created_at, status')
+          .eq('receiver_org_id', targetOrgId)
+          .eq('status', 'pending');
+        if (collabsRaw) pendingCollabs = collabsRaw;
+      } catch (collabErr) {}
+
       let unreadCount = 0;
 
       pendingApps.forEach((a: any) => {
@@ -441,6 +452,16 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pendingTeams.forEach((t: any) => {
         const notifId = `team_app_${t.id}`;
         const createdMs = new Date(t.created_at || 0).getTime();
+        const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
+        const isReadById = readList.includes(notifId);
+        if (!isReadByTime && !isReadById) {
+          unreadCount++;
+        }
+      });
+
+      pendingCollabs.forEach((c: any) => {
+        const notifId = `collab_${c.id}`;
+        const createdMs = new Date(c.created_at || 0).getTime();
         const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
         const isReadById = readList.includes(notifId);
         if (!isReadByTime && !isReadById) {
