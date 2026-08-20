@@ -54,6 +54,7 @@ import { NewsScreen } from './src/screens/NewsScreen';
 import { OrganizersScreen } from './src/screens/OrganizersScreen';
 import { FinishedMatchesScreen } from './src/screens/FinishedMatchesScreen';
 import { NotificationsScreen } from './src/screens/NotificationsScreen';
+import { CardsScreen } from './src/screens/CardsScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 import { hasSecurePin } from './src/utils/securePin';
 
@@ -78,12 +79,12 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, userRole } = useOrg();
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications'
+    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards'
   >('dashboard');
   const [playersSubTab, setPlayersSubTab] = useState<'players' | 'teams'>('players');
 
   const handleNavigate = (
-    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications',
+    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards',
     subTab?: 'players' | 'teams'
   ) => {
     if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers'].includes(tab)) {
@@ -278,6 +279,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'sponsors'}><SponsorsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'news'}><NewsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'standings'}><StandingsScreen /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'cards'}><CardsScreen onGoBack={() => setActiveTab('dashboard')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onNavigateToOrganizers={() => setActiveTab('organizers')} onLogout={onLogout} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>

@@ -17,7 +17,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 interface Props {
   onNavigate: (
-    tab: 'dashboard' | 'players' | 'matches' | 'finished-matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news',
+    tab: 'dashboard' | 'players' | 'matches' | 'finished-matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news' | 'cards',
     subTab?: 'players' | 'teams'
   ) => void;
   isEditingOrder?: boolean;
@@ -509,12 +509,12 @@ export const DashboardScreen: React.FC<Props> = ({
       adminOnly: false,
     },
     {
-      id: 'standings',
-      title: 'Turnirlar',
-      icon: 'grid-outline',
-      color: '#38BDF8',
-      action: () => Alert.alert("Turnir jadvali", "Turnir jadvali bo'limi tayyorlanmoqda"),
-      adminOnly: true,
+      id: 'cards',
+      title: 'Kartochkalar',
+      icon: 'albums-outline',
+      color: '#FACC15',
+      action: () => onNavigate && onNavigate('cards'),
+      adminOnly: false,
     },
     {
       id: 'sponsors',
