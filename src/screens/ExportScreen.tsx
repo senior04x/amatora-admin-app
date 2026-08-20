@@ -315,11 +315,8 @@ export const ExportScreen: React.FC = () => {
         }
       }
       const { data: teamsData } = await teamQuery;
-      if (teamsData && teamsData.length > 0) {
+      if (teamsData) {
         setAllTeams(teamsData);
-      } else {
-        const { data: fallbackTeams } = await dbClient.from('teams').select('*').order('name');
-        if (fallbackTeams) setAllTeams(fallbackTeams);
       }
     } catch (e) {
       console.error(e);
@@ -369,7 +366,7 @@ export const ExportScreen: React.FC = () => {
           .order('created_at', { ascending: false });
 
         if (orgId) {
-          spQuery = spQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+          spQuery = spQuery.eq('organization_id', orgId);
         }
 
         const { data: allSp, error: spErr } = await spQuery;
@@ -408,65 +405,29 @@ export const ExportScreen: React.FC = () => {
               uName.startsWith('YT_OAUTH') ||
               uName.startsWith('MATCH_TIMER') ||
               uName.startsWith('LEAGUE_SHOW_SPONSORS') ||
-              uName.startsWith('LEAGUE_BG') ||
-              uName.startsWith('EXPORT_BG') ||
-              uName.startsWith('BG_') ||
-              uName.endsWith('_BG') ||
-              uName.includes('BACKGROUND') ||
-              uUrl.includes('LEAGUE-BACKGROUNDS') ||
-              uUrl.includes('LEAGUE_BG') ||
-              uUrl.includes('EXPORT_BG') ||
-              uUrl.includes('EXPORT-BG')
+              uName.startsWith('REGISTRATION_OPEN') ||
+              uName.startsWith('POLL_VOTES') ||
+              uUrl.includes('EXPO_PUSH')
             ) {
               return false;
             }
             return true;
           });
 
-          // 1. Official Main Sponsor: Check explicitly for is_main === true or 1 or 'true'
-          let mainSp = realSponsors.find(
-            (s: any) =>
-              s.is_main === true ||
-              s.is_main === 1 ||
-              String(s.is_main) === 'true' ||
-              String(s.is_main) === '1'
-          );
+          if (showSponsorsForThisLeague && realSponsors.length > 0) {
+            const main = realSponsors.find((s: any) => s.is_main === true);
+            const secondaries = realSponsors.filter((s: any) => !s.is_main);
 
-          // Fallback to name containing BOSH or MAIN ONLY if no sponsor is explicitly marked is_main
-          if (!mainSp) {
-            mainSp = realSponsors.find((s: any) => {
-              const nameUpper = String(s.name || '').toUpperCase();
-              return nameUpper.includes('BOSH') || nameUpper.includes('MAIN');
-            });
-          }
+            if (main?.logo_url) {
+              setMainSponsorLogo(main.logo_url);
+            } else if (realSponsors[0]?.logo_url) {
+              setMainSponsorLogo(realSponsors[0].logo_url);
+            }
 
-          const activeMainLogo = mainSp?.logo_url || null;
-          setMainSponsorLogo(activeMainLogo);
-
-          // 2. Qolgan ikkilamchi homiylar (Faqat Footer uchun)
-          if (!showSponsorsForThisLeague) {
-            // AGAR USHBU LIGA UCHUN HOMIYLAR KO'RINISHI O'CHIRILGAN BO'LSA: FOOTERDA HECH QAYSI HOMIY KO'RINMAYDI!
-            setSecondarySponsors([]);
+            setSecondarySponsors(secondaries.map((s: any) => s.logo_url).filter(Boolean));
           } else {
-            const secSp = realSponsors.filter((s: any) => {
-              if (!s.logo_url) return false;
-              if (!s.logo_url.startsWith('http') && !s.logo_url.startsWith('data:')) return false;
-
-              // Bosh homiyni har qanday belgi bo'yicha DAF qilish (Bosh homiy footerda MUTLAQO TURMASLIGI KERAK!):
-              if (s.is_main === true || s.is_main === 1 || String(s.is_main) === 'true' || String(s.is_main) === '1') {
-                return false;
-              }
-              if (mainSp && (String(s.id) === String(mainSp.id) || s.logo_url === mainSp.logo_url)) {
-                return false;
-              }
-              if (activeMainLogo && s.logo_url === activeMainLogo) {
-                return false;
-              }
-
-              return true;
-            });
-
-            setSecondarySponsors(secSp);
+            setMainSponsorLogo(null);
+            setSecondarySponsors([]);
           }
         } else {
           setMainSponsorLogo(null);
@@ -476,14 +437,19 @@ export const ExportScreen: React.FC = () => {
         console.error('Error fetching sponsors in ExportScreen:', e);
       }
 
-      // 1. Fetch Teams
+      // 1. Fetch Teams (including Collab)
       let teamQuery = dbClient
         .from('teams')
         .select('*')
         .in('status', ['approved', 'partially_approved']);
 
       if (orgId) {
-        teamQuery = teamQuery.eq('organization_id', orgId);
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          teamQuery = teamQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+        } else {
+          teamQuery = teamQuery.eq('organization_id', orgId);
+        }
       }
 
       const { data: allOrgTeams } = await teamQuery;
@@ -504,14 +470,19 @@ export const ExportScreen: React.FC = () => {
 
       const teamIds = new Set(targetTeams.map((t: any) => t.id));
 
-      // 2. Fetch Matches (All matches: both finished and scheduled)
+      // 2. Fetch Matches (All matches: both finished and scheduled, including Collab)
       let matchQuery = dbClient
         .from('matches')
         .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
         .order('match_date', { ascending: true });
 
       if (orgId) {
-        matchQuery = matchQuery.eq('organization_id', orgId);
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          matchQuery = matchQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+        } else {
+          matchQuery = matchQuery.eq('organization_id', orgId);
+        }
       }
 
       const { data: allMatchesData } = await matchQuery;

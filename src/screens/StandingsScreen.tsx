@@ -29,7 +29,7 @@ interface TeamStanding {
 }
 
 export const StandingsScreen: React.FC = () => {
-  const { orgId } = useOrg();
+  const { orgId, collabLeagueNames, collabLeagueIds } = useOrg();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [leagues, setLeagues] = useState<any[]>([]);
@@ -41,13 +41,13 @@ export const StandingsScreen: React.FC = () => {
 
   useEffect(() => {
     fetchLeagues();
-  }, [orgId]);
+  }, [orgId, collabLeagueIds]);
 
   useEffect(() => {
     if (selectedLeague) {
       calculateStandings(selectedLeague, selectedRound);
     }
-  }, [selectedLeague, selectedRound, orgId]);
+  }, [selectedLeague, selectedRound, orgId, collabLeagueNames]);
 
   const fetchLeagues = async () => {
     setLoading(true);
@@ -55,7 +55,11 @@ export const StandingsScreen: React.FC = () => {
       const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('name');
       if (orgId) {
-        query = query.eq('organization_id', orgId);
+        if (collabLeagueIds && collabLeagueIds.length > 0) {
+          query = query.or(`organization_id.eq.${orgId},id.in.(${collabLeagueIds.join(',')})`);
+        } else {
+          query = query.eq('organization_id', orgId);
+        }
       }
       const { data } = await query;
       if (data && data.length > 0) {
@@ -83,14 +87,19 @@ export const StandingsScreen: React.FC = () => {
     try {
       const dbClient = supabase;
 
-      // 1. Fetch ONLY Approved & Active Teams
+      // 1. Fetch ONLY Approved & Active Teams (including Collab)
       let teamsQuery = dbClient
         .from('teams')
         .select('*')
         .in('status', ['approved', 'tasdiqlangan']);
 
       if (orgId) {
-        teamsQuery = teamsQuery.eq('organization_id', orgId);
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+        } else {
+          teamsQuery = teamsQuery.eq('organization_id', orgId);
+        }
       }
       const { data: teamsData } = await teamsQuery;
 
@@ -106,7 +115,7 @@ export const StandingsScreen: React.FC = () => {
         return leaguesList.includes(leagueName.toLowerCase().trim());
       });
 
-      // 2. Fetch Matches for this league
+      // 2. Fetch Matches for this league (including Collab)
       let matchesQuery = dbClient
         .from('matches')
         .select(`
@@ -116,7 +125,12 @@ export const StandingsScreen: React.FC = () => {
         `);
 
       if (orgId) {
-        matchesQuery = matchesQuery.eq('organization_id', orgId);
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          matchesQuery = matchesQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+        } else {
+          matchesQuery = matchesQuery.eq('organization_id', orgId);
+        }
       }
 
       const { data: matchesData } = await matchesQuery;
