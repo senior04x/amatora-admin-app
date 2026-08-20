@@ -237,6 +237,8 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
             });
           });
         }
+      } catch (e) {}
+
       // 6. Collab Notifications & Proposals
       try {
         let collabNotifQuery = dbClient
