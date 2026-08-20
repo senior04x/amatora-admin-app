@@ -10,6 +10,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 import * as Notifications from 'expo-notifications';
 
@@ -152,6 +153,14 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     const setupAdminPush = async () => {
       try {
         if (Platform.OS === 'web') return;
+
+        // In Expo SDK 53+, remote push token is unsupported inside Expo Go on Android
+        const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+        if (isExpoGo && Platform.OS === 'android') {
+          // Expo Go on Android: Local and in-app notifications still fully functional
+          return;
+        }
+
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
         if (existingStatus !== 'granted') {
@@ -181,7 +190,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
           console.log('✅ Admin Push Token registered:', `admin_${orgIdVal}`);
         }
       } catch (err) {
-        console.log('Admin push registration note:', err);
+        // Silent catch to prevent red box in development
       }
     };
 
