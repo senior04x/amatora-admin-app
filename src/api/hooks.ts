@@ -31,9 +31,9 @@ export const useDashboardCountsData = (orgId: any) => {
       let leaguesQuery = supabase.from('leagues').select('id', { count: 'exact', head: true });
       if (targetOrgId) {
         if (collabIds.length > 0) {
-          leaguesQuery = leaguesQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null,id.in.(${collabIds.join(',')})`);
+          leaguesQuery = leaguesQuery.or(`organization_id.eq.${targetOrgId},id.in.(${collabIds.join(',')})`);
         } else {
-          leaguesQuery = leaguesQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+          leaguesQuery = leaguesQuery.eq('organization_id', targetOrgId);
         }
       }
 
@@ -42,14 +42,14 @@ export const useDashboardCountsData = (orgId: any) => {
         .select('id', { count: 'exact', head: true })
         .in('status', ['approved', 'tasdiqlangan']);
       if (targetOrgId) {
-        teamsQuery = teamsQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        teamsQuery = teamsQuery.eq('organization_id', targetOrgId);
       }
 
       let playersQuery = supabase
         .from('players')
         .select('id', { count: 'exact', head: true });
       if (targetOrgId) {
-        playersQuery = playersQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        playersQuery = playersQuery.eq('organization_id', targetOrgId);
       }
 
       let approvedAppsQuery = supabase
@@ -57,7 +57,7 @@ export const useDashboardCountsData = (orgId: any) => {
         .select('id', { count: 'exact', head: true })
         .in('status', ['approved', 'tasdiqlangan']);
       if (targetOrgId) {
-        approvedAppsQuery = approvedAppsQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        approvedAppsQuery = approvedAppsQuery.eq('organization_id', targetOrgId);
       }
 
       let pendingAppsQuery = supabase
@@ -65,7 +65,7 @@ export const useDashboardCountsData = (orgId: any) => {
         .select('id', { count: 'exact', head: true })
         .in('status', ['pending', 'kutilmoqda']);
       if (targetOrgId) {
-        pendingAppsQuery = pendingAppsQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        pendingAppsQuery = pendingAppsQuery.eq('organization_id', targetOrgId);
       }
 
       let pendingTeamsQuery = supabase
@@ -73,7 +73,7 @@ export const useDashboardCountsData = (orgId: any) => {
         .select('id', { count: 'exact', head: true })
         .in('status', ['pending', 'kutilmoqda']);
       if (targetOrgId) {
-        pendingTeamsQuery = pendingTeamsQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        pendingTeamsQuery = pendingTeamsQuery.eq('organization_id', targetOrgId);
       }
 
       let pendingUpdatesQuery = supabase
@@ -81,7 +81,7 @@ export const useDashboardCountsData = (orgId: any) => {
         .select('id', { count: 'exact', head: true })
         .ilike('comment', '%[PROFILE_UPDATE]%');
       if (targetOrgId) {
-        pendingUpdatesQuery = pendingUpdatesQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+        pendingUpdatesQuery = pendingUpdatesQuery.eq('organization_id', targetOrgId);
       }
 
       const [playersRes, leaguesRes, teamsRes, approvedAppsRes, pendingAppsRes, pendingTeamsRes, pendingUpdatesRes] = await Promise.all([
@@ -566,7 +566,19 @@ export const useMatchesData = (
       let rawMatches = data || [];
 
       if (error || !data) {
-        const { data: fallbackData } = await supabase.from('matches').select('*').limit(100);
+        let fbQuery = supabase.from('matches').select('*').neq('status', 'finished');
+        if (targetOrgId) {
+          if (collabLeagueNames && collabLeagueNames.length > 0) {
+            const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+            fbQuery = fbQuery.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+          } else {
+            fbQuery = fbQuery.eq('organization_id', targetOrgId);
+          }
+        }
+        if (leagueName && leagueName !== 'all') {
+          fbQuery = fbQuery.eq('league', leagueName);
+        }
+        const { data: fallbackData } = await fbQuery.order('id', { ascending: false }).limit(100);
         if (fallbackData) {
           const { data: teamsData } = await supabase.from('teams').select('id, name, logo_url');
           const teamsMap = new Map((teamsData || []).map((t) => [t.id, t]));
@@ -687,9 +699,9 @@ export const useFinishedMatchesData = (
       if (targetOrgId) {
         if (collabLeagueNames && collabLeagueNames.length > 0) {
           const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${targetOrgId},organization_id.is.null,league.in.(${escapedNames})`);
+          query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
         } else {
-          query = query.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+          query = query.eq('organization_id', targetOrgId);
         }
       }
 
@@ -709,7 +721,12 @@ export const useFinishedMatchesData = (
           .limit(pageSize);
 
         if (targetOrgId) {
-          fbQuery = fbQuery.or(`organization_id.eq.${targetOrgId},organization_id.is.null`);
+          if (collabLeagueNames && collabLeagueNames.length > 0) {
+            const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+            fbQuery = fbQuery.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+          } else {
+            fbQuery = fbQuery.eq('organization_id', targetOrgId);
+          }
         }
 
         const { data: fallbackData } = await fbQuery;

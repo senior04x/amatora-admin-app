@@ -483,7 +483,7 @@ export const ExportScreen: React.FC = () => {
         .in('status', ['approved', 'partially_approved']);
 
       if (orgId) {
-        teamQuery = teamQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        teamQuery = teamQuery.eq('organization_id', orgId);
       }
 
       const { data: allOrgTeams } = await teamQuery;
@@ -511,7 +511,7 @@ export const ExportScreen: React.FC = () => {
         .order('match_date', { ascending: true });
 
       if (orgId) {
-        matchQuery = matchQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        matchQuery = matchQuery.eq('organization_id', orgId);
       }
 
       const { data: allMatchesData } = await matchQuery;

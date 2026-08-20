@@ -84,8 +84,8 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       let teamsQuery = supabase.from('teams').select('*').order('name');
 
       if (orgId) {
-        leaguesQuery = leaguesQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
-        teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        leaguesQuery = leaguesQuery.eq('organization_id', orgId);
+        teamsQuery = teamsQuery.eq('organization_id', orgId);
       }
 
       const [leaguesRes, teamsRes] = await Promise.all([leaguesQuery, teamsQuery]);

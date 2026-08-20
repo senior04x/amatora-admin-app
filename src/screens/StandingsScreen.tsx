@@ -55,19 +55,15 @@ export const StandingsScreen: React.FC = () => {
       const dbClient = supabase;
       let query = dbClient.from('leagues').select('*').order('name');
       if (orgId) {
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        query = query.eq('organization_id', orgId);
       }
       const { data } = await query;
       if (data && data.length > 0) {
         setLeagues(data);
         setSelectedLeague(data[0].name);
       } else {
-        // Fallback without org filter
-        const { data: fallbackData } = await dbClient.from('leagues').select('*').order('name');
-        if (fallbackData && fallbackData.length > 0) {
-          setLeagues(fallbackData);
-          setSelectedLeague(fallbackData[0].name);
-        }
+        setLeagues([]);
+        setSelectedLeague('');
       }
     } catch (e) {
       console.error('Error fetching leagues:', e);
@@ -94,7 +90,7 @@ export const StandingsScreen: React.FC = () => {
         .in('status', ['approved', 'tasdiqlangan']);
 
       if (orgId) {
-        teamsQuery = teamsQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        teamsQuery = teamsQuery.eq('organization_id', orgId);
       }
       const { data: teamsData } = await teamsQuery;
 
@@ -120,7 +116,7 @@ export const StandingsScreen: React.FC = () => {
         `);
 
       if (orgId) {
-        matchesQuery = matchesQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        matchesQuery = matchesQuery.eq('organization_id', orgId);
       }
 
       const { data: matchesData } = await matchesQuery;
