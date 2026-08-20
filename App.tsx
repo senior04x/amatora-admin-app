@@ -352,13 +352,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={styles.segmentDivider} />
 
-          {/* Segment 6: Admin Akkount / Profil (Round Org Logo Avatar) */}
+          {/* Segment 6: Admin Akkount / Profil */}
           <TouchableOpacity
             style={styles.segmentItem}
             onPress={handleAccountPress}
             activeOpacity={0.7}
           >
-            {currentOrg?.logo_url ? (
+            {userRole !== 'user' && currentOrg?.logo_url ? (
               <Image
                 source={{ uri: currentOrg.logo_url }}
                 style={[
@@ -368,7 +368,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               />
             ) : (
               <Ionicons
-                name="person-outline"
+                name={activeTab === 'account' ? "person" : "person-outline"}
                 size={22}
                 color={activeTab === 'account' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
                 style={activeTab === 'account' && styles.glowingIcon}
