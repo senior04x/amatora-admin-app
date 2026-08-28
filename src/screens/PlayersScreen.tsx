@@ -479,6 +479,15 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     };
   }, [orgId, queryClient]);
 
+  // Reset filters when modal opens
+  useEffect(() => {
+    if (showArchiveModal) {
+      setArchiveLeagueFilter('all');
+      setArchiveTeamFilter('all');
+      setArchiveSearchQuery('');
+    }
+  }, [showArchiveModal]);
+
   useEffect(() => {
     if (showArchiveModal) {
       fetchArchivedData();
@@ -491,7 +500,11 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       const dbClient = supabase;
 
       if (archiveTab === 'players') {
-        // ✅ JOIN with teams to get team name and league
+        console.log(`[ARCHIVE] Fetching archived players for org: ${orgId}`);
+        console.log(`[ARCHIVE] Active filters - League: ${archiveLeagueFilter}, Team: ${archiveTeamFilter}, Search: ${archiveSearchQuery}`);
+
+        // ✅ Try both applications and players tables
+        // First try applications with is_archived or status = 'archived'
         let query = dbClient
           .from('applications')
           .select('*, team:teams(id, name, league, logo_url)')
@@ -502,9 +515,44 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           query = query.eq('organization_id', orgId);
         }
 
-        const { data } = await query;
-        let res = data || [];
-        console.log(`[ARCHIVE] Raw data count: ${res.length}`);
+        const { data: applicationsData, error: appError } = await query;
+
+        // Also try players table
+        let playersQuery = dbClient
+          .from('players')
+          .select('*, team:teams(id, name, league, logo_url)')
+          .eq('is_archived', true)
+          .order('updated_at', { ascending: false});
+
+        if (orgId) {
+          playersQuery = playersQuery.eq('organization_id', orgId);
+        }
+
+        const { data: playersData, error: playersError } = await playersQuery;
+
+        if (appError) {
+          console.error('[ARCHIVE] Applications query error:', appError);
+        }
+        if (playersError) {
+          console.error('[ARCHIVE] Players query error:', playersError);
+        }
+
+        // Combine both sources, avoiding duplicates by ID
+        const applicationsMap = new Map();
+        (applicationsData || []).forEach((item: any) => applicationsMap.set(String(item.id), item));
+        (playersData || []).forEach((item: any) => {
+          if (!applicationsMap.has(String(item.id))) {
+            applicationsMap.set(String(item.id), item);
+          }
+        });
+
+        let res = Array.from(applicationsMap.values());
+        console.log(`[ARCHIVE] Applications count: ${applicationsData?.length || 0}`);
+        console.log(`[ARCHIVE] Players count: ${playersData?.length || 0}`);
+        console.log(`[ARCHIVE] Combined count: ${res.length}`);
+        if (res.length > 0) {
+          console.log(`[ARCHIVE] Sample item:`, JSON.stringify(res[0], null, 2));
+        }
 
         // ✅ Search filter
         if (archiveSearchQuery.trim()) {
