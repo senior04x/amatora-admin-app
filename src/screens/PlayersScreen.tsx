@@ -503,53 +503,25 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         console.log(`[ARCHIVE] Fetching archived players for org: ${orgId}`);
         console.log(`[ARCHIVE] Active filters - League: ${archiveLeagueFilter}, Team: ${archiveTeamFilter}, Search: ${archiveSearchQuery}`);
 
-        // ✅ Try both applications and players tables
-        // First try applications with is_archived or status = 'archived'
+        // ✅ Fetch from applications table only (players table doesn't exist)
         let query = dbClient
           .from('applications')
           .select('*, team:teams(id, name, league, logo_url)')
           .or('is_archived.eq.true,status.eq.archived')
-          .order('updated_at', { ascending: false });
+          .order('created_at', { ascending: false }); // ✅ Use created_at instead of updated_at
 
         if (orgId) {
           query = query.eq('organization_id', orgId);
         }
 
-        const { data: applicationsData, error: appError } = await query;
+        const { data, error } = await query;
 
-        // Also try players table
-        let playersQuery = dbClient
-          .from('players')
-          .select('*, team:teams(id, name, league, logo_url)')
-          .eq('is_archived', true)
-          .order('updated_at', { ascending: false});
-
-        if (orgId) {
-          playersQuery = playersQuery.eq('organization_id', orgId);
+        if (error) {
+          console.error('[ARCHIVE] Applications query error:', error);
         }
 
-        const { data: playersData, error: playersError } = await playersQuery;
-
-        if (appError) {
-          console.error('[ARCHIVE] Applications query error:', appError);
-        }
-        if (playersError) {
-          console.error('[ARCHIVE] Players query error:', playersError);
-        }
-
-        // Combine both sources, avoiding duplicates by ID
-        const applicationsMap = new Map();
-        (applicationsData || []).forEach((item: any) => applicationsMap.set(String(item.id), item));
-        (playersData || []).forEach((item: any) => {
-          if (!applicationsMap.has(String(item.id))) {
-            applicationsMap.set(String(item.id), item);
-          }
-        });
-
-        let res = Array.from(applicationsMap.values());
-        console.log(`[ARCHIVE] Applications count: ${applicationsData?.length || 0}`);
-        console.log(`[ARCHIVE] Players count: ${playersData?.length || 0}`);
-        console.log(`[ARCHIVE] Combined count: ${res.length}`);
+        let res = data || [];
+        console.log(`[ARCHIVE] Raw data count: ${res.length}`);
         if (res.length > 0) {
           console.log(`[ARCHIVE] Sample item:`, JSON.stringify(res[0], null, 2));
         }
@@ -623,9 +595,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         await dbClient.from('applications').update({ status: 'approved' }).eq('id', playerItem.id);
       }
 
-      try {
-        await dbClient.from('players').update({ is_archived: false }).eq('id', playerItem.id);
-      } catch (e) {}
 
       setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
@@ -839,10 +808,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       } catch (e) {
         await dbClient.from('applications').update({ status: 'archived' }).eq('id', itemToArchive.id);
       }
-
-      try {
-        await dbClient.from('players').update({ is_archived: true }).eq('id', itemToArchive.id);
-      } catch (e) {}
     } else {
       setAccumulatedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToArchive.id)));
       setArchivedTeams((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
@@ -876,7 +841,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       if (isPlayer) {
         setArchivedPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
         await dbClient.from('applications').delete().eq('id', itemToDelete.id);
-        await dbClient.from('players').delete().eq('id', itemToDelete.id);
         queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
         queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
       } else {
@@ -922,9 +886,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         await dbClient.from('applications').update({ status: 'approved' }).eq('id', playerItem.id);
       }
 
-      try {
-        await dbClient.from('players').update({ is_archived: false }).eq('id', playerItem.id);
-      } catch (e) {}
 
       setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
@@ -966,18 +927,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             passport_series: editForm.passport_series,
             passport_number: editForm.passport_number,
             player_number: editForm.player_number ? Number(editForm.player_number) : null,
-          })
-          .eq('id', selectedItem.id);
-
-        // Update players table
-        await dbClient
-          .from('players')
-          .update({
-            first_name: editForm.first_name,
-            last_name: editForm.last_name,
-            full_name: combinedFullName,
-            position: editForm.position,
-            phone: editForm.phone,
           })
           .eq('id', selectedItem.id);
 
@@ -1852,7 +1801,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 const avatar = item.avatar_url || item.photo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop';
                 const teamName = item.team?.name || item.team_name || "Jamoasiz";
                 const league = item.team?.league || item.league || "";
-                const archivedDate = item.updated_at ? new Date(item.updated_at).toLocaleDateString('uz-UZ', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+                const archivedDate = item.created_at ? new Date(item.created_at).toLocaleDateString('uz-UZ', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 
                 return (
                   <View style={styles.archiveCardRow}>
