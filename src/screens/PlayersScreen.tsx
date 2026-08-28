@@ -396,6 +396,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const [archiveSearchQuery, setArchiveSearchQuery] = useState<string>('');
   const [archiveLeagueFilter, setArchiveLeagueFilter] = useState<string>('all');
   const [archiveTeamFilter, setArchiveTeamFilter] = useState<string>('all');
+  const [showArchiveFilterModal, setShowArchiveFilterModal] = useState(false);
 
   // Registration Switch Toggling State
   const [togglingReg, setTogglingReg] = useState(false);
@@ -1725,63 +1726,38 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             </TouchableOpacity>
           </View>
 
-          {/* Archive Search Bar */}
-          <View style={styles.archiveSearchContainer}>
-            <Ionicons name="search" size={18} color="rgba(255,255,255,0.5)" />
-            <TextInput
-              style={styles.archiveSearchInput}
-              placeholder={archiveTab === 'players' ? "Arxivdagi o'yinchini qidirish..." : "Arxivdagi jamoani qidirish..."}
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              value={archiveSearchQuery}
-              onChangeText={setArchiveSearchQuery}
-            />
-            {archiveSearchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setArchiveSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+          {/* Archive Search and Filter Bar */}
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+            <View style={[styles.archiveSearchContainer, { flex: 1 }]}>
+              <Ionicons name="search" size={18} color="rgba(255,255,255,0.5)" />
+              <TextInput
+                style={styles.archiveSearchInput}
+                placeholder={archiveTab === 'players' ? "Arxivdagi o'yinchini qidirish..." : "Arxivdagi jamoani qidirish..."}
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                value={archiveSearchQuery}
+                onChangeText={setArchiveSearchQuery}
+              />
+              {archiveSearchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setArchiveSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Filter Button (Players tab only) */}
+            {archiveTab === 'players' && (
+              <TouchableOpacity
+                style={[styles.archiveFilterBtn, (archiveLeagueFilter !== 'all') && styles.archiveFilterBtnActive]}
+                onPress={() => setShowArchiveFilterModal(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="filter" size={18} color={(archiveLeagueFilter !== 'all') ? '#F59E0B' : 'rgba(255,255,255,0.7)'} />
+                {(archiveLeagueFilter !== 'all') && (
+                  <View style={styles.archiveFilterBadge} />
+                )}
               </TouchableOpacity>
             )}
           </View>
-
-          {/* Archive Filters (Players tab only) */}
-          {archiveTab === 'players' && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 4, gap: 6 }}
-              style={{ maxHeight: 50 }}
-            >
-              {/* Quick filter chips - Ligalar */}
-              {leagues.map((lg: any) => (
-                <TouchableOpacity
-                  key={lg.name}
-                  style={[styles.filterChip, archiveLeagueFilter === lg.name && styles.filterChipActive]}
-                  onPress={() => setArchiveLeagueFilter(archiveLeagueFilter === lg.name ? 'all' : lg.name)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="trophy"
-                    size={12}
-                    color={archiveLeagueFilter === lg.name ? '#000000' : 'rgba(255,255,255,0.6)'}
-                  />
-                  <Text style={[styles.filterChipText, archiveLeagueFilter === lg.name && styles.filterChipTextActive]}>
-                    {lg.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* Reset filter */}
-              {archiveLeagueFilter !== 'all' && (
-                <TouchableOpacity
-                  style={styles.filterChipReset}
-                  onPress={() => setArchiveLeagueFilter('all')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="close-circle" size={14} color="#EF4444" />
-                  <Text style={styles.filterChipResetText}>Tozalash</Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-          )}
 
           {/* Content List */}
           {loadingArchive ? (
@@ -1874,6 +1850,71 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             />
           )}
         </View>
+      </Modal>
+
+      {/* Archive Filter Modal */}
+      <Modal visible={showArchiveFilterModal} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.archiveFilterOverlay}
+          activeOpacity={1}
+          onPress={() => setShowArchiveFilterModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.archiveFilterCard}
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900' }}>Filter</Text>
+              <TouchableOpacity onPress={() => setShowArchiveFilterModal(false)}>
+                <Ionicons name="close" size={24} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Liga tanlash */}
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', marginBottom: 8 }}>
+              LIGA
+            </Text>
+            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={[styles.archiveFilterOption, archiveLeagueFilter === 'all' && styles.archiveFilterOptionActive]}
+                onPress={() => {
+                  setArchiveLeagueFilter('all');
+                  setShowArchiveFilterModal(false);
+                }}
+              >
+                <Ionicons
+                  name={archiveLeagueFilter === 'all' ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={20}
+                  color={archiveLeagueFilter === 'all' ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
+                />
+                <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === 'all' && styles.archiveFilterOptionTextActive]}>
+                  Barcha ligalar
+                </Text>
+              </TouchableOpacity>
+
+              {leagues.map((lg: any) => (
+                <TouchableOpacity
+                  key={lg.name}
+                  style={[styles.archiveFilterOption, archiveLeagueFilter === lg.name && styles.archiveFilterOptionActive]}
+                  onPress={() => {
+                    setArchiveLeagueFilter(lg.name);
+                    setShowArchiveFilterModal(false);
+                  }}
+                >
+                  <Ionicons
+                    name={archiveLeagueFilter === lg.name ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={20}
+                    color={archiveLeagueFilter === lg.name ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
+                  />
+                  <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === lg.name && styles.archiveFilterOptionTextActive]}>
+                    {lg.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -2515,45 +2556,62 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
+  archiveFilterBtn: {
+    width: 50,
+    height: 44,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  archiveFilterBtnActive: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderColor: '#F59E0B',
+  },
+  archiveFilterBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F59E0B',
+  },
+  archiveFilterOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  archiveFilterCard: {
+    backgroundColor: '#1E293B',
     borderRadius: 20,
+    padding: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  filterChipActive: {
-    backgroundColor: '#F59E0B',
-    borderColor: '#F59E0B',
-  },
-  filterChipText: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  filterChipTextActive: {
-    color: '#000000',
-    fontWeight: '900',
-  },
-  filterChipReset: {
+  archiveFilterOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#EF4444',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 6,
   },
-  filterChipResetText: {
-    color: '#EF4444',
-    fontSize: 11,
-    fontWeight: '700',
+  archiveFilterOptionActive: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+  },
+  archiveFilterOptionText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  archiveFilterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
   archiveCardRow: {
     flexDirection: 'row',
