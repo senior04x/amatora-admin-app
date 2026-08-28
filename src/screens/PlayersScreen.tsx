@@ -394,6 +394,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const [archivedTeams, setArchivedTeams] = useState<any[]>([]);
   const [loadingArchive, setLoadingArchive] = useState<boolean>(false);
   const [archiveSearchQuery, setArchiveSearchQuery] = useState<string>('');
+  const [archiveLeagueFilter, setArchiveLeagueFilter] = useState<string>('all');
+  const [archiveTeamFilter, setArchiveTeamFilter] = useState<string>('all');
 
   // Registration Switch Toggling State
   const [togglingReg, setTogglingReg] = useState(false);
@@ -481,7 +483,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     if (showArchiveModal) {
       fetchArchivedData();
     }
-  }, [showArchiveModal, archiveTab, archiveSearchQuery]);
+  }, [showArchiveModal, archiveTab, archiveSearchQuery, archiveLeagueFilter, archiveTeamFilter]);
 
   const fetchArchivedData = async () => {
     setLoadingArchive(true);
@@ -489,11 +491,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       const dbClient = supabase;
 
       if (archiveTab === 'players') {
+        // ✅ JOIN with teams to get team name and league
         let query = dbClient
           .from('applications')
-          .select('*')
+          .select('*, team:teams(id, name, league, logo_url)')
           .or('is_archived.eq.true,status.eq.archived')
-          .order('created_at', { ascending: false });
+          .order('updated_at', { ascending: false });
 
         if (orgId) {
           query = query.eq('organization_id', orgId);
@@ -501,6 +504,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
         const { data } = await query;
         let res = data || [];
+
+        // ✅ Search filter
         if (archiveSearchQuery.trim()) {
           const q = archiveSearchQuery.toLowerCase().trim();
           res = res.filter((p: any) => {
@@ -508,9 +513,21 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             const ln = (p.last_name || '').toLowerCase();
             const full = (p.full_name || '').toLowerCase();
             const phone = (p.phone || '').toLowerCase();
-            return fn.includes(q) || ln.includes(q) || full.includes(q) || phone.includes(q);
+            const teamName = (p.team?.name || '').toLowerCase();
+            return fn.includes(q) || ln.includes(q) || full.includes(q) || phone.includes(q) || teamName.includes(q);
           });
         }
+
+        // ✅ League filter
+        if (archiveLeagueFilter !== 'all') {
+          res = res.filter((p: any) => p.team?.league === archiveLeagueFilter);
+        }
+
+        // ✅ Team filter
+        if (archiveTeamFilter !== 'all') {
+          res = res.filter((p: any) => String(p.team_id) === String(archiveTeamFilter));
+        }
+
         setArchivedPlayers(res);
       } else {
         let query = dbClient
@@ -1719,6 +1736,63 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             )}
           </View>
 
+          {/* Archive Filters (Players tab only) */}
+          {archiveTab === 'players' && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}
+            >
+              {/* Liga filter */}
+              <TouchableOpacity
+                style={[styles.filterChip, archiveLeagueFilter !== 'all' && styles.filterChipActive]}
+                onPress={() => setArchiveLeagueFilter(archiveLeagueFilter === 'all' ? (leagues[0]?.name || 'all') : 'all')}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trophy" size={14} color={archiveLeagueFilter !== 'all' ? '#F59E0B' : 'rgba(255,255,255,0.6)'} />
+                <Text style={[styles.filterChipText, archiveLeagueFilter !== 'all' && styles.filterChipTextActive]}>
+                  {archiveLeagueFilter === 'all' ? 'Barcha ligalar' : archiveLeagueFilter}
+                </Text>
+                {archiveLeagueFilter !== 'all' && (
+                  <TouchableOpacity onPress={() => setArchiveLeagueFilter('all')}>
+                    <Ionicons name="close-circle" size={14} color="#F59E0B" />
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+
+              {/* Team filter */}
+              <TouchableOpacity
+                style={[styles.filterChip, archiveTeamFilter !== 'all' && styles.filterChipActive]}
+                onPress={() => setArchiveTeamFilter('all')}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="shield" size={14} color={archiveTeamFilter !== 'all' ? '#F59E0B' : 'rgba(255,255,255,0.6)'} />
+                <Text style={[styles.filterChipText, archiveTeamFilter !== 'all' && styles.filterChipTextActive]}>
+                  {archiveTeamFilter === 'all' ? 'Barcha jamoalar' : (allTeamsList.find((t: any) => String(t.id) === String(archiveTeamFilter))?.name || 'Jamoa')}
+                </Text>
+                {archiveTeamFilter !== 'all' && (
+                  <TouchableOpacity onPress={() => setArchiveTeamFilter('all')}>
+                    <Ionicons name="close-circle" size={14} color="#F59E0B" />
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+
+              {/* Quick filter chips */}
+              {leagues.slice(0, 3).map((lg: any) => (
+                <TouchableOpacity
+                  key={lg.name}
+                  style={[styles.filterChip, archiveLeagueFilter === lg.name && styles.filterChipActive]}
+                  onPress={() => setArchiveLeagueFilter(archiveLeagueFilter === lg.name ? 'all' : lg.name)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.filterChipText, archiveLeagueFilter === lg.name && styles.filterChipTextActive]}>
+                    {lg.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
           {/* Content List */}
           {loadingArchive ? (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -1735,14 +1809,26 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               renderItem={({ item }) => {
                 const name = item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.name;
                 const avatar = item.avatar_url || item.photo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop';
+                const teamName = item.team?.name || item.team_name || "Jamoasiz";
+                const league = item.team?.league || item.league || "";
+                const archivedDate = item.updated_at ? new Date(item.updated_at).toLocaleDateString('uz-UZ', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+
                 return (
                   <View style={styles.archiveCardRow}>
                     <ExpoImage source={{ uri: avatar }} style={styles.archiveAvatar} />
-                    <View style={{ flex: 1, gap: 2 }}>
+                    <View style={{ flex: 1, gap: 4 }}>
                       <Text style={styles.archiveItemTitle}>{name}</Text>
                       <Text style={styles.archiveItemSub}>
-                        {item.team_name ? `Jamoa: ${item.team_name}` : (item.phone || "Telefon yo'q")}
+                        <Ionicons name="shield" size={12} color="rgba(255,255,255,0.5)" />
+                        {` ${teamName}`}
+                        {league && ` • ${league}`}
                       </Text>
+                      {archivedDate && (
+                        <Text style={[styles.archiveItemSub, { fontSize: 11, color: 'rgba(255,255,255,0.4)' }]}>
+                          <Ionicons name="time-outline" size={11} />
+                          {` Arxivlangan: ${archivedDate}`}
+                        </Text>
+                      )}
                     </View>
                     <TouchableOpacity
                       style={styles.restoreBtn}
@@ -2438,6 +2524,30 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '600',
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  filterChipActive: {
+    backgroundColor: '#F59E0B',
+    borderColor: '#F59E0B',
+  },
+  filterChipText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  filterChipTextActive: {
+    color: '#000000',
+    fontWeight: '900',
   },
   archiveCardRow: {
     flexDirection: 'row',
