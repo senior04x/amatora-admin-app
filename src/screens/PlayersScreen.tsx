@@ -1748,7 +1748,10 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             {archiveTab === 'players' && (
               <TouchableOpacity
                 style={[styles.archiveFilterBtn, (archiveLeagueFilter !== 'all') && styles.archiveFilterBtnActive]}
-                onPress={() => setShowArchiveFilterModal(true)}
+                onPress={() => {
+                  console.log('[FILTER] Opening filter modal');
+                  setShowArchiveFilterModal(true);
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons name="filter" size={18} color={(archiveLeagueFilter !== 'all') ? '#F59E0B' : 'rgba(255,255,255,0.7)'} />
@@ -1849,72 +1852,73 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               )}
             />
           )}
-        </View>
-      </Modal>
 
-      {/* Archive Filter Modal */}
-      <Modal visible={showArchiveFilterModal} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.archiveFilterOverlay}
-          activeOpacity={1}
-          onPress={() => setShowArchiveFilterModal(false)}
-        >
-          <TouchableOpacity
-            style={styles.archiveFilterCard}
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900' }}>Filter</Text>
-              <TouchableOpacity onPress={() => setShowArchiveFilterModal(false)}>
-                <Ionicons name="close" size={24} color="rgba(255,255,255,0.7)" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Liga tanlash */}
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', marginBottom: 8 }}>
-              LIGA
-            </Text>
-            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+          {/* Archive Filter Modal - Inside Archive Modal */}
+          <Modal visible={showArchiveFilterModal} transparent animationType="fade">
+            {console.log('[FILTER] Modal render - visible:', showArchiveFilterModal)}
+            <TouchableOpacity
+              style={styles.archiveFilterOverlay}
+              activeOpacity={1}
+              onPress={() => setShowArchiveFilterModal(false)}
+            >
               <TouchableOpacity
-                style={[styles.archiveFilterOption, archiveLeagueFilter === 'all' && styles.archiveFilterOptionActive]}
-                onPress={() => {
-                  setArchiveLeagueFilter('all');
-                  setShowArchiveFilterModal(false);
-                }}
+                style={styles.archiveFilterCard}
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation()}
               >
-                <Ionicons
-                  name={archiveLeagueFilter === 'all' ? 'checkmark-circle' : 'ellipse-outline'}
-                  size={20}
-                  color={archiveLeagueFilter === 'all' ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
-                />
-                <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === 'all' && styles.archiveFilterOptionTextActive]}>
-                  Barcha ligalar
-                </Text>
-              </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900' }}>Filter</Text>
+                  <TouchableOpacity onPress={() => setShowArchiveFilterModal(false)}>
+                    <Ionicons name="close" size={24} color="rgba(255,255,255,0.7)" />
+                  </TouchableOpacity>
+                </View>
 
-              {leagues.map((lg: any) => (
-                <TouchableOpacity
-                  key={lg.name}
-                  style={[styles.archiveFilterOption, archiveLeagueFilter === lg.name && styles.archiveFilterOptionActive]}
-                  onPress={() => {
-                    setArchiveLeagueFilter(lg.name);
-                    setShowArchiveFilterModal(false);
-                  }}
-                >
-                  <Ionicons
-                    name={archiveLeagueFilter === lg.name ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={20}
-                    color={archiveLeagueFilter === lg.name ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
-                  />
-                  <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === lg.name && styles.archiveFilterOptionTextActive]}>
-                    {lg.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
+                {/* Liga tanlash */}
+                <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', marginBottom: 8 }}>
+                  LIGA
+                </Text>
+                <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+                  <TouchableOpacity
+                    style={[styles.archiveFilterOption, archiveLeagueFilter === 'all' && styles.archiveFilterOptionActive]}
+                    onPress={() => {
+                      setArchiveLeagueFilter('all');
+                      setShowArchiveFilterModal(false);
+                    }}
+                  >
+                    <Ionicons
+                      name={archiveLeagueFilter === 'all' ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={20}
+                      color={archiveLeagueFilter === 'all' ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
+                    />
+                    <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === 'all' && styles.archiveFilterOptionTextActive]}>
+                      Barcha ligalar
+                    </Text>
+                  </TouchableOpacity>
+
+                  {leagues.map((lg: any) => (
+                    <TouchableOpacity
+                      key={lg.name}
+                      style={[styles.archiveFilterOption, archiveLeagueFilter === lg.name && styles.archiveFilterOptionActive]}
+                      onPress={() => {
+                        setArchiveLeagueFilter(lg.name);
+                        setShowArchiveFilterModal(false);
+                      }}
+                    >
+                      <Ionicons
+                        name={archiveLeagueFilter === lg.name ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={20}
+                        color={archiveLeagueFilter === lg.name ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
+                      />
+                      <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === lg.name && styles.archiveFilterOptionTextActive]}>
+                        {lg.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+        </View>
       </Modal>
     </View>
   );
