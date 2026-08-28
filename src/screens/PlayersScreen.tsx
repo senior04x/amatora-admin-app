@@ -504,6 +504,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
         const { data } = await query;
         let res = data || [];
+        console.log(`[ARCHIVE] Raw data count: ${res.length}`);
 
         // ✅ Search filter
         if (archiveSearchQuery.trim()) {
@@ -520,14 +521,22 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
         // ✅ League filter
         if (archiveLeagueFilter !== 'all') {
-          res = res.filter((p: any) => p.team?.league === archiveLeagueFilter);
+          console.log(`[ARCHIVE] Filtering by league: ${archiveLeagueFilter}`);
+          res = res.filter((p: any) => {
+            const playerLeague = p.team?.league || p.league || '';
+            return playerLeague === archiveLeagueFilter;
+          });
+          console.log(`[ARCHIVE] After league filter: ${res.length}`);
         }
 
         // ✅ Team filter
         if (archiveTeamFilter !== 'all') {
+          console.log(`[ARCHIVE] Filtering by team: ${archiveTeamFilter}`);
           res = res.filter((p: any) => String(p.team_id) === String(archiveTeamFilter));
+          console.log(`[ARCHIVE] After team filter: ${res.length}`);
         }
 
+        console.log(`[ARCHIVE] Final count: ${res.length}`);
         setArchivedPlayers(res);
       } else {
         let query = dbClient
@@ -1741,55 +1750,39 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 8 }}
+              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 4, gap: 6 }}
+              style={{ maxHeight: 50 }}
             >
-              {/* Liga filter */}
-              <TouchableOpacity
-                style={[styles.filterChip, archiveLeagueFilter !== 'all' && styles.filterChipActive]}
-                onPress={() => setArchiveLeagueFilter(archiveLeagueFilter === 'all' ? (leagues[0]?.name || 'all') : 'all')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="trophy" size={14} color={archiveLeagueFilter !== 'all' ? '#F59E0B' : 'rgba(255,255,255,0.6)'} />
-                <Text style={[styles.filterChipText, archiveLeagueFilter !== 'all' && styles.filterChipTextActive]}>
-                  {archiveLeagueFilter === 'all' ? 'Barcha ligalar' : archiveLeagueFilter}
-                </Text>
-                {archiveLeagueFilter !== 'all' && (
-                  <TouchableOpacity onPress={() => setArchiveLeagueFilter('all')}>
-                    <Ionicons name="close-circle" size={14} color="#F59E0B" />
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-
-              {/* Team filter */}
-              <TouchableOpacity
-                style={[styles.filterChip, archiveTeamFilter !== 'all' && styles.filterChipActive]}
-                onPress={() => setArchiveTeamFilter('all')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="shield" size={14} color={archiveTeamFilter !== 'all' ? '#F59E0B' : 'rgba(255,255,255,0.6)'} />
-                <Text style={[styles.filterChipText, archiveTeamFilter !== 'all' && styles.filterChipTextActive]}>
-                  {archiveTeamFilter === 'all' ? 'Barcha jamoalar' : (allTeamsList.find((t: any) => String(t.id) === String(archiveTeamFilter))?.name || 'Jamoa')}
-                </Text>
-                {archiveTeamFilter !== 'all' && (
-                  <TouchableOpacity onPress={() => setArchiveTeamFilter('all')}>
-                    <Ionicons name="close-circle" size={14} color="#F59E0B" />
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-
-              {/* Quick filter chips */}
-              {leagues.slice(0, 3).map((lg: any) => (
+              {/* Quick filter chips - Ligalar */}
+              {leagues.map((lg: any) => (
                 <TouchableOpacity
                   key={lg.name}
                   style={[styles.filterChip, archiveLeagueFilter === lg.name && styles.filterChipActive]}
                   onPress={() => setArchiveLeagueFilter(archiveLeagueFilter === lg.name ? 'all' : lg.name)}
                   activeOpacity={0.7}
                 >
+                  <Ionicons
+                    name="trophy"
+                    size={12}
+                    color={archiveLeagueFilter === lg.name ? '#000000' : 'rgba(255,255,255,0.6)'}
+                  />
                   <Text style={[styles.filterChipText, archiveLeagueFilter === lg.name && styles.filterChipTextActive]}>
                     {lg.name}
                   </Text>
                 </TouchableOpacity>
               ))}
+
+              {/* Reset filter */}
+              {archiveLeagueFilter !== 'all' && (
+                <TouchableOpacity
+                  style={styles.filterChipReset}
+                  onPress={() => setArchiveLeagueFilter('all')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close-circle" size={14} color="#EF4444" />
+                  <Text style={styles.filterChipResetText}>Tozalash</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           )}
 
@@ -2528,10 +2521,10 @@ const styles = StyleSheet.create({
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -2548,6 +2541,22 @@ const styles = StyleSheet.create({
   filterChipTextActive: {
     color: '#000000',
     fontWeight: '900',
+  },
+  filterChipReset: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  filterChipResetText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontWeight: '700',
   },
   archiveCardRow: {
     flexDirection: 'row',
