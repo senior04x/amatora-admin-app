@@ -123,6 +123,7 @@ const SwipeablePlayerCard = ({
             useNativeDriver: true,
             bounciness: 6,
           }).start();
+          onSwipeOpen(); // ✅ FIX: Notify parent that card is opened
         } else {
           // Snap Closed (0px)
           Animated.spring(panX, {
