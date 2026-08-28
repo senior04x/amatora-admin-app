@@ -14,7 +14,8 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+// 🔒 SECURITY FIX: supabase olib tashlandi, faqat supabase (anon + RLS) ishlatiladi
+import { supabase } from '../supabaseClient';
 
 // Google OAuth credentials — mobile uses PKCE OAuth flow without client secret
 const GOOGLE_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
@@ -69,7 +70,7 @@ export const saveYtTokens = async (
 
     // 2. Persist to Supabase organizations.yt_tokens (primary DB storage)
     try {
-      await supabaseAdmin
+      await supabase
         .from('organizations')
         .update({ yt_tokens: payloadStr })
         .eq('id', orgId);
@@ -80,19 +81,19 @@ export const saveYtTokens = async (
     // 3. Fallback: sponsors table (guaranteed cross-device persistence)
     try {
       const configName = `YT_OAUTH_TOKENS_${orgId}`;
-      const { data: existing } = await supabaseAdmin
+      const { data: existing } = await supabase
         .from('sponsors')
         .select('id')
         .eq('name', configName)
         .maybeSingle();
 
       if (existing) {
-        await supabaseAdmin
+        await supabase
           .from('sponsors')
           .update({ logo_url: payloadStr, organization_id: orgId })
           .eq('id', existing.id);
       } else {
-        await supabaseAdmin
+        await supabase
           .from('sponsors')
           .insert([{
             name: configName,
@@ -120,7 +121,7 @@ export const getYtTokens = async (orgId: number): Promise<YtTokens | null> => {
 
   // 2. Check Supabase organizations.yt_tokens
   try {
-    const { data } = await supabaseAdmin
+    const { data } = await supabase
       .from('organizations')
       .select('yt_tokens')
       .eq('id', orgId)
@@ -139,7 +140,7 @@ export const getYtTokens = async (orgId: number): Promise<YtTokens | null> => {
   // 3. Fallback: sponsors table
   try {
     const configName = `YT_OAUTH_TOKENS_${orgId}`;
-    const { data } = await supabaseAdmin
+    const { data } = await supabase
       .from('sponsors')
       .select('logo_url')
       .eq('name', configName)
@@ -276,7 +277,7 @@ export const disconnectYouTube = async (orgId: number): Promise<void> => {
 
   // 2. Clear organizations.yt_tokens
   try {
-    await supabaseAdmin
+    await supabase
       .from('organizations')
       .update({ yt_tokens: null })
       .eq('id', orgId);
@@ -284,7 +285,7 @@ export const disconnectYouTube = async (orgId: number): Promise<void> => {
 
   // 3. Clear sponsors table fallback
   try {
-    await supabaseAdmin
+    await supabase
       .from('sponsors')
       .delete()
       .eq('name', `YT_OAUTH_TOKENS_${orgId}`);
