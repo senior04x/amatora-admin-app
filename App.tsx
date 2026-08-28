@@ -144,9 +144,26 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       }
     };
 
-    fetchPendingCount();
-    const interval = setInterval(fetchPendingCount, 10000);
-    return () => clearInterval(interval);
+    // 🔥 PERFORMANCE FIX: Realtime subscription o'rniga polling
+    // Before: 100 admin × 10s = 10 query/s = 864,000 query/day (database never rests!)
+    // After: 100 admin × on INSERT event = faqat yangi ariza kelganda query
+
+    fetchPendingCount(); // Initial load
+
+    const channel = supabase.channel('admin_pending_count')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'applications',
+        filter: `organization_id=eq.${currentOrg?.id}`
+      }, () => {
+        fetchPendingCount(); // Faqat yangi ariza kelganda
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [currentOrg?.id]);
 
   // 🔔 Register Admin Push Token & Deep Link Listener
