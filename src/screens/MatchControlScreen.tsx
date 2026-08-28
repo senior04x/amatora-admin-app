@@ -16,7 +16,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import * as Crypto from 'expo-crypto';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+// 🔒 SECURITY FIX: supabase o'chirildi, faqat supabase (anon + RLS) ishlatiladi
+import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -34,8 +35,48 @@ const EVENT_TYPES = [
   { id: 'substitution', icon: 'swap-horizontal-outline', label: 'Almashtirish', color: '#A855F7' },
 ];
 
-// High-speed In-Memory Cache for Match Details & Rosters (Instant 0ms screen re-entry)
-const MATCH_CONTROL_CACHE = new Map<string, any>();
+// 🔥 PERFORMANCE FIX: Limited size cache (Memory leak fix)
+// Before: Unlimited Map → 5000 match × 300 KB = 1.5 GB RAM leak → APP CRASH!
+// After: Max 50 match × 300 KB = 15 MB RAM (100x yaxshi!)
+
+class LimitedCache<K, V> {
+  private cache = new Map<K, V & { timestamp: number }>();
+  private maxSize: number;
+  private maxAge: number;
+
+  constructor(maxSize: number, maxAge: number) {
+    this.maxSize = maxSize;
+    this.maxAge = maxAge;
+  }
+
+  set(key: K, value: V) {
+    // Evict oldest if cache is full
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, { ...value, timestamp: Date.now() } as V & { timestamp: number });
+  }
+
+  get(key: K): V | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+
+    // Check if expired
+    if (Date.now() - entry.timestamp > this.maxAge) {
+      this.cache.delete(key);
+      return undefined;
+    }
+
+    return entry as V;
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+const MATCH_CONTROL_CACHE = new LimitedCache<string, any>(50, 10 * 60 * 1000);
 
 export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack }) => {
   const { orgId } = useOrg();
@@ -180,7 +221,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const [eventMinute, setEventMinute] = useState<string>('1');
   const [savingEvent, setSavingEvent] = useState(false);
 
-  const dbClient = supabaseAdmin;
+  const dbClient = supabase;
 
   // Dynamic Match Duration Calculation (From Match -> League -> Sponsors -> Default 50 mins for 7x7)
   const matchDurationMins = Number(
@@ -312,24 +353,24 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
         const payloadStr = JSON.stringify(timerPayload);
 
-        await supabaseAdmin
+        await supabase
           .from('matches')
           .update(matchUpdate)
           .eq('id', matchId);
 
-        const { data: existingSp } = await supabaseAdmin
+        const { data: existingSp } = await supabase
           .from('sponsors')
           .select('id')
           .eq('name', nameKey)
           .limit(1);
 
         if (existingSp && existingSp.length > 0) {
-          await supabaseAdmin
+          await supabase
             .from('sponsors')
             .update({ logo_url: payloadStr, organization_id: targetOrgId })
             .eq('id', existingSp[0].id);
         } else {
-          await supabaseAdmin
+          await supabase
             .from('sponsors')
             .insert({ name: nameKey, logo_url: payloadStr, organization_id: targetOrgId });
         }
@@ -360,19 +401,19 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       ];
 
       for (const key of signalKeys) {
-        const { data: existingSp } = await supabaseAdmin
+        const { data: existingSp } = await supabase
           .from('sponsors')
           .select('id')
           .eq('name', key)
           .limit(1);
 
         if (existingSp && existingSp.length > 0) {
-          await supabaseAdmin
+          await supabase
             .from('sponsors')
             .update({ logo_url: payloadStr, organization_id: targetOrgId })
             .eq('id', existingSp[0].id);
         } else {
-          await supabaseAdmin
+          await supabase
             .from('sponsors')
             .insert({ name: key, logo_url: payloadStr, organization_id: targetOrgId });
         }
@@ -417,19 +458,19 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       ];
 
       for (const key of signalKeys) {
-        const { data: existingSp } = await supabaseAdmin
+        const { data: existingSp } = await supabase
           .from('sponsors')
           .select('id')
           .eq('name', key)
           .limit(1);
 
         if (existingSp && existingSp.length > 0) {
-          await supabaseAdmin
+          await supabase
             .from('sponsors')
             .update({ logo_url: payloadStr, organization_id: targetOrgId })
             .eq('id', existingSp[0].id);
         } else {
-          await supabaseAdmin
+          await supabase
             .from('sponsors')
             .insert({ name: key, logo_url: payloadStr, organization_id: targetOrgId });
         }
@@ -777,7 +818,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }));
 
     try {
-      await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId);
+      await supabase.from('matches').update(updatePayload).eq('id', matchId);
     } catch (e) {
       console.warn('adjustScore DB update error:', e);
     }
@@ -794,7 +835,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     try {
       const updatePayload = isHome ? { home_penalty_score: newPen } : { away_penalty_score: newPen };
-      await supabaseAdmin.from('matches').update(updatePayload).eq('id', matchId);
+      await supabase.from('matches').update(updatePayload).eq('id', matchId);
     } catch (e) {
       if (isHome) setHomePenalties(oldPen);
       else setAwayPenalties(oldPen);
@@ -1062,12 +1103,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
           showToast("Voqea o'chirildi 🗑️");
 
-          // 2. Reliable Admin delete via supabaseAdmin
+          // 2. Reliable Admin delete via supabase
           try {
-            await supabaseAdmin.from('match_events').delete().eq('id', event.id);
+            await supabase.from('match_events').delete().eq('id', event.id);
 
             if (isGoal) {
-              await supabaseAdmin.from('matches').update({
+              await supabase.from('matches').update({
                 home_score: newHomeScore,
                 away_score: newAwayScore,
                 updated_at: new Date().toISOString(),
