@@ -11,13 +11,15 @@ import {
   Modal,
   ImageBackground,
   Animated,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import ViewShot from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 
 // Helper component for scaling 1080x1080 canvas graphics for device previews
@@ -82,6 +84,7 @@ const ScaledCanvasPreview = ({
 
 // Skeleton Loader Pulse Item Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
+  const { isDark, colors } = useTheme();
   const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
@@ -107,7 +110,7 @@ const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
     <Animated.View
       style={[
         {
-          backgroundColor: '#334155',
+          backgroundColor: Platform.OS === 'android' ? (isDark ? '#334155' : '#E2E8F0') : '#334155',
           borderRadius: 12,
         },
         style,
@@ -119,10 +122,11 @@ const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
 
 // Full Screen Cards Skeleton Component
 const ExportSkeleton: React.FC = () => {
+  const { colors } = useTheme();
   return (
     <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
       {[1, 2, 3, 4].map((key) => (
-        <View key={key} style={styles.exportSectionCard}>
+        <View key={key} style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           {/* Card Header Skeleton */}
           <View style={styles.sectionHeaderRow}>
             <View style={{ flex: 1, gap: 8 }}>
@@ -165,8 +169,100 @@ const ExportSkeleton: React.FC = () => {
   );
 };
 
+export const compareMatches = (a: any, b: any) => {
+  // 1. Sort by match_date (ascending: earlier date first)
+  const dateA = a?.match_date ? String(a.match_date).trim() : '';
+  const dateB = b?.match_date ? String(b.match_date).trim() : '';
+  if (dateA !== dateB) {
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    return dateA.localeCompare(dateB);
+  }
+
+  // 2. Sort by match_time (ascending: earlier time first, e.g. 20:45 before 21:45)
+  const timeA = a?.match_time ? String(a.match_time).trim().substring(0, 5) : '';
+  const timeB = b?.match_time ? String(b.match_time).trim().substring(0, 5) : '';
+  if (timeA !== timeB) {
+    if (!timeA) return 1;
+    if (!timeB) return -1;
+    return timeA.localeCompare(timeB);
+  }
+
+  // 3. Sort by field / location (1-maydon before 2-maydon)
+  const getFieldNum = (loc: any) => {
+    if (!loc) return 999;
+    const match = String(loc).match(/\d+/);
+    return match ? parseInt(match[0], 10) : 999;
+  };
+
+  const fieldA = getFieldNum(a?.location);
+  const fieldB = getFieldNum(b?.location);
+  if (fieldA !== fieldB) {
+    return fieldA - fieldB;
+  }
+
+  const locA = String(a?.location || '').toLowerCase();
+  const locB = String(b?.location || '').toLowerCase();
+  if (locA !== locB) {
+    return locA.localeCompare(locB);
+  }
+
+  // 4. Fallback ID
+  return (a?.id || 0) - (b?.id || 0);
+};
+
+export const isRealSponsor = (s: any) => {
+  if (!s || !s.name) return false;
+  const uName = String(s.name).trim().toUpperCase();
+  const rawUrl = String(s.logo_url || '').trim();
+  const uUrl = rawUrl.toUpperCase();
+
+  // 1. Filter out all system config keys, banners, tokens, timers, remote triggers, overrides
+  if (
+    uName.startsWith('BANNER_') ||
+    uName.startsWith('SCHEDULE_BANNER') ||
+    uName.startsWith('YT_BANNER') ||
+    uName.startsWith('YT_OAUTH') ||
+    uName.startsWith('MATCH_TIMER') ||
+    uName.startsWith('REMOTE_') ||
+    uName.includes('REMOTE_FINISH') ||
+    uName.includes('REMOTE_GOAL') ||
+    uName.includes('MATCH_TIMER') ||
+    uName.startsWith('LEAGUE_SHOW_SPONSORS') ||
+    uName.startsWith('STANDINGS_OVERRIDE') ||
+    uName.startsWith('REGISTRATION_OPEN') ||
+    uName.startsWith('POLL_VOTES') ||
+    uName.startsWith('LEAGUE_BG') ||
+    uName.startsWith('EXPORT_BG') ||
+    uName.startsWith('BG_') ||
+    uName.endsWith('_BG') ||
+    uName.includes('BACKGROUND') ||
+    uUrl.includes('EXPO_PUSH') ||
+    uUrl.includes('LEAGUE-BACKGROUNDS') ||
+    uUrl.includes('LEAGUE_BG') ||
+    uUrl.includes('EXPORT_BG') ||
+    uUrl.includes('EXPORT-BG')
+  ) {
+    return false;
+  }
+
+  // 2. Must have a valid image URL (not JSON string or boolean)
+  if (
+    rawUrl.startsWith('{') ||
+    rawUrl.startsWith('[') ||
+    rawUrl === 'true' ||
+    rawUrl === 'false' ||
+    (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://') && !rawUrl.startsWith('data:') && !rawUrl.startsWith('file:') && !rawUrl.startsWith('blob:'))
+  ) {
+    return false;
+  }
+
+  return true;
+};
+
 export const ExportScreen: React.FC = () => {
   const { orgId, collabLeagueIds, collabLeagueNames } = useOrg();
+  const { isDark, colors } = useTheme();
   const [leagues, setLeagues] = useState<any[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<any>(null);
   const [showLeagueDropdown, setShowLeagueDropdown] = useState(false);
@@ -406,29 +502,12 @@ export const ExportScreen: React.FC = () => {
         }
 
         if (allSp && allSp.length > 0) {
-          // Filter real sponsors excluding system keys (case-insensitive)
-          const realSponsors = allSp.filter((s: any) => {
-            if (!s.name) return false;
-            const uName = String(s.name).toUpperCase();
-            const uUrl = String(s.logo_url || '').toUpperCase();
-            if (
-              uName.startsWith('SCHEDULE_BANNER') ||
-              uName.startsWith('YT_BANNER') ||
-              uName.startsWith('YT_OAUTH') ||
-              uName.startsWith('MATCH_TIMER') ||
-              uName.startsWith('LEAGUE_SHOW_SPONSORS') ||
-              uName.startsWith('REGISTRATION_OPEN') ||
-              uName.startsWith('POLL_VOTES') ||
-              uUrl.includes('EXPO_PUSH')
-            ) {
-              return false;
-            }
-            return true;
-          });
+          // Filter real sponsors using isRealSponsor
+          const realSponsors = allSp.filter(isRealSponsor);
 
           if (showSponsorsForThisLeague && realSponsors.length > 0) {
             const main = realSponsors.find((s: any) => s.is_main === true);
-            const secondaries = realSponsors.filter((s: any) => !s.is_main);
+            const secondaries = realSponsors.filter((s: any) => !s.is_main && s.is_selected !== false);
 
             if (main?.logo_url) {
               setMainSponsorLogo(main.logo_url);
@@ -436,7 +515,7 @@ export const ExportScreen: React.FC = () => {
               setMainSponsorLogo(realSponsors[0].logo_url);
             }
 
-            setSecondarySponsors(secondaries.map((s: any) => s.logo_url).filter(Boolean));
+            setSecondarySponsors(secondaries.filter((s: any) => !!s.logo_url));
           } else {
             setMainSponsorLogo(null);
             setSecondarySponsors([]);
@@ -590,7 +669,6 @@ export const ExportScreen: React.FC = () => {
         });
 
       setTeams(computedStandings);
-
       const enrichedMatches = allLeagueMatches.map((m: any) => ({
         ...m,
         home_team: m.home_team_data?.name || m.home_team || m.home_team_name || 'Jamoa 1',
@@ -598,6 +676,7 @@ export const ExportScreen: React.FC = () => {
         home_team_logo: m.home_team_data?.logo_url,
         away_team_logo: m.away_team_data?.logo_url,
       }));
+      enrichedMatches.sort(compareMatches);
       setMatches(enrichedMatches);
 
       // 4. Fetch Events
@@ -913,36 +992,47 @@ export const ExportScreen: React.FC = () => {
   const exportBgUrl = selectedLeague?.bg_image || null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* Header Selector Card */}
-      <View style={[styles.headerCard, (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }]}>
+      <View style={[
+        styles.headerCard,
+        Platform.OS === 'android' && { backgroundColor: colors.bgPrimary, borderBottomColor: colors.border },
+        (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }
+      ]}>
+        {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
         <View style={[styles.dropdownsRow, (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }]}>
           {/* League Dropdown */}
           <View style={[styles.dropdownWrapper, showLeagueDropdown && { zIndex: 10000, elevation: 25 }]}>
-            <Text style={styles.dropdownLabel}>{"Liga:"}</Text>
+            <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Liga:"}</Text>
             <TouchableOpacity
-              style={styles.dropdownBtn}
+              style={[styles.dropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
               onPress={() => {
                 setShowLeagueDropdown(!showLeagueDropdown);
                 setShowRoundDropdown(false);
               }}
               activeOpacity={0.8}
             >
-              <Text style={styles.dropdownBtnText} numberOfLines={1}>
+              <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                 {selectedLeague?.name || "Ligalarni yuklash..."}
               </Text>
-              <Ionicons name="chevron-down" size={16} color="#94A3B8" />
+              <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
             </TouchableOpacity>
 
             {showLeagueDropdown && (
-              <View style={styles.dropdownMenu}>
+              <View style={[
+                styles.dropdownMenu,
+                Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }
+              ]}>
+                {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
                 <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
                   {leagues.map((lg) => (
                     <TouchableOpacity
                       key={lg.id}
                       style={[
                         styles.dropdownItem,
+                        Platform.OS === 'android' && { borderBottomColor: colors.border },
                         selectedLeague?.id === lg.id && styles.dropdownItemActive,
+                        Platform.OS === 'android' && selectedLeague?.id === lg.id && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5' },
                       ]}
                       onPress={() => {
                         setSelectedLeague(lg);
@@ -952,7 +1042,9 @@ export const ExportScreen: React.FC = () => {
                       <Text
                         style={[
                           styles.dropdownItemText,
+                          Platform.OS === 'android' && { color: colors.textSecondary },
                           selectedLeague?.id === lg.id && styles.dropdownItemTextActive,
+                          Platform.OS === 'android' && selectedLeague?.id === lg.id && { color: colors.accentGreen },
                         ]}
                       >
                         {lg.name}
@@ -966,30 +1058,36 @@ export const ExportScreen: React.FC = () => {
 
           {/* Round Dropdown */}
           <View style={[styles.dropdownWrapper, showRoundDropdown && { zIndex: 10000, elevation: 25 }]}>
-            <Text style={styles.dropdownLabel}>{"Tur (Round):"}</Text>
+            <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tur (Round):"}</Text>
             <TouchableOpacity
-              style={styles.dropdownBtn}
+              style={[styles.dropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
               onPress={() => {
                 setShowRoundDropdown(!showRoundDropdown);
                 setShowLeagueDropdown(false);
               }}
               activeOpacity={0.8}
             >
-              <Text style={styles.dropdownBtnText}>
+              <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                 {selectedRound === 'all' ? 'Barchasi' : `${selectedRound}-Tur`}
               </Text>
-              <Ionicons name="chevron-down" size={16} color="#94A3B8" />
+              <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
             </TouchableOpacity>
 
             {showRoundDropdown && (
-              <View style={styles.dropdownMenu}>
+              <View style={[
+                styles.dropdownMenu,
+                Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }
+              ]}>
+                {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
                 <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
                   {availableRounds.map((r) => (
                     <TouchableOpacity
                       key={r}
                       style={[
                         styles.dropdownItem,
+                        Platform.OS === 'android' && { borderBottomColor: colors.border },
                         selectedRound === r && styles.dropdownItemActive,
+                        Platform.OS === 'android' && selectedRound === r && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5' },
                       ]}
                       onPress={() => {
                         setSelectedRound(r);
@@ -999,7 +1097,9 @@ export const ExportScreen: React.FC = () => {
                       <Text
                         style={[
                           styles.dropdownItemText,
+                          Platform.OS === 'android' && { color: colors.textSecondary },
                           selectedRound === r && styles.dropdownItemTextActive,
+                          Platform.OS === 'android' && selectedRound === r && { color: colors.accentGreen },
                         ]}
                       >
                         {r === 'all' ? 'Barcha turlar' : `${r}-Tur`}
@@ -1019,23 +1119,23 @@ export const ExportScreen: React.FC = () => {
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           
           {/* 1. TURNIR JADVALI (1080x1080 PNG GRAPHIC MATCHING IMAGE 2 1-TO-1) */}
-          <View style={styles.exportSectionCard}>
+          <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>{"1. Turnir Jadvali"}</Text>
-                <Text style={styles.sectionSubtitle}>{"1:1 Formatdagi Standings Post PNG (1080x1080)"}</Text>
+                <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"1. Turnir Jadvali"}</Text>
+                <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Standings Post PNG (1080x1080)"}</Text>
               </View>
               <TouchableOpacity
-                style={styles.downloadBtn}
+                style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 onPress={() => handleExportPNG(standingsRef, 'Turnir_Jadvali')}
                 disabled={downloadingSection === 'Turnir_Jadvali'}
               >
                 {downloadingSection === 'Turnir_Jadvali' ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.textPrimary : "#000000"} />
                 ) : (
                   <>
-                    <Ionicons name="download" size={16} color="#000000" />
-                    <Text style={styles.downloadBtnText}>{"PNG (1x1)"}</Text>
+                    <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
+                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG (1x1)"}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1288,9 +1388,11 @@ export const ExportScreen: React.FC = () => {
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 32 }}>
                         {secondarySponsors.slice(0, 6).map((s: any, idx: number) => {
                           const isLast = idx === Math.min(secondarySponsors.length, 6) - 1;
+                          const logoUri = typeof s === 'string' ? s : (s?.logo_url || '');
+                          if (!logoUri) return null;
                           return (
                             <React.Fragment key={s.id || idx}>
-                              <Image source={{ uri: s.logo_url }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
+                              <Image source={{ uri: logoUri }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
                               {!isLast && (
                                 <View style={{ height: 22, width: 1.5, backgroundColor: '#ffffff', opacity: 0.4 }} />
                               )}
@@ -1328,23 +1430,23 @@ export const ExportScreen: React.FC = () => {
             })();
 
             return (
-              <View style={styles.exportSectionCard}>
+              <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
                 <View style={styles.sectionHeaderRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.sectionTitle}>{`2. O'yin Jadvali (${currentScheduleRound}-TUR)`}</Text>
-                    <Text style={styles.sectionSubtitle}>{"1:1 Formatdagi Match Fixtures PNG (1080x1080)"}</Text>
+                    <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{`2. O'yin Jadvali (${currentScheduleRound}-TUR)`}</Text>
+                    <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Match Fixtures PNG (1080x1080)"}</Text>
                   </View>
               <TouchableOpacity
-                style={styles.downloadBtn}
+                style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 onPress={() => handleExportPNG(scheduleRef, 'Oyin_Jadvali')}
                 disabled={downloadingSection === 'Oyin_Jadvali'}
               >
                 {downloadingSection === 'Oyin_Jadvali' ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.textPrimary : "#000000"} />
                 ) : (
                   <>
-                    <Ionicons name="download" size={16} color="#000000" />
-                    <Text style={styles.downloadBtnText}>{"PNG (1x1)"}</Text>
+                    <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
+                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG (1x1)"}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1566,9 +1668,11 @@ export const ExportScreen: React.FC = () => {
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 32 }}>
                         {secondarySponsors.slice(0, 6).map((s: any, idx: number) => {
                           const isLast = idx === Math.min(secondarySponsors.length, 6) - 1;
+                          const logoUri = typeof s === 'string' ? s : (s?.logo_url || '');
+                          if (!logoUri) return null;
                           return (
                             <React.Fragment key={s.id || idx}>
-                              <Image source={{ uri: s.logo_url }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
+                              <Image source={{ uri: logoUri }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
                               {!isLast && (
                                 <View style={{ height: 22, width: 1.5, backgroundColor: '#ffffff', opacity: 0.4 }} />
                               )}
@@ -1589,25 +1693,25 @@ export const ExportScreen: React.FC = () => {
         })()}
 
           {/* 3. QIZIL VA SARIQ KARTOCHKALAR (1080x1080 CARDS EXPORT MATCHING AMATORA-ORGANIZATION/ADMIN 1-TO-1) */}
-          <View style={styles.exportSectionCard}>
+          <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>
+                <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                   {selectedRound && selectedRound !== 'all' ? `3. Qizil va Sariq Kartochkalar (${selectedRound}-TUR)` : "3. Qizil va Sariq Kartochkalar (BARCHA)"}
                 </Text>
-                <Text style={styles.sectionSubtitle}>{"1:1 Formatdagi Cards & Penalties PNG (1080x1080)"}</Text>
+                <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Cards & Penalties PNG (1080x1080)"}</Text>
               </View>
               <TouchableOpacity
-                style={styles.downloadBtn}
+                style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 onPress={() => handleExportPNG(cardsRef, 'Kartochkalar_Jadvali')}
                 disabled={downloadingSection === 'Kartochkalar_Jadvali'}
               >
                 {downloadingSection === 'Kartochkalar_Jadvali' ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.textPrimary : "#000000"} />
                 ) : (
                   <>
-                    <Ionicons name="download" size={16} color="#000000" />
-                    <Text style={styles.downloadBtnText}>{"PNG (1x1)"}</Text>
+                    <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
+                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG (1x1)"}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1756,9 +1860,11 @@ export const ExportScreen: React.FC = () => {
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 32 }}>
                         {secondarySponsors.slice(0, 6).map((s: any, idx: number) => {
                           const isLast = idx === Math.min(secondarySponsors.length, 6) - 1;
+                          const logoUri = typeof s === 'string' ? s : (s?.logo_url || '');
+                          if (!logoUri) return null;
                           return (
                             <React.Fragment key={s.id || idx}>
-                              <Image source={{ uri: s.logo_url }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
+                              <Image source={{ uri: logoUri }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
                               {!isLast && (
                                 <View style={{ height: 22, width: 1.5, backgroundColor: '#ffffff', opacity: 0.4 }} />
                               )}
@@ -1777,25 +1883,25 @@ export const ExportScreen: React.FC = () => {
           </View>
 
           {/* 4. TO'PURARLAR JADVALI (1080x1080 TOP SCORERS STANDALONE GRAPHIC) */}
-          <View style={styles.exportSectionCard}>
+          <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>
+                <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                   {selectedRound && selectedRound !== 'all' ? `4. To'purarlar Jadvali (${selectedRound}-TUR)` : "4. To'purarlar Jadvali (BARCHA)"}
                 </Text>
-                <Text style={styles.sectionSubtitle}>{"1:1 Formatdagi Top Scorers PNG (1080x1080)"}</Text>
+                <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Top Scorers PNG (1080x1080)"}</Text>
               </View>
               <TouchableOpacity
-                style={styles.downloadBtn}
+                style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 onPress={() => handleExportPNG(scorersRef, 'Topurarlar_Jadvali')}
                 disabled={downloadingSection === 'Topurarlar_Jadvali'}
               >
                 {downloadingSection === 'Topurarlar_Jadvali' ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.textPrimary : "#000000"} />
                 ) : (
                   <>
-                    <Ionicons name="download" size={16} color="#000000" />
-                    <Text style={styles.downloadBtnText}>{"PNG (1x1)"}</Text>
+                    <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
+                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG (1x1)"}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -1935,9 +2041,11 @@ export const ExportScreen: React.FC = () => {
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 32 }}>
                         {secondarySponsors.slice(0, 6).map((s: any, idx: number) => {
                           const isLast = idx === Math.min(secondarySponsors.length, 6) - 1;
+                          const logoUri = typeof s === 'string' ? s : (s?.logo_url || '');
+                          if (!logoUri) return null;
                           return (
                             <React.Fragment key={s.id || idx}>
-                              <Image source={{ uri: s.logo_url }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
+                              <Image source={{ uri: logoUri }} style={{ height: 40, maxWidth: 140, width: 110, resizeMode: 'contain', opacity: 0.9 }} />
                               {!isLast && (
                                 <View style={{ height: 22, width: 1.5, backgroundColor: '#ffffff', opacity: 0.4 }} />
                               )}
@@ -1956,16 +2064,16 @@ export const ExportScreen: React.FC = () => {
           </View>
 
           {/* 5. PDF YUKLAB OLISH */}
-          <View style={[styles.exportSectionCard, { borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.06)' }]}>
+          <View style={[styles.exportSectionCard, { borderColor: '#10B981', backgroundColor: Platform.OS === 'android' ? (isDark ? 'rgba(16, 185, 129, 0.06)' : '#ECFDF5') : 'rgba(16, 185, 129, 0.06)' }]}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sectionTitle, { color: '#10B981' }]}>{"5. PDF Hujjat Eksporti"}</Text>
-                <Text style={styles.sectionSubtitle}>
+                <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
                   {"Jamoalar va o'yinchilarning to'liq ma'lumotlarini PDF formatida yuklab olish"}
                 </Text>
               </View>
               <TouchableOpacity
-                style={[styles.downloadBtn, { backgroundColor: '#10B981' }]}
+                style={[styles.downloadBtn, { backgroundColor: '#10B981', borderColor: '#10B981' }]}
                 onPress={() => setShowPDFModal(true)}
                 activeOpacity={0.8}
               >
@@ -1980,16 +2088,16 @@ export const ExportScreen: React.FC = () => {
       {/* PDF EXPORT MODAL */}
       <Modal visible={showPDFModal} transparent animationType="slide">
         <View style={styles.pdfOverlay}>
-          <View style={styles.pdfCard}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.pdfCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
             {/* Modal Header */}
-            <View style={styles.pdfHeader}>
+            <View style={[styles.pdfHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="document-text" size={22} color="#10B981" />
-                <Text style={styles.pdfTitle}>{"PDF Yuklab Olish"}</Text>
+                <Text style={[styles.pdfTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PDF Yuklab Olish"}</Text>
               </View>
               <TouchableOpacity onPress={() => setShowPDFModal(false)}>
-                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
 
@@ -1997,49 +2105,84 @@ export const ExportScreen: React.FC = () => {
               {/* Mode Buttons Row */}
               <View style={styles.pdfModeRow}>
                 <TouchableOpacity
-                  style={[styles.pdfModeBtn, pdfMode === 'league' && styles.pdfModeBtnActive]}
+                  style={[
+                    styles.pdfModeBtn,
+                    Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                    pdfMode === 'league' && styles.pdfModeBtnActive,
+                    Platform.OS === 'android' && pdfMode === 'league' && { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen },
+                  ]}
                   onPress={() => setPdfMode('league')}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.pdfModeText, pdfMode === 'league' && styles.pdfModeTextActive]}>
+                  <Text style={[
+                    styles.pdfModeText,
+                    Platform.OS === 'android' && { color: colors.textMuted },
+                    pdfMode === 'league' && styles.pdfModeTextActive,
+                    Platform.OS === 'android' && pdfMode === 'league' && { color: '#000000' },
+                  ]}>
                     {"Liga bo'yicha"}
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.pdfModeBtn, pdfMode === 'team' && styles.pdfModeBtnActive]}
+                  style={[
+                    styles.pdfModeBtn,
+                    Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                    pdfMode === 'team' && styles.pdfModeBtnActive,
+                    Platform.OS === 'android' && pdfMode === 'team' && { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen },
+                  ]}
                   onPress={() => setPdfMode('team')}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.pdfModeText, pdfMode === 'team' && styles.pdfModeTextActive]}>
+                  <Text style={[
+                    styles.pdfModeText,
+                    Platform.OS === 'android' && { color: colors.textMuted },
+                    pdfMode === 'team' && styles.pdfModeTextActive,
+                    Platform.OS === 'android' && pdfMode === 'team' && { color: '#000000' },
+                  ]}>
                     {"Bitta jamoa"}
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.pdfModeAllBtn}
+                  style={[
+                    styles.pdfModeAllBtn,
+                    Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                    pdfMode === 'all' && { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen },
+                  ]}
                   onPress={() => setPdfMode('all')}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.pdfModeAllText}>{"Barchasini yuklash"}</Text>
+                  <Text style={[
+                    styles.pdfModeAllText,
+                    Platform.OS === 'android' && { color: colors.textPrimary },
+                    Platform.OS === 'android' && pdfMode === 'all' && { color: '#000000' },
+                  ]}>{"Barchasini yuklash"}</Text>
                 </TouchableOpacity>
               </View>
 
               {/* Mode: League Select */}
               {pdfMode === 'league' && (
-                <View style={styles.pdfSectionBox}>
-                  <Text style={styles.pdfLabel}>{"Liga tanlang:"}</Text>
+                <View style={[styles.pdfSectionBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                  <Text style={[styles.pdfLabel, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Liga tanlang:"}</Text>
                   <ScrollView style={{ maxHeight: 150 }} showsVerticalScrollIndicator={false}>
                     {leagues.map((lg) => (
                       <TouchableOpacity
                         key={lg.id}
                         style={[
                           styles.pdfOptionRow,
+                          Platform.OS === 'android' && { borderBottomColor: colors.border },
                           selectedPDFLeagueName === lg.name && styles.pdfOptionRowActive,
+                          Platform.OS === 'android' && selectedPDFLeagueName === lg.name && { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ECFDF5' },
                         ]}
                         onPress={() => setSelectedPDFLeagueName(lg.name)}
                       >
-                        <Text style={[styles.pdfOptionText, selectedPDFLeagueName === lg.name && styles.pdfOptionTextActive]}>
+                        <Text style={[
+                          styles.pdfOptionText,
+                          Platform.OS === 'android' && { color: colors.textSecondary },
+                          selectedPDFLeagueName === lg.name && styles.pdfOptionTextActive,
+                          Platform.OS === 'android' && selectedPDFLeagueName === lg.name && { color: colors.accentGreen },
+                        ]}>
                           {lg.name}
                         </Text>
                         {selectedPDFLeagueName === lg.name && (
@@ -2050,11 +2193,11 @@ export const ExportScreen: React.FC = () => {
                   </ScrollView>
 
                   <View style={styles.pdfActionRow}>
-                    <TouchableOpacity style={styles.pdfBackBtn} onPress={() => setPdfMode(null)}>
-                      <Text style={styles.pdfBackText}>{"Ortga"}</Text>
+                    <TouchableOpacity style={[styles.pdfBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setPdfMode(null)}>
+                      <Text style={[styles.pdfBackText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ortga"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.pdfSubmitBtn}
+                      style={[styles.pdfSubmitBtn, { backgroundColor: '#10B981' }]}
                       onPress={() => handleExecutePDFExport('league')}
                       disabled={isPDFExporting}
                     >
@@ -2073,8 +2216,8 @@ export const ExportScreen: React.FC = () => {
 
               {/* Mode: Team Select */}
               {pdfMode === 'team' && (
-                <View style={styles.pdfSectionBox}>
-                  <Text style={styles.pdfLabel}>{"Jamoa tanlang:"}</Text>
+                <View style={[styles.pdfSectionBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                  <Text style={[styles.pdfLabel, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Jamoa tanlang:"}</Text>
                   <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
                     {(allTeams.length > 0 ? allTeams : teams).length > 0 ? (
                       (allTeams.length > 0 ? allTeams : teams).map((tm) => (
@@ -2082,11 +2225,18 @@ export const ExportScreen: React.FC = () => {
                           key={tm.id}
                           style={[
                             styles.pdfOptionRow,
+                            Platform.OS === 'android' && { borderBottomColor: colors.border },
                             selectedPDFTeamId === String(tm.id) && styles.pdfOptionRowActive,
+                            Platform.OS === 'android' && selectedPDFTeamId === String(tm.id) && { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ECFDF5' },
                           ]}
                           onPress={() => setSelectedPDFTeamId(String(tm.id))}
                         >
-                          <Text style={[styles.pdfOptionText, selectedPDFTeamId === String(tm.id) && styles.pdfOptionTextActive]}>
+                          <Text style={[
+                            styles.pdfOptionText,
+                            Platform.OS === 'android' && { color: colors.textSecondary },
+                            selectedPDFTeamId === String(tm.id) && styles.pdfOptionTextActive,
+                            Platform.OS === 'android' && selectedPDFTeamId === String(tm.id) && { color: colors.accentGreen },
+                          ]}>
                             {tm.name}
                           </Text>
                           {selectedPDFTeamId === String(tm.id) && (
@@ -2095,18 +2245,18 @@ export const ExportScreen: React.FC = () => {
                         </TouchableOpacity>
                       ))
                     ) : (
-                      <Text style={{ color: 'rgba(255,255,255,0.5)', padding: 12, fontSize: 12, textAlign: 'center' }}>
+                      <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)', padding: 12, fontSize: 12, textAlign: 'center' }}>
                         {"Jamoalar topilmadi"}
                       </Text>
                     )}
                   </ScrollView>
 
                   <View style={styles.pdfActionRow}>
-                    <TouchableOpacity style={styles.pdfBackBtn} onPress={() => setPdfMode(null)}>
-                      <Text style={styles.pdfBackText}>{"Ortga"}</Text>
+                    <TouchableOpacity style={[styles.pdfBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setPdfMode(null)}>
+                      <Text style={[styles.pdfBackText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ortga"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.pdfSubmitBtn}
+                      style={[styles.pdfSubmitBtn, { backgroundColor: '#10B981' }]}
                       onPress={() => handleExecutePDFExport('team')}
                       disabled={isPDFExporting}
                     >
@@ -2125,20 +2275,20 @@ export const ExportScreen: React.FC = () => {
 
               {/* Mode: All Export */}
               {pdfMode === 'all' && (
-                <View style={styles.pdfSectionBox}>
-                  <View style={styles.pdfInfoBox}>
+                <View style={[styles.pdfSectionBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                  <View style={[styles.pdfInfoBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.1)' : '#ECFDF5', borderColor: '#10B981' }]}>
                     <Ionicons name="information-circle" size={20} color="#10B981" />
-                    <Text style={styles.pdfInfoText}>
+                    <Text style={[styles.pdfInfoText, Platform.OS === 'android' && { color: colors.textSecondary }]}>
                       {"Siz barcha jamoalar va ularning o'yinchilarini PDF ga yuklab olasiz."}
                     </Text>
                   </View>
 
                   <View style={styles.pdfActionRow}>
-                    <TouchableOpacity style={styles.pdfBackBtn} onPress={() => setPdfMode(null)}>
-                      <Text style={styles.pdfBackText}>{"Ortga"}</Text>
+                    <TouchableOpacity style={[styles.pdfBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setPdfMode(null)}>
+                      <Text style={[styles.pdfBackText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ortga"}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.pdfSubmitBtn}
+                      style={[styles.pdfSubmitBtn, { backgroundColor: '#10B981' }]}
                       onPress={() => handleExecutePDFExport('all')}
                       disabled={isPDFExporting}
                     >
@@ -2164,8 +2314,8 @@ export const ExportScreen: React.FC = () => {
               )}
 
               {/* Info Text Footer */}
-              <View style={styles.pdfFooterDescBox}>
-                <Text style={styles.pdfFooterDescText}>
+              <View style={[styles.pdfFooterDescBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]}>
+                <Text style={[styles.pdfFooterDescText, Platform.OS === 'android' && { color: colors.textMuted }]}>
                   {"📄 PDF fayli o'yinchilarning rasmlari, ismlari, pasport, amplua va jismoniy ma'lumotlari bilan birga yaratiladi."}
                 </Text>
               </View>
@@ -2188,13 +2338,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerCard: {
-    backgroundColor: 'rgba(10, 15, 29, 0.95)',
+    backgroundColor: 'transparent',
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1.2,
-    borderBottomColor: 'rgba(255, 255, 255, 0.18)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.15)',
     zIndex: 999,
     elevation: 15,
+    overflow: 'hidden',
   },
   dropdownsRow: {
     flexDirection: 'row',
@@ -2216,7 +2367,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.18)',
     borderRadius: 10,
@@ -2234,15 +2385,15 @@ const styles = StyleSheet.create({
     top: 68,
     left: 0,
     right: 0,
-    backgroundColor: '#0F172A',
-    borderWidth: 1.5,
-    borderColor: 'rgba(0, 255, 102, 0.3)',
+    backgroundColor: 'transparent',
+    borderWidth: 1.2,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
     borderRadius: 12,
     zIndex: 10000,
     elevation: 30,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.7,
+    shadowOpacity: 0.5,
     shadowRadius: 16,
     overflow: 'hidden',
   },
@@ -2250,10 +2401,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   dropdownItemActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   dropdownItemText: {
     color: 'rgba(255, 255, 255, 0.8)',
