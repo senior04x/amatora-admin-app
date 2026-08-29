@@ -507,7 +507,7 @@ export const ExportScreen: React.FC = () => {
 
           if (showSponsorsForThisLeague && realSponsors.length > 0) {
             const main = realSponsors.find((s: any) => s.is_main === true);
-            const secondaries = realSponsors.filter((s: any) => !s.is_main && s.is_selected !== false);
+            const secondaries = realSponsors.filter((s: any) => s.id !== main?.id && s.is_selected !== false);
 
             if (main?.logo_url) {
               setMainSponsorLogo(main.logo_url);
