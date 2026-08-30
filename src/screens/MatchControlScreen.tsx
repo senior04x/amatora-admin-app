@@ -12,19 +12,23 @@ import {
   TextInput,
   Clipboard,
   Animated,
+  Platform,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import * as Crypto from 'expo-crypto';
 // 🔒 SECURITY FIX: supabase o'chirildi, faqat supabase (anon + RLS) ishlatiladi
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
   matchId: string | number;
   initialMatch?: any;
   onBack: () => void;
+  isReadOnly?: boolean;
 }
 
 const EVENT_TYPES = [
@@ -53,7 +57,9 @@ class LimitedCache<K, V> {
     // Evict oldest if cache is full
     if (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
     }
     this.cache.set(key, { ...value, timestamp: Date.now() } as V & { timestamp: number });
   }
@@ -77,9 +83,13 @@ class LimitedCache<K, V> {
 }
 
 const MATCH_CONTROL_CACHE = new LimitedCache<string, any>(50, 10 * 60 * 1000);
+// Cache unassigned replays when admin deletes a goal mistake so re-adding re-links the replay video
+const ORPHAN_REPLAYS_BY_MATCH = new Map<string, { url: string; timestamp: number }>();
 
-export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack }) => {
+export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack, isReadOnly = false }) => {
   const { orgId } = useOrg();
+  const { isDark, colors } = useTheme();
+  const queryClient = useQueryClient();
   const cachedData = MATCH_CONTROL_CACHE.get(String(matchId));
 
   // Match, League & Team Data (Immediate initial render from cache - 0ms delay!)
@@ -95,6 +105,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       ? { ...seedMatch, match_duration: seedMatch.match_duration || initialMatchDur, half_duration: seedMatch.half_duration || initialHalfDur }
       : null
   );
+
+  const isReadOnlyMode = isReadOnly || Boolean(match?.organization_id && Number(match.organization_id) !== Number(orgId));
   const [leagueData, setLeagueData] = useState<any>(
     cachedData?.leagueData || {
       match_duration: initialMatchDur,
@@ -106,6 +118,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const [homePlayers, setHomePlayers] = useState<any[]>(cachedData?.homePlayers || []);
   const [awayPlayers, setAwayPlayers] = useState<any[]>(cachedData?.awayPlayers || []);
   const [events, setEvents] = useState<any[]>(cachedData?.events || []);
+  const [isPlayersLoading, setIsPlayersLoading] = useState(!cachedData?.homePlayers || cachedData.homePlayers.length === 0);
+  const [isEventsLoading, setIsEventsLoading] = useState(!cachedData?.events);
 
   // Penalty Shootout State
   const [showPenaltyControls, setShowPenaltyControls] = useState(false);
@@ -237,6 +251,33 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   );
   const halfDurationSecs = halfDurationMins * 60;
 
+  // Hardware Android Back Button Handler (Closes modals first, or navigates back)
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const backAction = () => {
+      if (statusConfirmModal.isOpen) {
+        setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
+        return true;
+      }
+      if (showEventModal) {
+        setShowEventModal(false);
+        return true;
+      }
+      if (showObsModal) {
+        setShowObsModal(false);
+        return true;
+      }
+      if (onBack) {
+        onBack();
+        return true;
+      }
+      return false;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [statusConfirmModal.isOpen, showEventModal, showObsModal, onBack]);
+
   // Helper to apply persistent timer payload in countdown mode (25:00 -> 00:00)
   const applyTimerPayload = (payload: any) => {
     if (!payload) return;
@@ -322,7 +363,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     // 1. Fast broadcast channel for instant OBS update (0ms latency!)
     try {
-      const streamKey = match?.location?.includes('2-maydon') ? 'stream2' : 'stream1';
+      const isField2 = String(match?.location || '').toLowerCase().includes('2');
+      const streamKey = isField2 ? 'stream2' : 'stream1';
       supabase.channel(`obs_fast_timer_${matchId}`).send({
         type: 'broadcast',
         event: 'timer_update',
@@ -340,6 +382,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       try {
         const matchUpdate: any = {
           updated_at: new Date().toISOString(),
+          timer_seconds: baseSec,
+          timer_started_at: startedAtIso,
+          is_timer_running: isRunning,
         };
         if (newStatus) {
           matchUpdate.status = newStatus;
@@ -351,29 +396,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           matchUpdate.away_score = scoreOverride.away_score;
         }
 
-        const payloadStr = JSON.stringify(timerPayload);
-
         await supabase
           .from('matches')
           .update(matchUpdate)
           .eq('id', matchId);
-
-        const { data: existingSp } = await supabase
-          .from('sponsors')
-          .select('id')
-          .eq('name', nameKey)
-          .limit(1);
-
-        if (existingSp && existingSp.length > 0) {
-          await supabase
-            .from('sponsors')
-            .update({ logo_url: payloadStr, organization_id: targetOrgId })
-            .eq('id', existingSp[0].id);
-        } else {
-          await supabase
-            .from('sponsors')
-            .insert({ name: nameKey, logo_url: payloadStr, organization_id: targetOrgId });
-        }
       } catch (e) {
         console.warn('Background timer sync error:', e);
       }
@@ -381,45 +407,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   };
 
   // SEND REMOTE GOAL SIGNAL TO AMATORA-OBS (amatora.exe) REPLAY ENGINE
-  const sendRemoteObsGoalSignal = async (eventUuid: string) => {
+  const sendRemoteObsGoalSignal = async (eventUuid: string, playerName?: string, teamName?: string) => {
     try {
       const targetOrgId = match?.organization_id || orgId || 1;
       const rawLocation = String(match?.location || '1').toLowerCase();
       const fieldId = rawLocation.includes('2') ? '2' : '1';
 
-      const payloadStr = JSON.stringify({
-        timestamp: Date.now(),
-        event_id: eventUuid,
-        match_id: String(matchId),
-        org_id: String(targetOrgId),
-        field_id: fieldId,
-      });
-
-      const signalKeys = [
-        `REMOTE_GOAL_${targetOrgId}_FIELD_${fieldId}`,
-        `REMOTE_GOAL_FIELD_${fieldId}`,
-      ];
-
-      for (const key of signalKeys) {
-        const { data: existingSp } = await supabase
-          .from('sponsors')
-          .select('id')
-          .eq('name', key)
-          .limit(1);
-
-        if (existingSp && existingSp.length > 0) {
-          await supabase
-            .from('sponsors')
-            .update({ logo_url: payloadStr, organization_id: targetOrgId })
-            .eq('id', existingSp[0].id);
-        } else {
-          await supabase
-            .from('sponsors')
-            .insert({ name: key, logo_url: payloadStr, organization_id: targetOrgId });
-        }
-      }
-
-      // Also trigger fast broadcast
+      // Fast broadcast to OBS Replay Engine (0ms latency)
       try {
         supabase.channel(`obs_goal_${targetOrgId}_field_${fieldId}`).send({
           type: 'broadcast',
@@ -430,6 +424,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             match_id: String(matchId),
             org_id: String(targetOrgId),
             field_id: fieldId,
+            player_name: playerName || '',
+            team_name: teamName || '',
           },
         });
       } catch (bcErr) {}
@@ -445,36 +441,18 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       const rawLocation = String(match?.location || '1').toLowerCase();
       const fieldId = rawLocation.includes('2') ? '2' : '1';
 
-      const payloadStr = JSON.stringify({
-        timestamp: Date.now(),
-        match_id: String(matchId),
-        org_id: String(targetOrgId),
-        field_id: fieldId,
-      });
-
-      const signalKeys = [
-        `REMOTE_FINISH_MATCH_${targetOrgId}_FIELD_${fieldId}`,
-        `REMOTE_FINISH_MATCH_FIELD_${fieldId}`,
-      ];
-
-      for (const key of signalKeys) {
-        const { data: existingSp } = await supabase
-          .from('sponsors')
-          .select('id')
-          .eq('name', key)
-          .limit(1);
-
-        if (existingSp && existingSp.length > 0) {
-          await supabase
-            .from('sponsors')
-            .update({ logo_url: payloadStr, organization_id: targetOrgId })
-            .eq('id', existingSp[0].id);
-        } else {
-          await supabase
-            .from('sponsors')
-            .insert({ name: key, logo_url: payloadStr, organization_id: targetOrgId });
-        }
-      }
+      try {
+        supabase.channel(`obs_goal_${targetOrgId}_field_${fieldId}`).send({
+          type: 'broadcast',
+          event: 'finish_match_trigger',
+          payload: {
+            timestamp: Date.now(),
+            match_id: String(matchId),
+            org_id: String(targetOrgId),
+            field_id: fieldId,
+          },
+        });
+      } catch (bcErr) {}
     } catch (e) {
       console.warn('sendRemoteObsFinishSignal error:', e);
     }
@@ -491,16 +469,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         fetchEvents(matchId);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (payload: any) => {
-        setMatch((prev: any) => ({ ...prev, ...payload.new }));
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sponsors', filter: `name=eq.MATCH_TIMER_${matchId}` }, (payload: any) => {
-        const record = payload.new || payload.record;
-        const jsonStr = record?.logo_url || record?.image_url || record?.url;
-        if (jsonStr) {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            applyTimerPayload(parsed);
-          } catch (e) {}
+        const updated = payload.new;
+        if (updated) {
+          setMatch((prev: any) => ({ ...prev, ...updated }));
+          if (updated.timer_seconds !== undefined) {
+            applyTimerPayload(updated);
+          }
         }
       })
       .subscribe();
@@ -559,22 +533,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     // Only show blocking loader if we have NO initial match data at all
     if (!match && !initialMatch) setLoading(true);
     try {
-      // 1. Fetch match and timer sponsor in parallel
-      const [mRes, timerSpRes] = await Promise.all([
-        dbClient.from('matches').select('*').eq('id', matchId).single(),
-        dbClient
-          .from('sponsors')
-          .select('name, logo_url')
-          .eq('name', `MATCH_TIMER_${matchId}`)
-          .order('created_at', { ascending: false })
-          .limit(1)
-      ]);
-
-      const matchData = mRes.data;
-      const timerSpData = timerSpRes.data && timerSpRes.data.length > 0 ? timerSpRes.data[0] : null;
+      // 1. Fetch match directly from matches table
+      const { data: matchData } = await dbClient.from('matches').select('*').eq('id', matchId).single();
 
       if (matchData) {
-        // 1. Fetch League Data & League Duration (Match -> League -> Sponsors LEAGUE_DURATION)
+        // 1. Fetch League Data & League Duration from leagues table
         let matchDur = Number(matchData.match_duration || matchData.duration || 0) || null;
         let halfDur = Number(matchData.half_duration || 0) || null;
         let lData: any = null;
@@ -603,29 +566,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
             if (lData) {
               if (!matchDur) {
-                matchDur = Number(lData.match_duration || lData.duration || lData.match_minutes || 0) || null;
+                matchDur = Number(lData.duration || lData.match_duration || lData.match_minutes || 0) || null;
               }
               if (!halfDur) {
                 halfDur = Number(lData.half_duration || lData.half_minutes || 0) || null;
-              }
-            }
-
-            // Check sponsors table for LEAGUE_DURATION_<id> or LEAGUE_DURATION_<name>
-            const spKeys = [
-              lData?.id ? `LEAGUE_DURATION_${lData.id}` : null,
-              `LEAGUE_DURATION_${targetOrgId}_${leagueNameTrim}`,
-              `LEAGUE_DURATION_${leagueNameTrim}`,
-            ].filter(Boolean) as string[];
-
-            const { data: spDurs } = await dbClient
-              .from('sponsors')
-              .select('name, logo_url')
-              .in('name', spKeys);
-
-            if (spDurs && spDurs.length > 0) {
-              const validSp = spDurs.find((s: any) => s.logo_url && !isNaN(Number(s.logo_url)) && Number(s.logo_url) > 0);
-              if (validSp) {
-                matchDur = Number(validSp.logo_url);
               }
             }
           } catch (lErr) {
@@ -656,18 +600,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
         setMatch((prev: any) => ({ ...prev, ...mergedMatchData }));
 
-        let loadedTimer = false;
-        if (timerSpData?.logo_url) {
-          try {
-            const parsed = JSON.parse(timerSpData.logo_url);
-            applyTimerPayload({ ...mergedMatchData, ...parsed });
-            loadedTimer = true;
-          } catch (e) {}
-        }
-        if (!loadedTimer) {
-          if (mergedMatchData.status) {
-            setMatch((prev: any) => ({ ...prev, status: mergedMatchData.status }));
-          }
+        // Apply timer state from matches table columns
+        applyTimerPayload(mergedMatchData);
+
+        if (mergedMatchData.status) {
+          setMatch((prev: any) => ({ ...prev, status: mergedMatchData.status }));
         }
 
         if (matchData.home_penalty_score !== undefined && matchData.away_penalty_score !== undefined) {
@@ -703,6 +640,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         setHomePlayers(finalHomePlayers);
         setAwayPlayers(finalAwayPlayers);
         setEvents(finalEvents);
+        setIsPlayersLoading(false);
+        setIsEventsLoading(false);
 
         // Update high-speed memory cache for instant future loads
         MATCH_CONTROL_CACHE.set(String(matchId), {
@@ -724,6 +663,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       console.error('Background fetchMatchControlData error:', e);
     } finally {
       setLoading(false);
+      setIsPlayersLoading(false);
+      setIsEventsLoading(false);
     }
   };
 
@@ -738,10 +679,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       setEvents(data || []);
     } catch (e) {
       console.error('Error fetching events:', e);
+    } finally {
+      setIsEventsLoading(false);
     }
   };
-
-  const queryClient = useQueryClient();
 
   // Calculate elapsed time (Count-UP: to'g'ri sanash) for Mobile Admin Display
   const getElapsedSeconds = () => {
@@ -780,6 +721,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Instant Manual Timer Toggle (Play / Pause 0ms Instant Response!)
   const toggleTimerManual = () => {
+    if (isReadOnlyMode) return;
     const newRunning = !isTimerRunning;
     let curRemaining = timerSeconds;
     if (curRemaining <= 0) curRemaining = halfDurationSecs;
@@ -798,13 +740,31 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Instant Reset Timer (0ms RAM response)
   const resetTimerManual = () => {
+    if (isReadOnlyMode) return;
     updateTimerDBAndState(halfDurationSecs, null, false);
     showToast("Taymer qayta o'rnatildi (Reset) 🔄");
   };
 
+  // Instant Quick Minute Adjuster (+1m / -1m)
+  const adjustTimerSeconds = (deltaSec: number) => {
+    if (isReadOnlyMode) return;
+    const maxSec = (matchDurationMins * 60) || (halfDurationSecs * 2) || 3600;
+    const newSec = Math.max(0, Math.min(maxSec, timerSeconds + deltaSec));
+    const nowIso = isTimerRunning ? new Date().toISOString() : null;
+
+    // 1. Immediate UI flip (0ms response)
+    setTimerSeconds(newSec);
+    baseTimerSecondsRef.current = newSec;
+    timerStartedAtRef.current = nowIso;
+    showToast(deltaSec > 0 ? "+1 daqiqa qo'shildi ⏱️" : "-1 daqiqa kamaytirildi ⏱️");
+
+    // 2. Non-blocking Background persistence
+    updateTimerDBAndState(newSec, nowIso, isTimerRunning);
+  };
+
   // Instant Optimistic Score Adjuster (+1 / -1) with Rollback
   const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
-    if (!match) return;
+    if (!match || isReadOnlyMode) return;
     const isHome = teamType === 'home';
     const oldScore = isHome ? match.home_score || 0 : match.away_score || 0;
     const newScore = Math.max(0, oldScore + delta);
@@ -826,6 +786,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Adjust Penalty Score
   const adjustPenaltyScore = async (teamType: 'home' | 'away', delta: number) => {
+    if (isReadOnlyMode) return;
     const isHome = teamType === 'home';
     const oldPen = isHome ? homePenalties : awayPenalties;
     const newPen = Math.max(0, oldPen + delta);
@@ -844,6 +805,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Open Sleek Uzbek Confirmation Modal for Match Status Changes
   const promptStatusChange = (newStatus: string) => {
+    if (isReadOnlyMode) return;
     let title = "Statusni O'zgartirish";
     let message = "";
 
@@ -966,6 +928,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Open Event Modal prefilled
   const openEventModal = (type: string, teamId?: string | number, playerId?: string | number) => {
+    if (isReadOnlyMode) return;
     setEventType(type);
     setSelectedTeamId(teamId || match?.home_team_id || '');
     setSelectedPlayerId(playerId || '');
@@ -991,6 +954,14 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     const prevEvents = [...events];
     const prevMatch = { ...match };
 
+    // Check if there is an existing orphan replay video from a recently deleted mistake goal
+    const orphanReplay = ORPHAN_REPLAYS_BY_MATCH.get(String(matchId));
+    const isOrphanFresh = Boolean(orphanReplay && (Date.now() - orphanReplay.timestamp < 10 * 60 * 1000));
+    const existingReplayUrl = isGoal && isOrphanFresh ? orphanReplay?.url : null;
+    if (existingReplayUrl) {
+      ORPHAN_REPLAYS_BY_MATCH.delete(String(matchId));
+    }
+
     // 1. Instant Optimistic UI (0ms response)
     const optimisticEvent: any = {
       id: eventUuid,
@@ -1001,6 +972,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       event_type: eventType,
       type: eventType,
       minute: minVal,
+      replay_video_url: existingReplayUrl || null,
       created_at: new Date().toISOString(),
       player: currentModalPlayers.find((p) => p.id === selectedPlayerId) || null,
       team: selectedTeamId === match?.home_team_id ? homeTeam : awayTeam,
@@ -1017,7 +989,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }
 
     setShowEventModal(false);
-    showToast(isGoal ? "Gol saqlandi ⚽" : "Voqea qayd etildi ✅");
+    showToast(isGoal ? (existingReplayUrl ? "Gol saqlandi va Replay biriktirildi ⚽🎬" : "Gol saqlandi ⚽") : "Voqea qayd etildi ✅");
 
     // 2. Background RPC with rollback on error
     try {
@@ -1043,9 +1015,17 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         }));
       }
 
+      // If we had a preserved replay video, attach it to the newly created event record
+      if (existingReplayUrl) {
+        await supabase.from('match_events').update({ replay_video_url: existingReplayUrl }).eq('id', eventUuid);
+      }
+
       if (isGoal) {
         // Trigger OBS Replay Engine (amatora.exe) workflow
-        sendRemoteObsGoalSignal(eventUuid);
+        const selPlayer = currentModalPlayers.find((p) => p.id === selectedPlayerId);
+        const pName = selPlayer ? `${selPlayer.first_name || ''} ${selPlayer.last_name || ''}`.trim() : '';
+        const tName = selectedTeamId === match?.home_team_id ? (homeTeam?.name || 'Uy jamoa') : (awayTeam?.name || 'Mehmon');
+        sendRemoteObsGoalSignal(eventUuid, pName, tName);
       }
 
       queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
@@ -1062,6 +1042,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Delete Event with Instant Optimistic UI and Reliable Admin Delete
   const handleDeleteEvent = (event: any) => {
+    if (isReadOnlyMode) return;
     Alert.alert("Voqeani o'chirish", "Ushbu voqeani o'chirishni tasdiqlaysizmi?", [
       { text: "Bekor qilish", style: "cancel" },
       {
@@ -1076,6 +1057,14 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           if (isGoal) {
             newHomeScore = Math.max(0, newHomeScore - (isHome ? 1 : 0));
             newAwayScore = Math.max(0, newAwayScore - (isHome ? 0 : 1));
+
+            // If this deleted goal had a recorded replay video, preserve it in orphan map so next goal can re-link it
+            if (event.replay_video_url) {
+              ORPHAN_REPLAYS_BY_MATCH.set(String(matchId), {
+                url: event.replay_video_url,
+                timestamp: Date.now(),
+              });
+            }
           }
 
           // 1. Instant 0ms Optimistic local UI update
@@ -1164,59 +1153,6 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }
   }, [loading]);
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        {/* Top Action Nav Bar Skeleton */}
-        <View style={styles.topHeaderNav}>
-          <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
-          <View style={styles.topIconGroup}>
-            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
-            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
-            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
-            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
-          </View>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Main Scoreboard Board Skeleton */}
-          <Animated.View style={[styles.skeletonCard, { height: 160, opacity: pulseAnim }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
-              <View style={{ alignItems: 'center', gap: 6 }}>
-                <View style={styles.skeletonLogoCircle} />
-                <View style={{ width: 60, height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5 }} />
-              </View>
-
-              <View style={{ alignItems: 'center', gap: 8 }}>
-                <View style={{ width: 80, height: 32, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 8 }} />
-                <View style={{ width: 100, height: 22, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10 }} />
-              </View>
-
-              <View style={{ alignItems: 'center', gap: 6 }}>
-                <View style={styles.skeletonLogoCircle} />
-                <View style={{ width: 60, height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5 }} />
-              </View>
-            </View>
-            <View style={{ width: '100%', height: 28, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, marginTop: 10 }} />
-          </Animated.View>
-
-          {/* Action Button Skeleton */}
-          <Animated.View style={[styles.skeletonCard, { height: 50, opacity: pulseAnim }]} />
-
-          {/* Quick Events Skeleton */}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Animated.View style={[styles.skeletonChip, { opacity: pulseAnim }]} />
-            <Animated.View style={[styles.skeletonChip, { opacity: pulseAnim }]} />
-            <Animated.View style={[styles.skeletonChip, { opacity: pulseAnim }]} />
-          </View>
-
-          {/* Roster Skeleton Card */}
-          <Animated.View style={[styles.skeletonCard, { height: 240, opacity: pulseAnim }]} />
-        </ScrollView>
-      </View>
-    );
-  }
-
   // Next status helper for main big action button (Resolves 'live' to exact half stage)
   const resolveMatchStatus = () => {
     const raw = match?.status || 'scheduled';
@@ -1270,12 +1206,69 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     outputRange: [0, 0.8, 1],
   });
 
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        {/* Top Action Nav Bar Skeleton */}
+        <View style={styles.topHeaderNav}>
+          <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
+          <View style={styles.topIconGroup}>
+            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
+            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
+            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
+            <Animated.View style={[styles.skeletonNavTile, { opacity: pulseAnim }]} />
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* Main Scoreboard Board Skeleton */}
+          <Animated.View style={[styles.skeletonCard, { height: 160, opacity: pulseAnim }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
+              <View style={{ alignItems: 'center', gap: 6 }}>
+                <View style={styles.skeletonLogoCircle} />
+                <View style={{ width: 60, height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5 }} />
+              </View>
+
+              <View style={{ alignItems: 'center', gap: 8 }}>
+                <View style={{ width: 80, height: 32, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 8 }} />
+                <View style={{ width: 100, height: 22, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10 }} />
+              </View>
+
+              <View style={{ alignItems: 'center', gap: 6 }}>
+                <View style={styles.skeletonLogoCircle} />
+                <View style={{ width: 60, height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5 }} />
+              </View>
+            </View>
+            <View style={{ width: '100%', height: 28, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, marginTop: 10 }} />
+          </Animated.View>
+
+          {/* Action Button Skeleton */}
+          <Animated.View style={[styles.skeletonCard, { height: 50, opacity: pulseAnim }]} />
+
+          {/* Quick Events Skeleton */}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Animated.View style={[styles.skeletonChip, { opacity: pulseAnim }]} />
+            <Animated.View style={[styles.skeletonChip, { opacity: pulseAnim }]} />
+            <Animated.View style={[styles.skeletonChip, { opacity: pulseAnim }]} />
+          </View>
+
+          {/* Roster Skeleton Card */}
+          <Animated.View style={[styles.skeletonCard, { height: 240, opacity: pulseAnim }]} />
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* 1. Top Action Buttons Bar (Sleek Icon-Only Row) */}
       <View style={styles.topHeaderNav}>
-        <TouchableOpacity style={styles.iconNavTile} onPress={onBack}>
-          <Ionicons name="arrow-back" size={18} color="#FFFFFF" />
+        <TouchableOpacity
+          style={[styles.iconNavTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+          onPress={onBack}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="arrow-back" size={18} color={Platform.OS === 'android' ? colors.textPrimary : '#FFFFFF'} />
         </TouchableOpacity>
 
         <View style={styles.topIconGroup}>
@@ -1283,10 +1276,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           <TouchableOpacity
             style={[
               styles.iconNavTile,
+              Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border },
               { borderColor: isObsConnected ? '#22C55E' : '#EF4444', backgroundColor: isObsConnected ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
             ]}
             onPress={() => setShowObsModal(true)}
           >
+            {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <Ionicons
               name={isObsConnected ? "radio-outline" : "warning-outline"}
               size={18}
@@ -1296,34 +1291,38 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
           {/* Boshqaruvni ulashish */}
           <TouchableOpacity
-            style={styles.iconNavTile}
+            style={[styles.iconNavTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
             onPress={() => {
               Clipboard.setString(`https://amatora.uz/match/${matchId}`);
               showToast("Match boshqaruv havolasi nusxalandi");
             }}
           >
+            {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <Ionicons name="share-social-outline" size={18} color="#38BDF8" />
           </TouchableOpacity>
 
           {/* OBS Stream Link */}
           <TouchableOpacity
-            style={styles.iconNavTile}
+            style={[styles.iconNavTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
             onPress={() => {
-              const obsUrl = `https://amatora.uz/obs/scoreboard/${match?.location?.includes('2-maydon') ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`;
+              const isField2 = String(match?.location || '').toLowerCase().includes('2');
+              const obsUrl = `https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`;
               Clipboard.setString(obsUrl);
-              showToast(`OBS Stream URL (${match?.location || '1-maydon'}) nusxalandi`);
+              showToast(`OBS Stream URL (${match?.location || (isField2 ? '2-maydon' : '1-maydon')}) nusxalandi`);
             }}
           >
+            {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <Ionicons name="desktop-outline" size={18} color="#2563EB" />
           </TouchableOpacity>
 
           {/* YouTube Oblojka */}
           <TouchableOpacity
-            style={styles.iconNavTile}
+            style={[styles.iconNavTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
             onPress={() => {
               showToast("YouTube oblojkasi yangilandi");
             }}
           >
+            {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <Ionicons name="logo-youtube" size={18} color="#FF0000" />
           </TouchableOpacity>
         </View>
@@ -1334,26 +1333,61 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         <Animated.View
           style={[
             styles.floatingToastCard,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 },
             {
               opacity: opacityAnim,
               transform: [{ translateY: slideAnim }],
             },
           ]}
         >
+          {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <View style={styles.toastCheckCircle}>
             <Ionicons name="checkmark" size={12} color="#FFFFFF" />
           </View>
-          <Text style={styles.floatingToastText}>{toastMessage}</Text>
+          <Text style={[styles.floatingToastText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{toastMessage}</Text>
           <TouchableOpacity onPress={() => setToastMessage(null)} style={{ paddingLeft: 6 }}>
-            <Ionicons name="close" size={14} color="rgba(255,255,255,0.6)" />
+            <Ionicons name="close" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
           </TouchableOpacity>
         </Animated.View>
       )}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Co-Host Read-Only View Banner */}
+        {isReadOnlyMode && (
+          <View
+            style={{
+              backgroundColor: Platform.OS === 'android' ? (isDark ? 'rgba(59, 130, 246, 0.15)' : '#EFF6FF') : 'rgba(59, 130, 246, 0.12)',
+              borderColor: Platform.OS === 'android' ? '#3B82F6' : 'rgba(59, 130, 246, 0.4)',
+              borderWidth: 1,
+              borderRadius: 14,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              marginBottom: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              overflow: 'hidden',
+            }}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            <Ionicons name="eye-outline" size={22} color="#38BDF8" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: Platform.OS === 'android' ? colors.textPrimary : '#FFFFFF', fontWeight: '800', fontSize: 13 }}>
+                {"Tomosha qilish rejimi (Co-Host)"}
+              </Text>
+              <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : '#94A3B8', fontSize: 11, marginTop: 2 }}>
+                {"Ushbu o'yin hamkor tashkilot ligasiga tegishli. O'yinni faqat tomosha qilish mumkin, tahrirlash cheklangan."}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* 2. Main Match Control Board Card (Zero Overlap Responsive Mobile Layout) */}
-        <View style={styles.scoreboardMainCard}>
-          <Text style={styles.boardLeagueSubtitle}>{`${match?.league || 'LIGA'} • ${match?.location === '2-maydon' ? '2-maydon' : '1-maydon'}`}</Text>
+        <View style={[styles.scoreboardMainCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Text style={[styles.boardLeagueSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
+            {`${match?.league || 'LIGA'} • ${match?.location === '2-maydon' ? '2-maydon' : '1-maydon'}`}
+          </Text>
 
           {/* Top Scoreboard Row: Home Team (Left) | Score & Status (Center) | Away Team (Right) */}
           <View style={styles.scoreboardBodyRow}>
@@ -1367,39 +1401,57 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                 }}
                 style={styles.teamBoardLogo}
               />
-              <Text style={styles.teamBoardName} numberOfLines={1}>
+              <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                 {homeTeam?.name || 'Mezbon'}
               </Text>
-              <View style={styles.scoreAdjustRow}>
-                <TouchableOpacity style={styles.minusScoreBtn} onPress={() => adjustScore('home', -1)}>
-                  <Text style={styles.scoreBtnSymbol}>-</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.plusScoreBtn} onPress={() => adjustScore('home', 1)}>
-                  <Text style={styles.scoreBtnSymbol}>+</Text>
-                </TouchableOpacity>
-              </View>
+              {!isReadOnlyMode && (
+                <View style={styles.scoreAdjustRow}>
+                  <TouchableOpacity
+                    style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                    onPress={() => adjustScore('home', -1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                    onPress={() => adjustScore('home', 1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             {/* Central Score & Timer Pill */}
             <View style={styles.centerBoardCol}>
-              <Text style={styles.bigScoreText}>{`${match?.home_score ?? 0} : ${match?.away_score ?? 0}`}</Text>
+              <Text style={[styles.bigScoreText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                {`${match?.home_score ?? 0} : ${match?.away_score ?? 0}`}
+              </Text>
 
               {/* Clean Timer Pill Container (Only counting timer clock + play/reset) */}
-              <View style={styles.timerOnlyCapsule}>
-                <Ionicons name="time-outline" size={14} color="#00FF66" />
-                <Text style={styles.timerPillText}>{formatTimer(timerSeconds)}</Text>
-                <Text style={styles.timerMinBadge}>{`(${getCurrentMinute()}')`}</Text>
+              <View style={[styles.timerOnlyCapsule, Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.accentGreen }]}>
+                {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Text style={[styles.timerPillText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{formatTimer(timerSeconds)}</Text>
+                <Text style={[styles.timerMinBadge, Platform.OS === 'android' && { color: colors.accentGreen }]}>{`(${getCurrentMinute()}')`}</Text>
 
-                <TouchableOpacity 
-                  style={[styles.pillIconBtn, { backgroundColor: isTimerRunning ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)' }]} 
-                  onPress={toggleTimerManual}
-                >
-                  <Ionicons name={isTimerRunning ? "pause" : "play"} size={13} color={isTimerRunning ? "#EF4444" : "#22C55E"} />
-                </TouchableOpacity>
+                {!isReadOnlyMode && (
+                  <>
+                    <TouchableOpacity 
+                      style={[styles.pillIconBtn, { backgroundColor: isTimerRunning ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)' }]} 
+                      onPress={toggleTimerManual}
+                    >
+                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Ionicons name={isTimerRunning ? "pause" : "play"} size={13} color={isTimerRunning ? "#EF4444" : (Platform.OS === 'android' ? colors.accentGreen : "#22C55E")} />
+                    </TouchableOpacity>
 
-                <TouchableOpacity style={styles.pillIconBtn} onPress={resetTimerManual}>
-                  <Ionicons name="refresh" size={13} color="rgba(255,255,255,0.8)" />
-                </TouchableOpacity>
+                    <TouchableOpacity style={styles.pillIconBtn} onPress={resetTimerManual}>
+                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Ionicons name="refresh" size={13} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.8)"} />
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             </View>
 
@@ -1413,24 +1465,34 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                 }}
                 style={styles.teamBoardLogo}
               />
-              <Text style={styles.teamBoardName} numberOfLines={1}>
+              <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                 {awayTeam?.name || 'Mehmon'}
               </Text>
-              <View style={styles.scoreAdjustRow}>
-                <TouchableOpacity style={styles.minusScoreBtn} onPress={() => adjustScore('away', -1)}>
-                  <Text style={styles.scoreBtnSymbol}>-</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.plusScoreBtn} onPress={() => adjustScore('away', 1)}>
-                  <Text style={styles.scoreBtnSymbol}>+</Text>
-                </TouchableOpacity>
-              </View>
+              {!isReadOnlyMode && (
+                <View style={styles.scoreAdjustRow}>
+                  <TouchableOpacity
+                    style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                    onPress={() => adjustScore('away', -1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                    onPress={() => adjustScore('away', 1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
 
           {/* DEDICATED FULL-WIDTH STATUS & DURATION ROW */}
           <View style={styles.timerRowContainer}>
-            <View style={styles.statusBadgeCapsule}>
-              <Text style={styles.statusBadgeText}>
+            <View style={[styles.statusBadgeCapsule, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : '#E0F2FE' }]}>
+              <Text style={[styles.statusBadgeText, Platform.OS === 'android' && { color: isDark ? '#38BDF8' : '#0284C7' }]}>
                 {`${match?.league || 'LIGA'} • ${
                   matchStatus === 'first_half'
                     ? '1-Taym Ketmoqda'
@@ -1448,137 +1510,165 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         </View>
 
         {/* 3. Dynamic Status Control Action Bar (1:1 Web Admin Screenshot matching) */}
-        <View style={styles.mainActionBarRow}>
-          {matchStatus === 'scheduled' && (
-            <TouchableOpacity
-              style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }]}
-              onPress={() => promptStatusChange('first_half')}
-              disabled={isStatusChanging}
-            >
-              {isStatusChanging ? (
-                <ActivityIndicator size="small" color="#000000" />
-              ) : (
-                <>
-                  <Ionicons name="play" size={18} color="#000000" />
-                  <Text style={styles.bigGreenBtnText}>{"1-Taym Boshlash"}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {matchStatus === 'first_half' && (
-            <TouchableOpacity
-              style={[styles.bigOrangeActionBtn, isStatusChanging && { opacity: 0.7 }]}
-              onPress={() => promptStatusChange('half_time')}
-              disabled={isStatusChanging}
-            >
-              {isStatusChanging ? (
-                <ActivityIndicator size="small" color="#000000" />
-              ) : (
-                <>
-                  <Ionicons name="pause" size={18} color="#000000" />
-                  <Text style={styles.bigGreenBtnText}>{"Tanaffus e'lon qilish"}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {matchStatus === 'half_time' && (
-            <TouchableOpacity
-              style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }]}
-              onPress={() => promptStatusChange('second_half')}
-              disabled={isStatusChanging}
-            >
-              {isStatusChanging ? (
-                <ActivityIndicator size="small" color="#000000" />
-              ) : (
-                <>
-                  <Ionicons name="play" size={18} color="#000000" />
-                  <Text style={styles.bigGreenBtnText}>{"2-Taym Boshlash"}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {matchStatus === 'second_half' && (
-            <TouchableOpacity
-              style={[styles.bigRedActionBtn, isStatusChanging && { opacity: 0.7 }]}
-              onPress={() => promptStatusChange('finished')}
-              disabled={isStatusChanging}
-            >
-              {isStatusChanging ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <Ionicons name="flag" size={18} color="#FFFFFF" />
-                  <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-
-          {matchStatus === 'finished' && (
-            <View style={{ width: '100%', gap: 8 }}>
-              <TouchableOpacity style={styles.bigFinishedBtn} disabled>
-                <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
-                <Text style={styles.bigFinishedBtnText}>{"Uchrashuv Yakunlandi"}</Text>
-              </TouchableOpacity>
+        {!isReadOnlyMode && (
+          <View style={[styles.mainActionBarRow, matchStatus === 'finished' && { flexDirection: 'column', width: '100%', gap: 8 }]}>
+            {matchStatus === 'scheduled' && (
               <TouchableOpacity
-                style={[styles.resetStatusBtn, isStatusChanging && { opacity: 0.7 }]}
-                onPress={() => promptStatusChange('scheduled')}
+                style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                onPress={() => promptStatusChange('first_half')}
                 disabled={isStatusChanging}
               >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 {isStatusChanging ? (
-                  <ActivityIndicator size="small" color="#F59E0B" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <>
-                    <Ionicons name="refresh" size={16} color="#F59E0B" />
-                    <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
+                    <Ionicons name="play" size={18} color="#FFFFFF" />
+                    <Text style={[styles.bigGreenBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"1-Taym Boshlash"}</Text>
                   </>
                 )}
               </TouchableOpacity>
-            </View>
-          )}
+            )}
 
-          {/* Penalty Shootout Dropdown Button */}
-          <TouchableOpacity
-            style={styles.penaltyDropdownBtn}
-            onPress={() => setShowPenaltyControls(!showPenaltyControls)}
-          >
-            <Ionicons name="football-outline" size={16} color="#38BDF8" />
-            <Text style={styles.penaltyDropdownText}>{"Penaltilar seriyasi ▼"}</Text>
-          </TouchableOpacity>
-        </View>
+            {matchStatus === 'first_half' && (
+              <TouchableOpacity
+                style={[styles.bigOrangeActionBtn, isStatusChanging && { opacity: 0.7 }]}
+                onPress={() => promptStatusChange('half_time')}
+                disabled={isStatusChanging}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                {isStatusChanging ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="pause" size={18} color="#FFFFFF" />
+                    <Text style={[styles.bigGreenBtnText, { color: '#FFFFFF' }]}>{"Tanaffus e'lon qilish"}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {matchStatus === 'half_time' && (
+              <TouchableOpacity
+                style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                onPress={() => promptStatusChange('second_half')}
+                disabled={isStatusChanging}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                {isStatusChanging ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="play" size={18} color="#FFFFFF" />
+                    <Text style={[styles.bigGreenBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"2-Taym Boshlash"}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {matchStatus === 'second_half' && (
+              <TouchableOpacity
+                style={[styles.bigRedActionBtn, isStatusChanging && { opacity: 0.7 }]}
+                onPress={() => promptStatusChange('finished')}
+                disabled={isStatusChanging}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                {isStatusChanging ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="flag" size={18} color="#FFFFFF" />
+                    <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {matchStatus === 'finished' && (
+              <View style={{ width: '100%', gap: 8 }}>
+                <TouchableOpacity style={[styles.bigFinishedBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]} disabled>
+                  {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                  <Ionicons name="checkmark-circle" size={18} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                  <Text style={[styles.bigFinishedBtnText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{"Uchrashuv Yakunlandi"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.resetStatusBtn, isStatusChanging && { opacity: 0.7 }]}
+                  onPress={() => promptStatusChange('scheduled')}
+                  disabled={isStatusChanging}
+                >
+                  {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                  {isStatusChanging ? (
+                    <ActivityIndicator size="small" color="#F59E0B" />
+                  ) : (
+                    <>
+                      <Ionicons name="refresh" size={16} color="#F59E0B" />
+                      <Text style={styles.resetStatusBtnText}>{"1-Taym Boshlash Holatiga Qaytarish"}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Penalty Shootout Dropdown Button */}
+            {matchStatus !== 'finished' && (
+              <TouchableOpacity
+                style={[styles.penaltyDropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+                onPress={() => setShowPenaltyControls(!showPenaltyControls)}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Ionicons name="football-outline" size={16} color="#38BDF8" />
+                <Text style={[styles.penaltyDropdownText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Penaltilar seriyasi ▼"}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Penalty Shootout Controls Box */}
-        {showPenaltyControls && (
-          <View style={styles.penaltyControlBox}>
-            <Text style={styles.sectionTitle}>{"Penaltilar Seriyasi Hisobi"}</Text>
+        {!isReadOnlyMode && showPenaltyControls && (
+          <View style={[styles.penaltyControlBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Penaltilar Seriyasi Hisobi"}</Text>
             <View style={styles.scoreboardBodyRow}>
               <View style={styles.teamBoardCol}>
-                <Text style={styles.teamBoardName}>{homeTeam?.name || 'Mezbon'}</Text>
+                <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{homeTeam?.name || 'Mezbon'}</Text>
                 <View style={styles.scoreAdjustRow}>
-                  <TouchableOpacity style={styles.minusScoreBtn} onPress={() => adjustPenaltyScore('home', -1)}>
-                    <Text style={styles.scoreBtnSymbol}>-</Text>
+                  <TouchableOpacity
+                    style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                    onPress={() => adjustPenaltyScore('home', -1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
                   </TouchableOpacity>
-                  <Text style={styles.scoreValText}>{homePenalties}</Text>
-                  <TouchableOpacity style={styles.plusScoreBtn} onPress={() => adjustPenaltyScore('home', 1)}>
-                    <Text style={styles.scoreBtnSymbol}>+</Text>
+                  <Text style={[styles.scoreValText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{homePenalties}</Text>
+                  <TouchableOpacity
+                    style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                    onPress={() => adjustPenaltyScore('home', 1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              <Text style={styles.scoreColon}>:</Text>
+              <Text style={[styles.scoreColon, Platform.OS === 'android' && { color: colors.textPrimary }]}>:</Text>
 
               <View style={styles.teamBoardCol}>
-                <Text style={styles.teamBoardName}>{awayTeam?.name || 'Mehmon'}</Text>
+                <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{awayTeam?.name || 'Mehmon'}</Text>
                 <View style={styles.scoreAdjustRow}>
-                  <TouchableOpacity style={styles.minusScoreBtn} onPress={() => adjustPenaltyScore('away', -1)}>
-                    <Text style={styles.scoreBtnSymbol}>-</Text>
+                  <TouchableOpacity
+                    style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                    onPress={() => adjustPenaltyScore('away', -1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
                   </TouchableOpacity>
-                  <Text style={styles.scoreValText}>{awayPenalties}</Text>
-                  <TouchableOpacity style={styles.plusScoreBtn} onPress={() => adjustPenaltyScore('away', 1)}>
-                    <Text style={styles.scoreBtnSymbol}>+</Text>
+                  <Text style={[styles.scoreValText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{awayPenalties}</Text>
+                  <TouchableOpacity
+                    style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                    onPress={() => adjustPenaltyScore('away', 1)}
+                  >
+                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1587,38 +1677,49 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         )}
 
         {/* 4. Quick Action Event Buttons */}
-        <View style={styles.quickEventsRow}>
-          {EVENT_TYPES.map((ev) => (
-            <TouchableOpacity
-              key={ev.id}
-              style={[styles.quickEventChip, { borderColor: ev.color }]}
-              onPress={() => openEventModal(ev.id)}
-            >
-              <Ionicons name={ev.icon as any} size={14} color={ev.color} />
-              <Text style={styles.quickEventText}>{ev.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {!isReadOnlyMode && (
+          <View style={styles.quickEventsRow}>
+            {EVENT_TYPES.map((ev) => (
+              <TouchableOpacity
+                key={ev.id}
+                style={[
+                  styles.quickEventChip,
+                  { borderColor: ev.color },
+                  Platform.OS === 'android' && { backgroundColor: colors.bgCard },
+                ]}
+                onPress={() => openEventModal(ev.id)}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Ionicons name={ev.icon as any} size={14} color={ev.color} />
+                <Text style={[styles.quickEventText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{ev.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         {/* 5. Interactive Team Roster with Chevron (< >) Switcher */}
-        <View style={styles.rosterCard}>
+        <View style={[styles.rosterCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <View style={styles.rosterHeader}>
             <TouchableOpacity
-              style={styles.arrowSwitchBtn}
+              style={[styles.arrowSwitchBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(34, 197, 94, 0.15)' : '#DCFCE7', borderColor: colors.accentGreen }]}
               onPress={() => setActiveRosterTab((prev) => (prev === 'home' ? 'away' : 'home'))}
             >
-              <Ionicons name="chevron-back" size={22} color="#00FF66" />
+              {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+              <Ionicons name="chevron-back" size={22} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
             </TouchableOpacity>
 
-            <View style={styles.rosterSubtabRow}>
+            <View style={[styles.rosterSubtabRow, Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' }]}>
               <TouchableOpacity
-                style={[styles.rosterSubtab, activeRosterTab === 'home' && styles.rosterSubtabActive]}
+                style={[styles.rosterSubtab, activeRosterTab === 'home' && (Platform.OS === 'android' ? { backgroundColor: colors.accentGreen } : styles.rosterSubtabActive)]}
                 onPress={() => setActiveRosterTab('home')}
               >
+                {Platform.OS === 'ios' && activeRosterTab === 'home' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 <Text
                   style={[
                     styles.rosterSubtabText,
-                    activeRosterTab === 'home' && styles.rosterSubtabTextActive,
+                    Platform.OS === 'android' && { color: colors.textMuted },
+                    activeRosterTab === 'home' && (Platform.OS === 'android' ? { color: '#FFFFFF', fontWeight: '900' } : styles.rosterSubtabTextActive),
                   ]}
                   numberOfLines={1}
                 >
@@ -1627,13 +1728,15 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.rosterSubtab, activeRosterTab === 'away' && styles.rosterSubtabActive]}
+                style={[styles.rosterSubtab, activeRosterTab === 'away' && (Platform.OS === 'android' ? { backgroundColor: colors.accentGreen } : styles.rosterSubtabActive)]}
                 onPress={() => setActiveRosterTab('away')}
               >
+                {Platform.OS === 'ios' && activeRosterTab === 'away' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 <Text
                   style={[
                     styles.rosterSubtabText,
-                    activeRosterTab === 'away' && styles.rosterSubtabTextActive,
+                    Platform.OS === 'android' && { color: colors.textMuted },
+                    activeRosterTab === 'away' && (Platform.OS === 'android' ? { color: '#FFFFFF', fontWeight: '900' } : styles.rosterSubtabTextActive),
                   ]}
                   numberOfLines={1}
                 >
@@ -1643,67 +1746,225 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             </View>
 
             <TouchableOpacity
-              style={styles.arrowSwitchBtn}
+              style={[styles.arrowSwitchBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(34, 197, 94, 0.15)' : '#DCFCE7', borderColor: colors.accentGreen }]}
               onPress={() => setActiveRosterTab((prev) => (prev === 'home' ? 'away' : 'home'))}
             >
-              <Ionicons name="chevron-forward" size={22} color="#00FF66" />
+              {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+              <Ionicons name="chevron-forward" size={22} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
             </TouchableOpacity>
           </View>
 
           {/* Player Roster List (Gol ⚽, Assist 👣, Sariq 🟨, Qizil 🟥) */}
           <View style={styles.playerListContainer}>
-            {currentRoster.map((player) => (
-              <View key={player.id} style={styles.playerRowItem}>
-                <View style={styles.playerNumBadge}>
-                  <Text style={styles.playerNumText}>{player.player_number ? `#${player.player_number}` : '•'}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.playerNameText}>
-                    {`${player.first_name || ''} ${player.last_name || ''}`}
-                  </Text>
-                  <Text style={styles.playerPositionText}>{player.position || 'O\'yinchi'}</Text>
-                </View>
-
-                {/* Quick Action Buttons for Player: Gol, Assist, Sariq, Qizil */}
-                <View style={styles.playerQuickActions}>
-                  <TouchableOpacity
-                    style={styles.playerActBtn}
-                    onPress={() => openEventModal('goal', currentRosterTeamId, player.id)}
+            {isPlayersLoading ? (
+              <>
+                {[1, 2, 3, 4, 5].map((key) => (
+                  <Animated.View
+                    key={key}
+                    style={[
+                      styles.playerRowItem,
+                      { opacity: pulseAnim },
+                      Platform.OS === 'android' && {
+                        backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                        borderColor: colors.border,
+                        borderWidth: 1,
+                      },
+                    ]}
                   >
-                    <Ionicons name="football-outline" size={14} color="#22C55E" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.playerActBtn}
-                    onPress={() => openEventModal('assist', currentRosterTeamId, player.id)}
-                  >
-                    <Ionicons name="footsteps-outline" size={14} color="#3B82F6" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.playerActBtn}
-                    onPress={() => openEventModal('yellow_card', currentRosterTeamId, player.id)}
-                  >
-                    <Ionicons name="square" size={12} color="#F59E0B" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.playerActBtn}
-                    onPress={() => openEventModal('red_card', currentRosterTeamId, player.id)}
-                  >
-                    <Ionicons name="square" size={12} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
+                    {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                    <View
+                      style={[
+                        styles.playerNumBadge,
+                        Platform.OS === 'android'
+                          ? { backgroundColor: isDark ? '#334155' : '#E2E8F0' }
+                          : { backgroundColor: 'rgba(255,255,255,0.1)' },
+                      ]}
+                    />
+                    <View style={{ flex: 1, gap: 6 }}>
+                      <View
+                        style={[
+                          { width: '55%', height: 13, borderRadius: 4 },
+                          Platform.OS === 'android'
+                            ? { backgroundColor: isDark ? '#334155' : '#CBD5E1' }
+                            : { backgroundColor: 'rgba(255,255,255,0.15)' },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          { width: '35%', height: 9, borderRadius: 4 },
+                          Platform.OS === 'android'
+                            ? { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }
+                            : { backgroundColor: 'rgba(255,255,255,0.08)' },
+                        ]}
+                      />
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {[1, 2, 3, 4].map((bKey) => (
+                        <View
+                          key={bKey}
+                          style={[
+                            styles.playerActBtn,
+                            Platform.OS === 'android'
+                              ? { backgroundColor: isDark ? '#334155' : '#E2E8F0' }
+                              : { backgroundColor: 'rgba(255,255,255,0.08)' },
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  </Animated.View>
+                ))}
+              </>
+            ) : currentRoster.length === 0 ? (
+              <View
+                style={[
+                  styles.playerRowItem,
+                  { justifyContent: 'center', paddingVertical: 18 },
+                  Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border, borderWidth: 1 },
+                ]}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Text
+                  style={[
+                    { fontSize: 13, fontWeight: '600', textAlign: 'center' },
+                    Platform.OS === 'android' ? { color: colors.textMuted } : { color: 'rgba(255,255,255,0.5)' },
+                  ]}
+                >
+                  {"Ushbu jamoada o'yinchilar topilmadi"}
+                </Text>
               </View>
-            ))}
+            ) : (
+              currentRoster.map((player) => (
+                <View
+                  key={player.id}
+                  style={[
+                    styles.playerRowItem,
+                    Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border, borderWidth: 1 }
+                  ]}
+                >
+                  {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                  <View style={[styles.playerNumBadge, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}>
+                    <Text style={[styles.playerNumText, Platform.OS === 'android' && { color: colors.accentGreen }]}>
+                      {player.player_number ? `#${player.player_number}` : '•'}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.playerNameText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                      {`${player.first_name || ''} ${player.last_name || ''}`}
+                    </Text>
+                    <Text style={[styles.playerPositionText, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                      {player.position || 'O\'yinchi'}
+                    </Text>
+                  </View>
+
+                  {/* Quick Action Buttons for Player: Gol, Assist, Sariq, Qizil */}
+                  {!isReadOnlyMode && (
+                    <View style={styles.playerQuickActions}>
+                      <TouchableOpacity
+                        style={[styles.playerActBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                        onPress={() => openEventModal('goal', currentRosterTeamId, player.id)}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="football-outline" size={14} color="#22C55E" />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.playerActBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                        onPress={() => openEventModal('assist', currentRosterTeamId, player.id)}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="footsteps-outline" size={14} color="#3B82F6" />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.playerActBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                        onPress={() => openEventModal('yellow_card', currentRosterTeamId, player.id)}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="square" size={12} color="#F59E0B" />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.playerActBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                        onPress={() => openEventModal('red_card', currentRosterTeamId, player.id)}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="square" size={12} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
           </View>
         </View>
 
         {/* 6. Live Events Timeline */}
-        <View style={styles.eventsTimelineCard}>
-          <Text style={styles.sectionTitle}>{"O'yin Voqealari (Timeline)"}</Text>
-          {events.length === 0 ? (
-            <Text style={styles.emptyEventsText}>{"Hozircha voqealar kiritilmagan"}</Text>
+        <View style={[styles.eventsTimelineCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"O'yin Voqealari (Timeline)"}</Text>
+          {isEventsLoading ? (
+            <>
+              {[1, 2, 3].map((key) => (
+                <Animated.View
+                  key={key}
+                  style={[
+                    styles.eventItemRow,
+                    { opacity: pulseAnim },
+                    Platform.OS === 'android' && {
+                      backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+                      borderColor: colors.border,
+                      borderWidth: 1,
+                    },
+                  ]}
+                >
+                  {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                  <View
+                    style={[
+                      styles.eventMinuteBadge,
+                      Platform.OS === 'android'
+                        ? { backgroundColor: isDark ? '#334155' : '#E2E8F0' }
+                        : { backgroundColor: 'rgba(255,255,255,0.1)' },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      { width: 16, height: 16, borderRadius: 8 },
+                      Platform.OS === 'android'
+                        ? { backgroundColor: isDark ? '#334155' : '#E2E8F0' }
+                        : { backgroundColor: 'rgba(255,255,255,0.12)' },
+                    ]}
+                  />
+                  <View style={{ flex: 1, gap: 6 }}>
+                    <View
+                      style={[
+                        { width: '50%', height: 13, borderRadius: 4 },
+                        Platform.OS === 'android'
+                          ? { backgroundColor: isDark ? '#334155' : '#CBD5E1' }
+                          : { backgroundColor: 'rgba(255,255,255,0.15)' },
+                      ]}
+                    />
+                    <View
+                      style={[
+                        { width: '30%', height: 9, borderRadius: 4 },
+                        Platform.OS === 'android'
+                          ? { backgroundColor: isDark ? '#1E293B' : '#E2E8F0' }
+                          : { backgroundColor: 'rgba(255,255,255,0.08)' },
+                      ]}
+                    />
+                  </View>
+                  <View
+                    style={[
+                      styles.eventDeleteBtn,
+                      Platform.OS === 'android'
+                        ? { backgroundColor: isDark ? '#334155' : '#E2E8F0' }
+                        : { backgroundColor: 'rgba(255,255,255,0.08)' },
+                    ]}
+                  />
+                </Animated.View>
+              ))}
+            </>
+          ) : events.length === 0 ? (
+            <Text style={[styles.emptyEventsText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Hozircha voqealar kiritilmagan"}</Text>
           ) : (
             events.map((ev) => {
               const evConfig = EVENT_TYPES.find((t) => t.id === ev.event_type) || EVENT_TYPES[0];
@@ -1713,26 +1974,36 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               const isHome = ev.team_id === match?.home_team_id;
 
               return (
-                <View key={ev.id} style={styles.eventItemRow}>
-                  <View style={styles.eventMinuteBadge}>
-                    <Text style={styles.eventMinuteText}>{`${ev.minute}'`}</Text>
+                <View
+                  key={ev.id}
+                  style={[
+                    styles.eventItemRow,
+                    Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F8FAFC', borderColor: colors.border, borderWidth: 1 }
+                  ]}
+                >
+                  {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                  <View style={[styles.eventMinuteBadge, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(34, 197, 94, 0.15)' : '#DCFCE7' }]}>
+                    <Text style={[styles.eventMinuteText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{`${ev.minute}'`}</Text>
                   </View>
 
                   <Ionicons name={evConfig.icon as any} size={15} color={evConfig.color} />
 
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.eventPlayerText}>
+                    <Text style={[styles.eventPlayerText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                       {ev.player?.player_number ? `#${ev.player.player_number} ` : ''}
                       {playerName}
                     </Text>
-                    <Text style={styles.eventTeamText}>
+                    <Text style={[styles.eventTeamText, Platform.OS === 'android' && { color: colors.textMuted }]}>
                       {isHome ? homeTeam?.name : awayTeam?.name}
                     </Text>
                   </View>
 
-                  <TouchableOpacity style={styles.eventDeleteBtn} onPress={() => handleDeleteEvent(ev)}>
-                    <Ionicons name="trash-outline" size={15} color="#EF4444" />
-                  </TouchableOpacity>
+                  {!isReadOnlyMode && (
+                    <TouchableOpacity style={styles.eventDeleteBtn} onPress={() => handleDeleteEvent(ev)}>
+                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               );
             })
@@ -1740,75 +2011,105 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         </View>
       </ScrollView>
 
-      {/* Pop-up Animated Solid Full-Width Pause/Play Button (Only visible during active 1st or 2nd half) */}
-      <Animated.View
-        pointerEvents={isStickyTimerVisible ? 'auto' : 'none'}
-        style={[
-          styles.stickyBottomTimerBar,
-          {
-            opacity: stickyBtnOpacity,
-            transform: [
-              { translateY: stickyBtnTranslateY },
-              { scale: stickyBtnScale },
-            ],
-          },
-        ]}
-      >
-        <TouchableOpacity
+      {/* Pop-up Animated Solid Full-Width Pause/Play & Minute Adjust Buttons (Only visible during active 1st or 2nd half) */}
+      {!isReadOnlyMode && (
+        <Animated.View
+          pointerEvents={isStickyTimerVisible ? 'auto' : 'none'}
           style={[
-            styles.solidTimerFullBtn,
+            styles.stickyBottomTimerBar,
             {
-              backgroundColor: isTimerRunning ? '#DC2626' : '#16A34A',
+              opacity: stickyBtnOpacity,
+              transform: [
+                { translateY: stickyBtnTranslateY },
+                { scale: stickyBtnScale },
+              ],
             },
           ]}
-          onPress={toggleTimerManual}
-          activeOpacity={0.85}
         >
-          <View style={styles.solidBtnContentRow}>
-            <View style={styles.solidBtnLeftGroup}>
-              <Ionicons
-                name={isTimerRunning ? 'pause-circle' : 'play-circle'}
-                size={26}
-                color="#FFFFFF"
-              />
-              <Text style={styles.solidBtnMainText}>
-                {isTimerRunning ? "Vaqtni To'xtatish (Pauza)" : 'Vaqtni Davom Ettirish'}
-              </Text>
-            </View>
-            <View style={styles.solidBtnTimeBadge}>
-              <Text style={styles.solidBtnTimeText}>
-                {formatTimer(timerSeconds)}
-              </Text>
-            </View>
+          <View
+            style={[
+              styles.unifiedBottomTimerCapsule,
+              {
+                backgroundColor: isTimerRunning ? '#DC2626' : (Platform.OS === 'android' ? colors.accentGreen : '#16A34A'),
+              },
+            ]}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+
+            {/* Left Edge: -1m Button */}
+            <TouchableOpacity
+              style={styles.capsuleSideAdjustBtn}
+              onPress={() => adjustTimerSeconds(-60)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.capsuleSideAdjustBtnText}>-1m</Text>
+            </TouchableOpacity>
+
+            {/* Center: Main Play/Pause Button */}
+            <TouchableOpacity
+              style={styles.capsuleCenterPlayBtn}
+              onPress={toggleTimerManual}
+              activeOpacity={0.85}
+            >
+              <View style={styles.solidBtnContentRow}>
+                <View style={styles.solidBtnLeftGroup}>
+                  <Ionicons
+                    name={isTimerRunning ? 'pause-circle' : 'play-circle'}
+                    size={24}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.solidBtnMainText} numberOfLines={1}>
+                    {isTimerRunning ? "To'xtatish" : 'Davom ettirish'}
+                  </Text>
+                </View>
+                <View style={styles.solidBtnTimeBadge}>
+                  <Text style={styles.solidBtnTimeText}>
+                    {formatTimer(timerSeconds)}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            {/* Right Edge: +1m Button */}
+            <TouchableOpacity
+              style={styles.capsuleSideAdjustBtnRight}
+              onPress={() => adjustTimerSeconds(60)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.capsuleSideAdjustBtnText}>+1m</Text>
+            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
-      </Animated.View>
+        </Animated.View>
+      )}
 
       {/* Modern Sleek Mobile Status Change Confirmation Modal */}
       <Modal visible={statusConfirmModal.isOpen} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.confirmModalCard}>
+          <View style={[styles.confirmModalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{statusConfirmModal.title}</Text>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{statusConfirmModal.title}</Text>
             </View>
-            <Text style={styles.confirmModalMessage}>{statusConfirmModal.message}</Text>
+            <Text style={[styles.confirmModalMessage, Platform.OS === 'android' && { color: colors.textPrimary }]}>{statusConfirmModal.message}</Text>
             <View style={styles.confirmModalActionRow}>
               <TouchableOpacity
-                style={[styles.confirmCancelBtn, isStatusChanging && { opacity: 0.5 }]}
+                style={[styles.confirmCancelBtn, isStatusChanging && { opacity: 0.5 }, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
                 disabled={isStatusChanging}
                 onPress={() => !isStatusChanging && setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' })}
               >
-                <Text style={styles.confirmCancelText}>Bekor qilish</Text>
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Text style={[styles.confirmCancelText, Platform.OS === 'android' && { color: colors.textPrimary }]}>Bekor qilish</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.confirmOkBtn, isStatusChanging && { opacity: 0.8 }]}
+                style={[styles.confirmOkBtn, isStatusChanging && { opacity: 0.8 }, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                 disabled={isStatusChanging}
                 onPress={() => executeStatusChange()}
               >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 {isStatusChanging ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.confirmOkText}>Tasdiqlash • Ha</Text>
+                  <Text style={[styles.confirmOkText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>Tasdiqlash • Ha</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1819,11 +2120,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       {/* OBS & amatora.exe Connection Status Info Modal */}
       <Modal visible={showObsModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{"📡 OBS & amatora.exe Aloqa Holati"}</Text>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"📡 OBS & amatora.exe Aloqa Holati"}</Text>
               <TouchableOpacity onPress={() => setShowObsModal(false)}>
-                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
 
@@ -1848,23 +2150,25 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             </View>
 
             {/* Detailed Explanation */}
-            <Text style={styles.obsExplanationText}>
+            <Text style={[styles.obsExplanationText, Platform.OS === 'android' && { color: colors.textSecondary }]}>
               {"Ushbu indikator stadiondagi kompyuterda ishlayotgan amatora-obs (amatora.exe) dasturining OBS Studio va jonli efir bilan bog'liqligini ko'rsatadi.\n\nU o'yin taymeri, hisob, gollar hamda takroriy lavhalar (replays) translyatsiya ekranida real vaqtda to'g'ri ko'rinishini ta'minlaydi."}
             </Text>
 
-            <Text style={styles.modalLabel}>{`📍 Maydon: ${match?.location || '1-maydon'}`}</Text>
-            <Text style={styles.modalLabel}>{`🔌 OBS WebSocket Porti: ${match?.location?.includes('2-maydon') ? 'ws://localhost:4456 (2-Maydon)' : 'ws://localhost:4455 (1-Maydon)'}`}</Text>
-            <Text style={styles.modalLabel}>{`🔗 Stream Overlay URL:\nhttps://amatora.uz/obs/scoreboard/${match?.location?.includes('2-maydon') ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`📍 Maydon: ${match?.location || '1-maydon'}`}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔌 OBS WebSocket Porti: ${String(match?.location || '').toLowerCase().includes('2') ? 'ws://localhost:4456 (2-Maydon)' : 'ws://localhost:4455 (1-Maydon)'}`}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔗 Stream Overlay URL:\nhttps://amatora.uz/obs/scoreboard/${String(match?.location || '').toLowerCase().includes('2') ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`}</Text>
 
             <TouchableOpacity
-              style={styles.modalSubmitBtn}
+              style={[styles.modalSubmitBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
               onPress={() => {
-                Clipboard.setString(`https://amatora.uz/obs/scoreboard/${match?.location?.includes('2-maydon') ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`);
-                Alert.alert("Nusxalandi", "OBS Stream Scoreboard havolasi nusxalandi!");
+                const isField2 = String(match?.location || '').toLowerCase().includes('2');
+                Clipboard.setString(`https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`);
+                Alert.alert("Nusxalandi", `OBS Stream Scoreboard (${isField2 ? '2-Maydon' : '1-Maydon'}) havolasi nusxalandi!`);
                 setShowObsModal(false);
               }}
             >
-              <Text style={styles.modalSubmitBtnText}>{"OBS Scoreboard Linkini Nusxalash"}</Text>
+              {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+              <Text style={[styles.modalSubmitBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"OBS Scoreboard Linkini Nusxalash"}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1873,23 +2177,25 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       {/* Log Event Modal */}
       <Modal visible={showEventModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                 {eventType === 'substitution' ? "O'yinchi Almashtirish 🔄" : "Hodisa Qayd Etish"}
               </Text>
               <TouchableOpacity onPress={() => setShowEventModal(false)}>
-                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
 
             {/* Team Picker */}
-            <Text style={styles.modalLabel}>{"Jamoa:"}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Jamoa:"}</Text>
             <View style={styles.modalTeamRow}>
               <TouchableOpacity
                 style={[
                   styles.modalTeamBtn,
-                  selectedTeamId === match?.home_team_id && styles.modalTeamBtnActive,
+                  Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.border },
+                  selectedTeamId === match?.home_team_id && (Platform.OS === 'android' ? { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen } : styles.modalTeamBtnActive),
                 ]}
                 onPress={() => {
                   setSelectedTeamId(match?.home_team_id);
@@ -1897,10 +2203,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                   setSelectedSubInPlayerId('');
                 }}
               >
+                {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 <Text
                   style={[
                     styles.modalTeamBtnText,
-                    selectedTeamId === match?.home_team_id && styles.modalTeamBtnTextActive,
+                    Platform.OS === 'android' && { color: colors.textSecondary },
+                    selectedTeamId === match?.home_team_id && (Platform.OS === 'android' ? { color: '#FFFFFF', fontWeight: '900' } : styles.modalTeamBtnTextActive),
                   ]}
                   numberOfLines={1}
                 >
@@ -1911,7 +2219,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               <TouchableOpacity
                 style={[
                   styles.modalTeamBtn,
-                  selectedTeamId === match?.away_team_id && styles.modalTeamBtnActive,
+                  Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.border },
+                  selectedTeamId === match?.away_team_id && (Platform.OS === 'android' ? { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen } : styles.modalTeamBtnActive),
                 ]}
                 onPress={() => {
                   setSelectedTeamId(match?.away_team_id);
@@ -1919,10 +2228,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                   setSelectedSubInPlayerId('');
                 }}
               >
+                {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 <Text
                   style={[
                     styles.modalTeamBtnText,
-                    selectedTeamId === match?.away_team_id && styles.modalTeamBtnTextActive,
+                    Platform.OS === 'android' && { color: colors.textSecondary },
+                    selectedTeamId === match?.away_team_id && (Platform.OS === 'android' ? { color: '#FFFFFF', fontWeight: '900' } : styles.modalTeamBtnTextActive),
                   ]}
                   numberOfLines={1}
                 >
@@ -1932,20 +2243,23 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             </View>
 
             {/* Event Type Picker */}
-            <Text style={styles.modalLabel}>{"Hodisa Turi:"}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Hodisa Turi:"}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
               {EVENT_TYPES.map((ev) => (
                 <TouchableOpacity
                   key={ev.id}
                   style={[
                     styles.modalEvChip,
+                    Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.border },
                     eventType === ev.id && { backgroundColor: ev.color, borderColor: ev.color },
                   ]}
                   onPress={() => setEventType(ev.id)}
                 >
+                  {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   <Text
                     style={[
                       styles.modalEvChipText,
+                      Platform.OS === 'android' && { color: colors.textSecondary },
                       eventType === ev.id && { color: '#000000', fontWeight: '900' },
                     ]}
                   >
@@ -1956,7 +2270,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             </ScrollView>
 
             {/* Sub Out Player (or Main Player) Selector */}
-            <Text style={styles.modalLabel}>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>
               {eventType === 'substitution' ? "Chiqayotgan O'yinchi (Sub Out):" : "O'yinchi:"}
             </Text>
             <ScrollView style={{ maxHeight: 110 }} showsVerticalScrollIndicator={false}>
@@ -1965,15 +2279,18 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                   key={p.id}
                   style={[
                     styles.modalPlayerItem,
-                    selectedPlayerId === p.id && styles.modalPlayerItemActive,
+                    Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' },
+                    selectedPlayerId === p.id && (Platform.OS === 'android' ? { backgroundColor: isDark ? 'rgba(34, 197, 94, 0.2)' : '#DCFCE7' } : styles.modalPlayerItemActive),
                   ]}
                   onPress={() => setSelectedPlayerId(p.id)}
                 >
-                  <Text style={styles.modalPlayerNum}>{p.player_number ? `#${p.player_number}` : '#'}</Text>
+                  {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                  <Text style={[styles.modalPlayerNum, Platform.OS === 'android' && { color: colors.accentGreen }]}>{p.player_number ? `#${p.player_number}` : '#'}</Text>
                   <Text
                     style={[
                       styles.modalPlayerName,
-                      selectedPlayerId === p.id && { color: '#00FF66', fontWeight: '900' },
+                      Platform.OS === 'android' && { color: colors.textPrimary },
+                      selectedPlayerId === p.id && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontWeight: '900' },
                     ]}
                   >
                     {`${p.first_name || ''} ${p.last_name || ''}`}
@@ -1985,7 +2302,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             {/* Sub In Player Selector (Only for Substitution) */}
             {eventType === 'substitution' && (
               <>
-                <Text style={styles.modalLabel}>{"Maydonga Tushayotgan O'yinchi (Sub In):"}</Text>
+                <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Maydonga Tushayotgan O'yinchi (Sub In):"}</Text>
                 <ScrollView style={{ maxHeight: 110 }} showsVerticalScrollIndicator={false}>
                   {currentModalPlayers
                     .filter((p) => p.id !== selectedPlayerId)
@@ -1994,14 +2311,17 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                         key={p.id}
                         style={[
                           styles.modalPlayerItem,
-                          selectedSubInPlayerId === p.id && styles.modalPlayerItemActive,
+                          Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F8FAFC' },
+                          selectedSubInPlayerId === p.id && (Platform.OS === 'android' ? { backgroundColor: 'rgba(168, 85, 247, 0.15)' } : styles.modalPlayerItemActive),
                         ]}
                         onPress={() => setSelectedSubInPlayerId(p.id)}
                       >
-                        <Text style={styles.modalPlayerNum}>{p.player_number ? `#${p.player_number}` : '#'}</Text>
+                        {Platform.OS === 'ios' && <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Text style={[styles.modalPlayerNum, Platform.OS === 'android' && { color: colors.accentGreen }]}>{p.player_number ? `#${p.player_number}` : '#'}</Text>
                         <Text
                           style={[
                             styles.modalPlayerName,
+                            Platform.OS === 'android' && { color: colors.textPrimary },
                             selectedSubInPlayerId === p.id && { color: '#A855F7', fontWeight: '900' },
                           ]}
                         >
@@ -2014,9 +2334,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             )}
 
             {/* Minute Input */}
-            <Text style={styles.modalLabel}>{"Daqiqa (Minut):"}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Daqiqa (Minut):"}</Text>
             <TextInput
-              style={styles.modalMinuteInput}
+              style={[
+                styles.modalMinuteInput,
+                Platform.OS === 'android' && { backgroundColor: colors.bgSecondary, color: colors.textPrimary, borderColor: colors.border },
+              ]}
               keyboardType="number-pad"
               value={eventMinute}
               onChangeText={setEventMinute}
@@ -2024,14 +2347,15 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
             {/* Submit Event Button */}
             <TouchableOpacity
-              style={styles.modalSubmitBtn}
+              style={[styles.modalSubmitBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
               onPress={handleSaveEvent}
               disabled={savingEvent}
             >
+              {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
               {savingEvent ? (
-                <ActivityIndicator size="small" color="#000000" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={styles.modalSubmitBtnText}>{"Hodisani Saqlash"}</Text>
+                <Text style={[styles.modalSubmitBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"Hodisani Saqlash"}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -2069,11 +2393,12 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
   },
   /* Skeleton Component Styles */
   skeletonNavTile: {
@@ -2109,7 +2434,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#262035',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(38, 32, 53, 0.75)' : '#262035',
     paddingHorizontal: 14,
     paddingVertical: 11,
     borderRadius: 14,
@@ -2119,6 +2444,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
+    overflow: 'hidden',
   },
   toastCheckCircle: {
     width: 20,
@@ -2139,12 +2465,13 @@ const styles = StyleSheet.create({
   },
   /* Scoreboard Main Card (Zero Overlap Responsive Layout) */
   scoreboardMainCard: {
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     borderRadius: 22,
     padding: 16,
     borderWidth: 1,
     borderColor: '#242C3D',
     gap: 14,
+    overflow: 'hidden',
   },
   boardLeagueSubtitle: {
     color: 'rgba(255, 255, 255, 0.5)',
@@ -2183,17 +2510,19 @@ const styles = StyleSheet.create({
     width: 32,
     height: 28,
     borderRadius: 8,
-    backgroundColor: '#334155',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(51, 65, 85, 0.65)' : '#334155',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   plusScoreBtn: {
     width: 32,
     height: 28,
     borderRadius: 8,
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.75)' : '#00FF66',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   scoreBtnSymbol: {
     color: '#000000',
@@ -2234,12 +2563,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 102, 0.3)',
+    overflow: 'hidden',
   },
   timerPillBar: {
     flexDirection: 'row',
@@ -2287,6 +2617,7 @@ const styles = StyleSheet.create({
     padding: 4,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 8,
+    overflow: 'hidden',
   },
 
   /* Action Bar under scoreboard (Matching Web Admin Screenshot 1:1) */
@@ -2301,9 +2632,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     paddingVertical: 14,
     borderRadius: 16,
+    overflow: 'hidden',
   },
   bigOrangeActionBtn: {
     flex: 1.5,
@@ -2311,9 +2643,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#F59E0B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.85)' : '#F59E0B',
     paddingVertical: 14,
     borderRadius: 16,
+    overflow: 'hidden',
   },
   bigRedActionBtn: {
     flex: 1.5,
@@ -2321,19 +2654,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#EF4444',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(239, 68, 68, 0.85)' : '#EF4444',
     paddingVertical: 14,
     borderRadius: 16,
+    overflow: 'hidden',
   },
   bigFinishedBtn: {
-    flex: 1.5,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#1E293B',
-    paddingVertical: 14,
-    borderRadius: 16,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    overflow: 'hidden',
   },
   bigGreenBtnText: {
     color: '#000000',
@@ -2356,12 +2692,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
     paddingVertical: 14,
     paddingHorizontal: 10,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(56, 189, 248, 0.3)',
+    overflow: 'hidden',
   },
   penaltyDropdownText: {
     color: '#FFFFFF',
@@ -2369,12 +2706,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   penaltyControlBox: {
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
     borderColor: '#38BDF8',
     gap: 10,
+    overflow: 'hidden',
   },
   scoreValText: {
     color: '#00FF66',
@@ -2398,11 +2736,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     paddingHorizontal: 12,
     paddingVertical: 9,
     borderRadius: 12,
     borderWidth: 1,
+    overflow: 'hidden',
   },
   quickEventText: {
     color: '#FFFFFF',
@@ -2411,12 +2750,13 @@ const styles = StyleSheet.create({
   },
   /* Roster Card */
   rosterCard: {
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
     borderColor: '#242C3D',
     gap: 12,
+    overflow: 'hidden',
   },
   rosterHeader: {
     flexDirection: 'row',
@@ -2432,6 +2772,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 102, 0.25)',
+    overflow: 'hidden',
   },
   sectionTitle: {
     color: '#FFFFFF',
@@ -2452,6 +2793,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 9,
     alignItems: 'center',
+    overflow: 'hidden',
   },
   rosterSubtabActive: {
     backgroundColor: '#00FF66',
@@ -2472,9 +2814,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#1B2230',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(27, 34, 48, 0.65)' : '#1B2230',
     padding: 10,
     borderRadius: 12,
+    overflow: 'hidden',
   },
   playerNumBadge: {
     width: 28,
@@ -2509,15 +2852,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   /* Events Timeline */
   eventsTimelineCard: {
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     borderRadius: 24,
     padding: 16,
     borderWidth: 1,
     borderColor: '#242C3D',
     gap: 10,
+    overflow: 'hidden',
   },
   emptyEventsText: {
     color: 'rgba(255,255,255,0.4)',
@@ -2529,9 +2874,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#1B2230',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(27, 34, 48, 0.65)' : '#1B2230',
     padding: 10,
     borderRadius: 12,
+    overflow: 'hidden',
   },
   eventMinuteBadge: {
     backgroundColor: 'rgba(0, 255, 102, 0.15)',
@@ -2555,6 +2901,8 @@ const styles = StyleSheet.create({
   },
   eventDeleteBtn: {
     padding: 6,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   /* Modal Overlay */
   modalOverlay: {
@@ -2564,12 +2912,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.75)' : '#1E293B',
     borderRadius: 24,
     padding: 20,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
     gap: 10,
+    overflow: 'hidden',
   },
   obsStatusBadge: {
     flexDirection: 'row',
@@ -2592,12 +2941,13 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   confirmModalCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.75)' : '#1E293B',
     borderRadius: 24,
     padding: 20,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 102, 0.3)',
     gap: 12,
+    overflow: 'hidden',
   },
   confirmModalMessage: {
     color: '#FFFFFF',
@@ -2613,8 +2963,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.08)',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   confirmCancelText: {
     color: 'rgba(255,255,255,0.7)',
@@ -2625,8 +2976,9 @@ const styles = StyleSheet.create({
     flex: 1.5,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   confirmOkText: {
     color: '#000000',
@@ -2659,13 +3011,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   modalTeamBtnActive: {
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     borderColor: '#00FF66',
   },
   modalTeamBtnText: {
@@ -2684,6 +3037,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   modalEvChipText: {
     color: 'rgba(255,255,255,0.7)',
@@ -2697,6 +3051,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
+    overflow: 'hidden',
   },
   modalPlayerItemActive: {
     backgroundColor: 'rgba(0, 255, 102, 0.1)',
@@ -2723,11 +3078,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   modalSubmitBtn: {
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
     marginTop: 8,
+    overflow: 'hidden',
   },
   modalSubmitBtnText: {
     color: '#000000',
@@ -2742,11 +3098,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.12)',
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.4)',
     marginTop: 6,
     width: '100%',
+    overflow: 'hidden',
   },
   resetStatusBtnText: {
     color: '#F59E0B',
@@ -2769,11 +3126,43 @@ const styles = StyleSheet.create({
     elevation: 24,
     zIndex: 99999,
   },
-  solidTimerFullBtn: {
+  /* Unified Bottom Continuous Floating Capsule Bar */
+  unifiedBottomTimerCapsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
     width: '100%',
     height: '100%',
     borderRadius: 20,
-    paddingHorizontal: 18,
+    overflow: 'hidden',
+  },
+  capsuleSideAdjustBtn: {
+    width: 54,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  capsuleSideAdjustBtnRight: {
+    width: 54,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  capsuleSideAdjustBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  capsuleCenterPlayBtn: {
+    flex: 1,
+    height: '100%',
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2787,27 +3176,33 @@ const styles = StyleSheet.create({
   solidBtnLeftGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     flex: 1,
   },
   solidBtnMainText: {
     color: '#FFFFFF',
-    fontSize: 14.5,
+    fontSize: 14,
     fontWeight: '900',
     letterSpacing: 0.2,
   },
   solidBtnTimeBadge: {
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   solidBtnTimeText: {
     color: '#FFFFFF',
-    fontSize: 15.5,
+    fontSize: 15,
     fontWeight: '900',
     letterSpacing: 1,
+  },
+  pillAdjustText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '900',
+    paddingHorizontal: 2,
   },
 });

@@ -6,17 +6,19 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
   Alert,
   Modal,
   TextInput,
   RefreshControl,
   Dimensions,
+  Platform,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 
@@ -107,6 +109,7 @@ const getRelativeTime = (dateString?: string | number | Date): string => {
 
 export const NewsScreen: React.FC = () => {
   const { orgId, currentOrg } = useOrg();
+  const { isDark, colors } = useTheme();
   const [newsList, setNewsList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -385,19 +388,19 @@ export const NewsScreen: React.FC = () => {
 
   return (
     <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingBottom: 140 }}
+      style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}
+      contentContainerStyle={{ paddingBottom: Platform.OS === 'android' ? 120 : 100 }}
       showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF87" />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
     >
       {/* HEADER SECTION */}
       <View style={styles.headerRow}>
-        <View style={styles.headerIconBox}>
-          <Ionicons name="newspaper" size={24} color="#00FF87" />
+        <View style={[styles.headerIconBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(74, 222, 128, 0.15)' : '#DCFCE7', borderColor: colors.border }]}>
+          <Ionicons name="newspaper" size={24} color={colors.accentGreen} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.screenTitle}>{"Yangiliklar Boshqaruvi"}</Text>
-          <Text style={styles.screenSub}>
+          <Text style={[styles.screenTitle, { color: colors.textPrimary }]}>{"Yangiliklar Boshqaruvi"}</Text>
+          <Text style={[styles.screenSub, { color: colors.textMuted }]}>
             {`Ilova uchun rasmiy yangiliklarni yaratish, tahrirlash va ko'rish (${currentOrg?.name || 'Amatora'})`}
           </Text>
         </View>
@@ -405,12 +408,12 @@ export const NewsScreen: React.FC = () => {
 
       {/* CREATE NEWS BUTTON */}
       <TouchableOpacity
-        style={styles.createNewsBtn}
+        style={[styles.createNewsBtn, { backgroundColor: colors.accentGreen }]}
         activeOpacity={0.8}
         onPress={handleOpenCreate}
       >
         <Ionicons name="add-circle" size={22} color="#000000" />
-        <Text style={styles.createNewsBtnText}>{"YANGI YANGILIK QO'SHISH"}</Text>
+        <Text style={styles.createNewsBtnText}>{"YANGILIK QO'SHISH"}</Text>
       </TouchableOpacity>
 
       {/* CATEGORY FILTER TABS */}
@@ -424,11 +427,27 @@ export const NewsScreen: React.FC = () => {
           return (
             <TouchableOpacity
               key={cat}
-              style={[styles.categoryTab, isActive && styles.categoryTabActive]}
+              style={[
+                styles.categoryTab,
+                Platform.OS === 'android' && {
+                  backgroundColor: colors.bgCard,
+                  borderColor: colors.border,
+                },
+                isActive && {
+                  backgroundColor: isDark ? 'rgba(74, 222, 128, 0.22)' : '#DCFCE7',
+                  borderColor: colors.accentGreen,
+                },
+              ]}
               activeOpacity={0.8}
               onPress={() => setFilterCategory(cat)}
             >
-              <Text style={[styles.categoryTabText, isActive && styles.categoryTabTextActive]}>
+              <Text
+                style={[
+                  styles.categoryTabText,
+                  { color: colors.textMuted },
+                  isActive && { color: colors.accentGreen, fontWeight: '900' },
+                ]}
+              >
                 {cat.toUpperCase()}
               </Text>
             </TouchableOpacity>
@@ -439,14 +458,14 @@ export const NewsScreen: React.FC = () => {
       {/* NEWS GRID LIST */}
       {loading ? (
         <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#00FF87" />
-          <Text style={styles.loadingText}>{"Yangiliklar yuklanmoqda..."}</Text>
+          <ActivityIndicator size="large" color={colors.accentGreen} />
+          <Text style={[styles.loadingText, { color: colors.textMuted }]}>{"Yangiliklar yuklanmoqda..."}</Text>
         </View>
       ) : filteredList.length === 0 ? (
-        <View style={styles.emptyBox}>
-          <Ionicons name="newspaper-outline" size={48} color="#475569" />
-          <Text style={styles.emptyTitle}>{"Hozircha yangiliklar yo'q"}</Text>
-          <Text style={styles.emptySub}>{"Tugmani bosib birinchi yangilikni e'lon qiling"}</Text>
+        <View style={[styles.emptyBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          <Ionicons name="newspaper-outline" size={48} color={colors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>{"Hozircha yangiliklar yo'q"}</Text>
+          <Text style={[styles.emptySub, { color: colors.textMuted }]}>{"Tugmani bosib birinchi yangilikni e'lon qiling"}</Text>
         </View>
       ) : (
         <View style={styles.gridContainer}>
@@ -455,52 +474,58 @@ export const NewsScreen: React.FC = () => {
             return (
               <TouchableOpacity
                 key={item.id}
-                style={styles.newsCard}
+                style={[
+                  styles.newsCard,
+                  Platform.OS === 'android' && {
+                    backgroundColor: colors.bgCard,
+                    borderColor: colors.border,
+                  },
+                ]}
                 activeOpacity={0.85}
                 onPress={() => setSelectedNewsForView(item)}
               >
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+                {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
                 {/* News Image */}
                 {item.image_url ? (
-                  <Image source={{ uri: item.image_url }} style={styles.newsCardImg} resizeMode="cover" />
+                  <ExpoImage source={{ uri: item.image_url }} cachePolicy="memory-disk" style={styles.newsCardImg} contentFit="cover" />
                 ) : (
-                  <View style={styles.newsCardImgPlaceholder}>
-                    <Ionicons name="image-outline" size={42} color="#475569" />
+                  <View style={[styles.newsCardImgPlaceholder, { backgroundColor: colors.bgCardElevated }]}>
+                    <Ionicons name="image-outline" size={42} color={colors.textMuted} />
                   </View>
                 )}
 
                 {/* News Details */}
                 <View style={styles.newsCardBody}>
                   {/* Category Pill */}
-                  <View style={styles.categoryBadge}>
-                    <Text style={styles.categoryBadgeText}>{(item.category || "O'YINLAR").toUpperCase()}</Text>
+                  <View style={[styles.categoryBadge, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                    <Text style={[styles.categoryBadgeText, { color: colors.textPrimary }]}>{(item.category || "O'YINLAR").toUpperCase()}</Text>
                   </View>
 
                   {/* Title */}
-                  <Text style={styles.newsTitle} numberOfLines={2}>
+                  <Text style={[styles.newsTitle, { color: colors.textPrimary }]} numberOfLines={2}>
                     {item.title}
                   </Text>
 
                   {/* Content Snippet */}
                   {item.content ? (
-                    <Text style={styles.newsSnippet} numberOfLines={3}>
+                    <Text style={[styles.newsSnippet, { color: colors.textSecondary }]} numberOfLines={3}>
                       {item.content}
                     </Text>
                   ) : null}
 
                   {/* Bottom Footer Action Buttons */}
-                  <View style={styles.newsCardFooter}>
-                    <Text style={styles.newsDateText}>{formattedDate}</Text>
+                  <View style={[styles.newsCardFooter, { borderTopColor: colors.border }]}>
+                    <Text style={[styles.newsDateText, { color: colors.textMuted }]}>{formattedDate}</Text>
 
                     <View style={styles.actionButtonsGroup}>
                       {/* EDIT BUTTON */}
                       <TouchableOpacity
-                        style={styles.editBtn}
+                        style={[styles.editBtn, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                         activeOpacity={0.8}
                         onPress={() => handleOpenEdit(item)}
                       >
-                        <Ionicons name="create-outline" size={15} color="#38BDF8" />
-                        <Text style={styles.editBtnText}>{"Tahrirlash"}</Text>
+                        <Ionicons name="create-outline" size={15} color={colors.accentGreen} />
+                        <Text style={[styles.editBtnText, { color: colors.textPrimary }]}>{"Tahrirlash"}</Text>
                       </TouchableOpacity>
 
                       {/* DELETE BUTTON */}
@@ -523,16 +548,16 @@ export const NewsScreen: React.FC = () => {
       {/* FULL DETAIL VIEW MODAL */}
       <Modal visible={!!selectedNewsForView} transparent animationType="fade" onRequestClose={() => setSelectedNewsForView(null)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.viewModalContainer}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.viewModalContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
             {/* View Modal Header */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{"YANGILIK MANZARASI"}</Text>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{"YANGILIK MANZARASI"}</Text>
               <TouchableOpacity
-                style={styles.modalCloseBtn}
+                style={[styles.modalCloseBtn, { backgroundColor: colors.bgCardElevated }]}
                 onPress={() => setSelectedNewsForView(null)}
               >
-                <Ionicons name="close" size={20} color="#FFFFFF" />
+                <Ionicons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -540,48 +565,49 @@ export const NewsScreen: React.FC = () => {
               <ScrollView showsVerticalScrollIndicator={false}>
                 {/* Full Image */}
                 {selectedNewsForView.image_url ? (
-                  <Image
+                  <ExpoImage
                     source={{ uri: selectedNewsForView.image_url }}
+                    cachePolicy="memory-disk"
                     style={styles.viewFullImg}
-                    resizeMode="cover"
+                    contentFit="cover"
                   />
                 ) : (
-                  <View style={styles.viewImgPlaceholder}>
-                    <Ionicons name="image-outline" size={54} color="#475569" />
+                  <View style={[styles.viewImgPlaceholder, { backgroundColor: colors.bgCardElevated }]}>
+                    <Ionicons name="image-outline" size={54} color={colors.textMuted} />
                   </View>
                 )}
 
                 <View style={{ paddingVertical: 14 }}>
                   {/* Category Pill & Date */}
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <View style={styles.categoryBadge}>
-                      <Text style={styles.categoryBadgeText}>
+                    <View style={[styles.categoryBadge, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                      <Text style={[styles.categoryBadgeText, { color: colors.textPrimary }]}>
                         {(selectedNewsForView.category || "O'YINLAR").toUpperCase()}
                       </Text>
                     </View>
-                    <Text style={styles.newsDateText}>
+                    <Text style={[styles.newsDateText, { color: colors.textMuted }]}>
                       {new Date(selectedNewsForView.created_at || Date.now()).toLocaleDateString('uz-UZ')}
                     </Text>
                   </View>
 
                   {/* Full Title */}
-                  <Text style={styles.viewFullTitle}>{selectedNewsForView.title}</Text>
+                  <Text style={[styles.viewFullTitle, { color: colors.textPrimary }]}>{selectedNewsForView.title}</Text>
 
                   {/* Full Content */}
-                  <Text style={styles.viewFullContent}>
+                  <Text style={[styles.viewFullContent, { color: colors.textSecondary }]}>
                     {selectedNewsForView.content || "Yangilik matni mavjud emas."}
                   </Text>
                 </View>
 
                 {/* Bottom Actions inside Full View */}
-                <View style={styles.viewModalActionRow}>
+                <View style={[styles.viewModalActionRow, { borderTopColor: colors.border }]}>
                   <TouchableOpacity
-                    style={styles.viewEditBtn}
+                    style={[styles.viewEditBtn, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                     activeOpacity={0.8}
                     onPress={() => handleOpenEdit(selectedNewsForView)}
                   >
-                    <Ionicons name="create" size={18} color="#000000" />
-                    <Text style={styles.viewEditBtnText}>{"Tahrirlash"}</Text>
+                    <Ionicons name="create" size={18} color={colors.accentGreen} />
+                    <Text style={[styles.viewEditBtnText, { color: colors.textPrimary }]}>{"Tahrirlash"}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -606,32 +632,32 @@ export const NewsScreen: React.FC = () => {
       {/* CREATE / EDIT NEWS MODAL */}
       <Modal visible={isModalOpen} transparent animationType="slide" onRequestClose={() => setIsModalOpen(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.modalContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
             {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingNews ? "YANGILIKNI TAHRIRLASH" : "YANGI YANGILIK YARATISH"}
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+                {editingNews ? "YANGILIKNI TAHRIRLASH" : "YANGILIK YARATISH"}
               </Text>
               <TouchableOpacity
-                style={styles.modalCloseBtn}
+                style={[styles.modalCloseBtn, { backgroundColor: colors.bgCardElevated }]}
                 onPress={() => {
                   setIsModalOpen(false);
                   resetForm();
                 }}
               >
-                <Ionicons name="close" size={20} color="#FFFFFF" />
+                <Ionicons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Title Input */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>{"YANGILIK SARLAVHASI *"}</Text>
+                <Text style={[styles.formLabel, { color: colors.textMuted }]}>{"YANGILIK SARLAVHASI *"}</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="Sarlavhani kiriting..."
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={title}
                   onChangeText={setTitle}
                 />
@@ -639,18 +665,34 @@ export const NewsScreen: React.FC = () => {
 
               {/* Category Picker */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>{"KATEGORIYA TANLANG *"}</Text>
+                <Text style={[styles.formLabel, { color: colors.textMuted }]}>{"KATEGORIYA TANLANG *"}</Text>
                 <View style={styles.categoryGrid}>
                   {categories.map((cat) => {
                     const isSelected = category === cat;
                     return (
                       <TouchableOpacity
                         key={cat}
-                        style={[styles.categoryOptionBtn, isSelected && styles.categoryOptionBtnActive]}
+                        style={[
+                          styles.categoryOptionBtn,
+                          Platform.OS === 'android' && {
+                            backgroundColor: colors.bgCardElevated,
+                            borderColor: colors.border,
+                          },
+                          isSelected && {
+                            backgroundColor: isDark ? 'rgba(74, 222, 128, 0.22)' : '#DCFCE7',
+                            borderColor: colors.accentGreen,
+                          },
+                        ]}
                         activeOpacity={0.8}
                         onPress={() => setCategory(cat)}
                       >
-                        <Text style={[styles.categoryOptionText, isSelected && styles.categoryOptionTextActive]}>
+                        <Text
+                          style={[
+                            styles.categoryOptionText,
+                            { color: colors.textSecondary },
+                            isSelected && { color: colors.accentGreen, fontWeight: '900' },
+                          ]}
+                        >
                           {cat}
                         </Text>
                       </TouchableOpacity>
@@ -661,35 +703,35 @@ export const NewsScreen: React.FC = () => {
 
               {/* Image Picker */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>{"RASM YUKLASH"}</Text>
+                <Text style={[styles.formLabel, { color: colors.textMuted }]}>{"RASM YUKLASH"}</Text>
 
                 {imageUri ? (
-                  <View style={styles.imagePreviewContainer}>
-                    <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="cover" />
+                  <View style={[styles.imagePreviewContainer, { borderColor: colors.border }]}>
+                    <ExpoImage source={{ uri: imageUri }} cachePolicy="memory-disk" style={styles.previewImage} contentFit="cover" />
                     <TouchableOpacity style={styles.removeImageBtn} onPress={removeImage}>
                       <Ionicons name="close" size={16} color="#FFFFFF" />
                     </TouchableOpacity>
                   </View>
                 ) : (
                   <TouchableOpacity
-                    style={styles.uploadDropzone}
+                    style={[styles.uploadDropzone, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                     activeOpacity={0.8}
                     onPress={handlePickImage}
                   >
-                    <Ionicons name="cloud-upload-outline" size={32} color="#94A3B8" />
-                    <Text style={styles.uploadDropzoneText}>{"Rasm tanlash uchun bosing"}</Text>
-                    <Text style={styles.uploadDropzoneSub}>{"PNG, JPG, WEBP • Max 5MB"}</Text>
+                    <Ionicons name="cloud-upload-outline" size={32} color={colors.textMuted} />
+                    <Text style={[styles.uploadDropzoneText, { color: colors.textPrimary }]}>{"Rasm tanlash uchun bosing"}</Text>
+                    <Text style={[styles.uploadDropzoneSub, { color: colors.textMuted }]}>{"PNG, JPG, WEBP • Max 5MB"}</Text>
                   </TouchableOpacity>
                 )}
               </View>
 
               {/* Content Input */}
               <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>{"YANGILIK MATNI"}</Text>
+                <Text style={[styles.formLabel, { color: colors.textMuted }]}>{"YANGILIK MATNI"}</Text>
                 <TextInput
-                  style={[styles.textInput, styles.textArea]}
+                  style={[styles.textInput, styles.textArea, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="Batafsil yangilik matnini kiriting..."
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   multiline
                   numberOfLines={5}
                   value={content}
@@ -700,18 +742,18 @@ export const NewsScreen: React.FC = () => {
               {/* Action Buttons */}
               <View style={styles.modalActionRow}>
                 <TouchableOpacity
-                  style={styles.cancelBtn}
+                  style={[styles.cancelBtn, { backgroundColor: colors.bgCardElevated }]}
                   activeOpacity={0.8}
                   onPress={() => {
                     setIsModalOpen(false);
                     resetForm();
                   }}
                 >
-                  <Text style={styles.cancelBtnText}>{"Bekor qilish"}</Text>
+                  <Text style={[styles.cancelBtnText, { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.submitBtn, submitting && { opacity: 0.6 }]}
+                  style={[styles.submitBtn, { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen }, submitting && { opacity: 0.6 }]}
                   activeOpacity={0.8}
                   onPress={handleSaveNews}
                   disabled={submitting}
@@ -719,7 +761,7 @@ export const NewsScreen: React.FC = () => {
                   {submitting ? (
                     <ActivityIndicator size="small" color="#000000" />
                   ) : (
-                    <Text style={styles.submitBtnText}>
+                    <Text style={[styles.submitBtnText, { color: '#000000' }]}>
                       {editingNews ? "Saqlash" : "Chop etish"}
                     </Text>
                   )}
@@ -733,22 +775,22 @@ export const NewsScreen: React.FC = () => {
       {/* DELETE CONFIRMATION MODAL */}
       <Modal visible={!!newsToDelete} transparent animationType="fade" onRequestClose={() => setNewsToDelete(null)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.deleteModalContainer}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.deleteModalContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
             <Ionicons name="alert-circle" size={44} color="#EF4444" style={{ alignSelf: 'center', marginBottom: 12 }} />
-            <Text style={styles.deleteModalTitle}>{"Yangilikni o'chirish"}</Text>
-            <Text style={styles.deleteModalSub}>
+            <Text style={[styles.deleteModalTitle, { color: colors.textPrimary }]}>{"Yangilikni o'chirish"}</Text>
+            <Text style={[styles.deleteModalSub, { color: colors.textMuted }]}>
               {`Chindan ham "${newsToDelete?.title || 'ushbu yangilik'}"ni o'chirmoqchimisiz?`}
             </Text>
 
             <View style={styles.modalActionRow}>
               <TouchableOpacity
-                style={styles.cancelBtn}
+                style={[styles.cancelBtn, { backgroundColor: colors.bgCardElevated }]}
                 activeOpacity={0.8}
                 onPress={() => setNewsToDelete(null)}
                 disabled={isDeleting}
               >
-                <Text style={styles.cancelBtnText}>{"Yo'q, bekor qilish"}</Text>
+                <Text style={[styles.cancelBtnText, { color: colors.textPrimary }]}>{"Yo'q, bekor qilish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity

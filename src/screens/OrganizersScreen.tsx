@@ -9,11 +9,13 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 
 interface OrganizersScreenProps {
@@ -22,6 +24,7 @@ interface OrganizersScreenProps {
 
 export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) => {
   const { orgId, currentOrg, showToast } = useOrg();
+  const { isDark, colors } = useTheme();
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'logs'>('users');
   const [organizersList, setOrganizersList] = useState<any[]>([]);
   const [loadingOrganizers, setLoadingOrganizers] = useState(false);
@@ -259,43 +262,67 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* Top Bar Header */}
       <View style={styles.headerRow}>
         <TouchableOpacity
-          style={styles.backBtn}
+          style={[styles.backBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
           onPress={onGoBack}
           activeOpacity={0.7}
         >
-          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
+          <Ionicons name="chevron-back" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
         </TouchableOpacity>
         <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={styles.headerTitle}>{"Organizatorlar Bilan Ishlash"}</Text>
-          <Text style={styles.headerSub}>{`Tashkilot ID: #${currentOrg?.id || orgId}`}</Text>
+          <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Organizatorlar Bilan Ishlash"}</Text>
+          <Text style={[styles.headerSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Tashkilot ID: #${currentOrg?.id || orgId}`}</Text>
         </View>
       </View>
 
       {/* SubTab Switcher */}
       <View style={styles.subTabRow}>
         <TouchableOpacity
-          style={[styles.subTabBtn, activeSubTab === 'users' && styles.subTabBtnActive]}
+          style={[
+            styles.subTabBtn,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+            activeSubTab === 'users' && styles.subTabBtnActive,
+            Platform.OS === 'android' && activeSubTab === 'users' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : '#E0F2FE', borderColor: '#38BDF8' }
+          ]}
           onPress={() => setActiveSubTab('users')}
           activeOpacity={0.8}
         >
-          <Ionicons name="people" size={16} color={activeSubTab === 'users' ? '#38BDF8' : '#94A3B8'} />
-          <Text style={[styles.subTabText, activeSubTab === 'users' && styles.subTabTextActive]}>{"Userlar (" + organizersList.length + ")"}</Text>
+          <Ionicons name="people" size={16} color={activeSubTab === 'users' ? '#0284C7' : colors.textMuted} />
+          <Text style={[
+            styles.subTabText,
+            Platform.OS === 'android' && { color: colors.textMuted },
+            activeSubTab === 'users' && styles.subTabTextActive,
+            Platform.OS === 'android' && activeSubTab === 'users' && { color: '#0284C7' }
+          ]}>
+            {"Userlar (" + organizersList.length + ")"}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.subTabBtn, activeSubTab === 'logs' && styles.subTabBtnActive]}
+          style={[
+            styles.subTabBtn,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+            activeSubTab === 'logs' && styles.subTabBtnActive,
+            Platform.OS === 'android' && activeSubTab === 'logs' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : '#E0F2FE', borderColor: '#38BDF8' }
+          ]}
           onPress={() => {
             setActiveSubTab('logs');
             fetchLoginLogs();
           }}
           activeOpacity={0.8}
         >
-          <Ionicons name="location" size={16} color={activeSubTab === 'logs' ? '#38BDF8' : '#94A3B8'} />
-          <Text style={[styles.subTabText, activeSubTab === 'logs' && styles.subTabTextActive]}>{"Kirish Tarixi va Joylashuvi"}</Text>
+          <Ionicons name="location" size={16} color={activeSubTab === 'logs' ? '#0284C7' : colors.textMuted} />
+          <Text style={[
+            styles.subTabText,
+            Platform.OS === 'android' && { color: colors.textMuted },
+            activeSubTab === 'logs' && styles.subTabTextActive,
+            Platform.OS === 'android' && activeSubTab === 'logs' && { color: '#0284C7' }
+          ]}>
+            {"Kirish Tarixi va Joylashuvi"}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -308,60 +335,66 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
             {/* Action Button: Add User */}
             {!showAddOrganizerForm ? (
               <TouchableOpacity
-                style={styles.addBtn}
+                style={[styles.addBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.12)' : '#E0F2FE', borderColor: '#38BDF8' }]}
                 activeOpacity={0.8}
                 onPress={() => setShowAddOrganizerForm(true)}
               >
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                <Ionicons name="person-add" size={20} color="#38BDF8" />
-                <Text style={styles.addBtnText}>{"Yangi User (Organizator) Qo'shish"}</Text>
+                {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Ionicons name="person-add" size={20} color={Platform.OS === 'android' ? '#0284C7' : "#38BDF8"} />
+                <Text style={[styles.addBtnText, Platform.OS === 'android' && { color: '#0284C7' }]}>{"Yangi User (Organizator) Qo'shish"}</Text>
               </TouchableOpacity>
             ) : (
-              <View style={styles.formCard}>
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                <Text style={styles.formTitle}>{"Yangi Organizator Kiritish"}</Text>
+              <View style={[styles.formCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Text style={[styles.formTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Yangi Organizator Kiritish"}</Text>
 
                 {/* Avatar Image Picker Button */}
                 <TouchableOpacity
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 10,
-                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                    borderRadius: 12,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    marginBottom: 10,
-                    borderWidth: 1,
-                    borderColor: 'rgba(255, 255, 255, 0.12)',
-                  }}
+                  style={[
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      borderRadius: 12,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      marginBottom: 10,
+                      borderWidth: 1,
+                      borderColor: 'rgba(255, 255, 255, 0.12)',
+                    },
+                    Platform.OS === 'android' && {
+                      backgroundColor: colors.bgCardElevated,
+                      borderColor: colors.border,
+                    }
+                  ]}
                   onPress={handlePickAvatar}
                   activeOpacity={0.8}
                 >
                   {newOrgAvatar ? (
                     <Image source={{ uri: newOrgAvatar }} style={{ width: 36, height: 36, borderRadius: 18 }} />
                   ) : (
-                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(56, 189, 248, 0.2)', justifyContent: 'center', alignItems: 'center' }}>
-                      <Ionicons name="camera-outline" size={20} color="#38BDF8" />
+                    <View style={[{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(56, 189, 248, 0.2)', justifyContent: 'center', alignItems: 'center' }, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.2)' : '#E0F2FE' }]}>
+                      <Ionicons name="camera-outline" size={20} color={Platform.OS === 'android' ? '#0284C7' : "#38BDF8"} />
                     </View>
                   )}
-                  <Text style={{ color: '#E2E8F0', fontSize: 13, fontWeight: '600' }}>
+                  <Text style={[{ color: '#E2E8F0', fontSize: 13, fontWeight: '600' }, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                     {newOrgAvatar ? "Rasm tanlandi (O'zgartirish)" : "User Rasmini Yuklash (Galereyadan)"}
                   </Text>
                 </TouchableOpacity>
 
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="F.I.SH (Ism Familiya)"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={newOrgName}
                   onChangeText={setNewOrgName}
                 />
 
                 <TextInput
-                  style={[styles.input, { marginTop: 10 }]}
+                  style={[styles.input, { marginTop: 10 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="Login Email"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={newOrgEmail}
                   onChangeText={setNewOrgEmail}
                   keyboardType="email-address"
@@ -369,9 +402,9 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
                 />
 
                 <TextInput
-                  style={[styles.input, { marginTop: 10 }]}
+                  style={[styles.input, { marginTop: 10 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="Parol"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={newOrgPassword}
                   onChangeText={setNewOrgPassword}
                   secureTextEntry
@@ -379,21 +412,21 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
 
                 <View style={styles.formActions}>
                   <TouchableOpacity
-                    style={styles.cancelBtn}
+                    style={[styles.cancelBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                     onPress={() => setShowAddOrganizerForm(false)}
                   >
-                    <Text style={styles.cancelBtnText}>{"Bekor qilish"}</Text>
+                    <Text style={[styles.cancelBtnText, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Bekor qilish"}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={styles.saveBtn}
+                    style={[styles.saveBtn, Platform.OS === 'android' && { backgroundColor: '#0284C7' }]}
                     onPress={handleCreateOrganizer}
                     disabled={isCreatingOrgUser}
                   >
                     {isCreatingOrgUser ? (
-                      <ActivityIndicator size="small" color="#000000" />
+                      <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Text style={styles.saveBtnText}>{"Saqlash"}</Text>
+                      <Text style={[styles.saveBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"Saqlash"}</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -401,36 +434,36 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
             )}
 
             {/* Organizers List Section */}
-            <Text style={styles.sectionTitle}>{"Mavjud Organizatorlar"}</Text>
+            <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Mavjud Organizatorlar"}</Text>
 
             {loadingOrganizers ? (
-              <ActivityIndicator size="small" color="#38BDF8" style={{ marginVertical: 30 }} />
+              <ActivityIndicator size="small" color={colors.accentGreen} style={{ marginVertical: 30 }} />
             ) : organizersList.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                <Ionicons name="people-outline" size={48} color="rgba(255,255,255,0.2)" />
-                <Text style={styles.emptyText}>{"Hozircha biriktirilgan organizatorlar yo'q"}</Text>
+              <View style={[styles.emptyCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Ionicons name="people-outline" size={48} color={colors.textMuted} />
+                <Text style={[styles.emptyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Hozircha biriktirilgan organizatorlar yo'q"}</Text>
               </View>
             ) : (
               organizersList.map((item) => (
-                <View key={item.id} style={styles.userCard}>
-                  <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <View key={item.id} style={[styles.userCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                  {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   {item.avatar_url ? (
-                    <Image source={{ uri: item.avatar_url }} style={{ width: 42, height: 42, borderRadius: 21, marginRight: 12 }} />
+                    <Image source={{ uri: item.avatar_url }} style={[{ width: 42, height: 42, borderRadius: 21, marginRight: 12 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]} />
                   ) : (
-                    <View style={styles.avatarBox}>
-                      <Ionicons name="person" size={20} color="#38BDF8" />
+                    <View style={[styles.avatarBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : '#E0F2FE' }]}>
+                      <Ionicons name="person" size={20} color={Platform.OS === 'android' ? '#0284C7' : "#38BDF8"} />
                     </View>
                   )}
 
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.userName}>{item.full_name || 'Organizator'}</Text>
-                    <Text style={styles.userEmail}>{item.email}</Text>
-                    <Text style={styles.userPassword}>{`Parol: ${item.password}`}</Text>
+                    <Text style={[styles.userName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{item.full_name || 'Organizator'}</Text>
+                    <Text style={[styles.userEmail, Platform.OS === 'android' && { color: colors.textSecondary }]}>{item.email}</Text>
+                    <Text style={[styles.userPassword, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Parol: ${item.password}`}</Text>
                   </View>
 
                   <TouchableOpacity
-                    style={styles.deleteBtn}
+                    style={[styles.deleteBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEE2E2', borderColor: '#EF4444' }]}
                     onPress={() => handleDeleteOrganizer(item.id)}
                   >
                     <Ionicons name="trash-outline" size={18} color="#EF4444" />
@@ -442,54 +475,54 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
         ) : (
           <>
             {/* Login Activity Logs View */}
-            <Text style={styles.sectionTitle}>{"Foydalanuvchilar Kirish Tarixi va Joylashuvlari"}</Text>
+            <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Foydalanuvchilar Kirish Tarixi va Joylashuvlari"}</Text>
 
             {loadingLogs ? (
-              <ActivityIndicator size="small" color="#38BDF8" style={{ marginVertical: 30 }} />
+              <ActivityIndicator size="small" color={colors.accentGreen} style={{ marginVertical: 30 }} />
             ) : loginLogs.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                <Ionicons name="location-outline" size={48} color="rgba(255,255,255,0.2)" />
-                <Text style={styles.emptyText}>{"Hozircha kirish tarixi yo'q"}</Text>
+              <View style={[styles.emptyCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Ionicons name="location-outline" size={48} color={colors.textMuted} />
+                <Text style={[styles.emptyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Hozircha kirish tarixi yo'q"}</Text>
               </View>
             ) : (
               loginLogs.map((log) => (
-                <View key={log.id} style={styles.logCard}>
-                  <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <View key={log.id} style={[styles.logCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                  {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <View style={styles.logAvatar}>
-                      <Ionicons name="person-circle" size={22} color="#38BDF8" />
+                      <Ionicons name="person-circle" size={22} color={Platform.OS === 'android' ? '#0284C7' : "#38BDF8"} />
                     </View>
 
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.logUserName}>{log.user_name || log.user_email}</Text>
-                      <Text style={styles.logUserEmail}>{log.user_email}</Text>
+                      <Text style={[styles.logUserName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{log.user_name || log.user_email}</Text>
+                      <Text style={[styles.logUserEmail, Platform.OS === 'android' && { color: colors.textMuted }]}>{log.user_email}</Text>
                     </View>
 
-                    <View style={styles.roleBadge}>
-                      <Text style={styles.roleBadgeText}>{(log.user_role || 'user').toUpperCase()}</Text>
+                    <View style={[styles.roleBadge, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(56, 189, 248, 0.18)' : '#E0F2FE', borderColor: '#38BDF8' }]}>
+                      <Text style={[styles.roleBadgeText, Platform.OS === 'android' && { color: '#0284C7' }]}>{(log.user_role || 'user').toUpperCase()}</Text>
                     </View>
                   </View>
 
-                  <View style={styles.logDivider} />
+                  <View style={[styles.logDivider, Platform.OS === 'android' && { backgroundColor: colors.border }]} />
 
                   <View style={styles.logRow}>
-                    <Ionicons name="time-outline" size={15} color="#38BDF8" />
-                    <Text style={styles.logDetailText}>{`Kirgan vaqti: ${formatLogTime(log.login_at)}`}</Text>
+                    <Ionicons name="time-outline" size={15} color={Platform.OS === 'android' ? '#0284C7' : "#38BDF8"} />
+                    <Text style={[styles.logDetailText, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`Kirgan vaqti: ${formatLogTime(log.login_at)}`}</Text>
                   </View>
 
                   <View style={[styles.logRow, { marginTop: 4 }]}>
-                    <Ionicons name="location-outline" size={15} color="#4ADE80" />
-                    <Text style={[styles.logDetailText, { color: '#E2E8F0', fontWeight: '600' }]}>
+                    <Ionicons name="location-outline" size={15} color={colors.accentGreen} />
+                    <Text style={[styles.logDetailText, { color: '#E2E8F0', fontWeight: '600' }, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                       {`Joylashuv: ${log.location_address || 'Aniqlanmadi'}`}
                     </Text>
                   </View>
 
                   {log.device_info && (
                     <View style={[styles.logRow, { marginTop: 4 }]}>
-                      <Ionicons name="hardware-chip-outline" size={15} color="#94A3B8" />
-                      <Text style={styles.logSubText}>{`Qurilma: ${log.device_info}`}</Text>
+                      <Ionicons name="hardware-chip-outline" size={15} color={colors.textMuted} />
+                      <Text style={[styles.logSubText, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Qurilma: ${log.device_info}`}</Text>
                     </View>
                   )}
                 </View>

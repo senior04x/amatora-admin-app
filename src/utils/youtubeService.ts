@@ -68,43 +68,21 @@ export const saveYtTokens = async (
     // 1. Save to AsyncStorage for quick local access
     await AsyncStorage.setItem(getAsyncStorageKey(orgId), payloadStr);
 
-    // 2. Persist to Supabase organizations.yt_tokens (primary DB storage)
+    // 2. Persist to Supabase Storage (player-photos/configs/yt_tokens_${orgId}.json)
     try {
-      await supabase
-        .from('organizations')
-        .update({ yt_tokens: payloadStr })
-        .eq('id', orgId);
-    } catch (e) {
-      console.warn('YT tokens: organizations table update failed:', e);
-    }
+      const filePath = `configs/yt_tokens_${orgId}.json`;
+      const { error } = await supabase.storage
+        .from('player-photos')
+        .upload(filePath, payloadStr, {
+          contentType: 'application/json',
+          upsert: true,
+        });
 
-    // 3. Fallback: sponsors table (guaranteed cross-device persistence)
-    try {
-      const configName = `YT_OAUTH_TOKENS_${orgId}`;
-      const { data: existing } = await supabase
-        .from('sponsors')
-        .select('id')
-        .eq('name', configName)
-        .maybeSingle();
-
-      if (existing) {
-        await supabase
-          .from('sponsors')
-          .update({ logo_url: payloadStr, organization_id: orgId })
-          .eq('id', existing.id);
-      } else {
-        await supabase
-          .from('sponsors')
-          .insert([{
-            name: configName,
-            logo_url: payloadStr,
-            organization_id: orgId,
-            is_main: false,
-            is_selected: false,
-          }]);
+      if (error) {
+        console.warn('YT tokens: Supabase storage upload warning:', error);
       }
-    } catch (err) {
-      console.warn('YT tokens: sponsors table sync failed:', err);
+    } catch (e) {
+      console.warn('YT tokens: Supabase storage upload failed:', e);
     }
   } catch (e) {
     console.error('Error saving YT tokens:', e);
@@ -116,42 +94,33 @@ export const getYtTokens = async (orgId: number): Promise<YtTokens | null> => {
   // 1. Check AsyncStorage (local cache)
   try {
     const raw = await AsyncStorage.getItem(getAsyncStorageKey(orgId));
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.access_token || parsed?.refresh_token) {
+        return parsed;
+      }
+    }
   } catch (e) {}
 
-  // 2. Check Supabase organizations.yt_tokens
+  // 2. Check Supabase Storage (player-photos/configs/yt_tokens_${orgId}.json)
   try {
-    const { data } = await supabase
-      .from('organizations')
-      .select('yt_tokens')
-      .eq('id', orgId)
-      .maybeSingle();
+    const filePath = `configs/yt_tokens_${orgId}.json`;
+    const { data, error } = await supabase.storage
+      .from('player-photos')
+      .download(filePath);
 
-    if (data?.yt_tokens) {
-      const parsed = typeof data.yt_tokens === 'string'
-        ? JSON.parse(data.yt_tokens)
-        : data.yt_tokens;
-      // Cache locally
-      await AsyncStorage.setItem(getAsyncStorageKey(orgId), JSON.stringify(parsed));
-      return parsed;
+    if (data && !error) {
+      const text = await data.text();
+      const parsed = JSON.parse(text);
+      if (parsed) {
+        // Cache locally for faster subsequent loads
+        await AsyncStorage.setItem(getAsyncStorageKey(orgId), JSON.stringify(parsed));
+        return parsed;
+      }
     }
-  } catch (err) {}
-
-  // 3. Fallback: sponsors table
-  try {
-    const configName = `YT_OAUTH_TOKENS_${orgId}`;
-    const { data } = await supabase
-      .from('sponsors')
-      .select('logo_url')
-      .eq('name', configName)
-      .maybeSingle();
-
-    if (data?.logo_url) {
-      const parsed = JSON.parse(data.logo_url);
-      await AsyncStorage.setItem(getAsyncStorageKey(orgId), JSON.stringify(parsed));
-      return parsed;
-    }
-  } catch (err) {}
+  } catch (err) {
+    console.warn('YT tokens: Supabase storage download error:', err);
+  }
 
   return null;
 };
@@ -275,21 +244,15 @@ export const disconnectYouTube = async (orgId: number): Promise<void> => {
     await AsyncStorage.removeItem(getAsyncStorageKey(orgId));
   } catch (e) {}
 
-  // 2. Clear organizations.yt_tokens
+  // 2. Remove from Supabase Storage (player-photos/configs/yt_tokens_${orgId}.json)
   try {
-    await supabase
-      .from('organizations')
-      .update({ yt_tokens: null })
-      .eq('id', orgId);
-  } catch (e) {}
-
-  // 3. Clear sponsors table fallback
-  try {
-    await supabase
-      .from('sponsors')
-      .delete()
-      .eq('name', `YT_OAUTH_TOKENS_${orgId}`);
-  } catch (e) {}
+    const filePath = `configs/yt_tokens_${orgId}.json`;
+    await supabase.storage
+      .from('player-photos')
+      .remove([filePath]);
+  } catch (e) {
+    console.warn('YT tokens: Supabase storage remove failed:', e);
+  }
 };
 
 // ─── Load Channel Info for Current Org ───────────────────────────────

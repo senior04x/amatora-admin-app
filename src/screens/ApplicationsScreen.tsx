@@ -14,10 +14,13 @@ import {
   PanResponder,
   Alert,
   Switch,
+  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
+import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
 import { useApplicationsData, useApplicationsCountsData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
@@ -105,10 +108,22 @@ const SwipeableCard: React.FC<{
     }).start();
   };
 
+  const actionOpacity = pan.interpolate({
+    inputRange: [-90, -15, 0],
+    outputRange: [1, 0.3, 0],
+    extrapolate: 'clamp',
+  });
+
+  const actionTranslateX = pan.interpolate({
+    inputRange: [-90, 0],
+    outputRange: [0, 50],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View style={{ position: 'relative', marginBottom: 10, borderRadius: 16, overflow: 'hidden' }}>
-      {/* Full Behind Background Red Action Card */}
-      <View
+      {/* Full Behind Background Red Action Card with smooth slide & fade */}
+      <Animated.View
         style={{
           position: 'absolute',
           top: 0,
@@ -120,6 +135,8 @@ const SwipeableCard: React.FC<{
           flexDirection: 'row',
           justifyContent: 'flex-end',
           alignItems: 'center',
+          opacity: actionOpacity,
+          transform: [{ translateX: actionTranslateX }],
         }}
       >
         <TouchableOpacity
@@ -137,16 +154,16 @@ const SwipeableCard: React.FC<{
           activeOpacity={0.8}
         >
           <Ionicons name="trash" size={24} color="#FFFFFF" />
-          <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>O'chirish</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>{"O'chirish"}</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
       {/* Sliding Foreground Main Card */}
       <Animated.View
         {...panResponder.panHandlers}
         style={{
           transform: [{ translateX: pan }],
-          backgroundColor: '#121212',
+          backgroundColor: 'transparent',
           borderRadius: 16,
         }}
       >
@@ -158,17 +175,22 @@ const SwipeableCard: React.FC<{
 
 export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', onNavigate }) => {
   const { orgId, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, userRole } = useOrg();
+  const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialTab);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Pagination Constants
-  const PLAYER_PAGE_SIZE = 20;
-  const TEAM_PAGE_SIZE = 10;
+  // Pagination Constants (25 per page, matching PlayersScreen)
+  const PLAYER_PAGE_SIZE = 25;
+  const TEAM_PAGE_SIZE = 25;
 
   const [playerPage, setPlayerPage] = useState(0);
   const [teamPage, setTeamPage] = useState(0);
+  const [accumulatedPlayerApps, setAccumulatedPlayerApps] = useState<any[]>([]);
+  const [accumulatedTeamApps, setAccumulatedTeamApps] = useState<any[]>([]);
+  const [morePlayerAppsAvailable, setMorePlayerAppsAvailable] = useState<boolean | null>(null);
+  const [moreTeamAppsAvailable, setMoreTeamAppsAvailable] = useState<boolean | null>(null);
 
   // Filters State
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'qisman'>('all');
@@ -176,10 +198,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showLeagueDropdown, setShowLeagueDropdown] = useState(false);
 
-  const currentPage = activeTab === 'players' ? playerPage : teamPage;
-  const currentPageSize = activeTab === 'players' ? PLAYER_PAGE_SIZE : TEAM_PAGE_SIZE;
-
-  // 1. React Query Hooks
+  // 1. React Query Hooks — ONLY for initial page (page 0)
   const {
     data: applicationsData,
     isLoading: loadingApps,
@@ -189,8 +208,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     activeTab,
     statusFilter,
     leagueFilter,
-    currentPage,
-    currentPageSize,
+    0,
+    PLAYER_PAGE_SIZE,
     collabLeagueNames
   );
 
@@ -200,11 +219,30 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const { data: allTeams = [], isLoading: loadingTeams } = useTeamsData(orgId);
   const { data: leagues = [] } = useLeaguesData(orgId);
 
-  const loading = loadingApps || loadingTeams;
-  const rawItems = applicationsData?.items ?? [];
-  const hasMore = applicationsData?.hasMore ?? false;
-  const hasMorePlayerApps = activeTab === 'players' && hasMore;
-  const hasMoreTeamApps = activeTab === 'teams' && hasMore;
+  // Reset accumulated data when filters change
+  useEffect(() => {
+    setPlayerPage(0);
+    setTeamPage(0);
+    setAccumulatedPlayerApps([]);
+    setAccumulatedTeamApps([]);
+    setMorePlayerAppsAvailable(null);
+    setMoreTeamAppsAvailable(null);
+  }, [statusFilter, leagueFilter, orgId, activeTab]);
+
+  // Instantaneous data resolution: use initial cache when page is 0, or accumulated state on pagination
+  const rawItems = playerPage === 0 && activeTab === 'players'
+    ? (applicationsData?.items || accumulatedPlayerApps)
+    : activeTab === 'players'
+    ? accumulatedPlayerApps
+    : teamPage === 0
+    ? (applicationsData?.items || accumulatedTeamApps)
+    : accumulatedTeamApps;
+
+  const hasMorePlayerApps = morePlayerAppsAvailable !== null ? morePlayerAppsAvailable : (applicationsData?.hasMore ?? false);
+  const hasMoreTeamApps = moreTeamAppsAvailable !== null ? moreTeamAppsAvailable : (applicationsData?.hasMore ?? false);
+
+  // Seamless loading state: active only while fetching initial page and no items are in memory
+  const loading = loadingApps && rawItems.length === 0;
 
   // Fast Teams Map for fast team name resolution
   const teamsMap = React.useMemo(() => {
@@ -433,6 +471,13 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
   const onRefresh = async () => {
     setRefreshing(true);
+    // Reset pagination to page 0
+    setPlayerPage(0);
+    setTeamPage(0);
+    setAccumulatedPlayerApps([]);
+    setAccumulatedTeamApps([]);
+    setMorePlayerAppsAvailable(null);
+    setMoreTeamAppsAvailable(null);
     await Promise.all([
       refetchApplications(),
       refetchCounts(),
@@ -440,14 +485,153 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     setRefreshing(false);
   };
 
-  // Load More Button Handler
-  const handleLoadMoreBtn = () => {
+  // Seamless Next Batch Fetching (25 items per page) with accumulation — matching PlayersScreen pattern
+  const handleLoadMoreBtn = async () => {
     if (loadingMore || loading) return;
+    setLoadingMore(true);
 
-    if (activeTab === 'players' && hasMorePlayerApps) {
-      setPlayerPage((prev) => prev + 1);
-    } else if (activeTab === 'teams' && hasMoreTeamApps) {
-      setTeamPage((prev) => prev + 1);
+    try {
+      const dbClient = supabase;
+      const targetOrgId = Number(orgId) || 1;
+      const isPlayerTab = activeTab === 'players';
+      const currentPageSize = isPlayerTab ? PLAYER_PAGE_SIZE : TEAM_PAGE_SIZE;
+
+      if (isPlayerTab && hasMorePlayerApps) {
+        const nextPage = playerPage + 1;
+        const from = nextPage * currentPageSize;
+        const to = from + currentPageSize; // fetch pageSize+1 to check hasMore
+
+        let query = dbClient
+          .from('applications')
+          .select(`
+            id, first_name, last_name, father_name, birth_date,
+            passport_series, passport_number, phone, photo_url, position,
+            player_number, team_id, status, is_archived, comment, created_at, organization_id,
+            team:team_id (id, name, logo_url, league)
+          `)
+          .order('created_at', { ascending: false })
+          .range(from, to);
+
+        // Org filter
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          try {
+            const { data: cTeams } = await dbClient.from('teams').select('id').in('league', collabLeagueNames);
+            const cTeamIds = (cTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (cTeamIds.length > 0) {
+              query = query.or(`organization_id.eq.${targetOrgId},team_id.in.(${cTeamIds.join(',')})`);
+            } else {
+              query = query.eq('organization_id', targetOrgId);
+            }
+          } catch (e) {
+            query = query.eq('organization_id', targetOrgId);
+          }
+        } else {
+          query = query.eq('organization_id', targetOrgId);
+        }
+
+        // League filter
+        if (leagueFilter && leagueFilter !== 'all' && leagueFilter.trim()) {
+          try {
+            const { data: lTeams } = await dbClient.from('teams').select('id').ilike('league', `%${leagueFilter.trim()}%`);
+            const lTeamIds = (lTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (lTeamIds.length > 0) {
+              query = query.in('team_id', lTeamIds);
+            } else {
+              setMorePlayerAppsAvailable(false);
+              setLoadingMore(false);
+              return;
+            }
+          } catch (e) {
+            setMorePlayerAppsAvailable(false);
+            setLoadingMore(false);
+            return;
+          }
+        }
+
+        // Status filter
+        if (statusFilter !== 'all') {
+          if (statusFilter === 'pending') {
+            query = query.in('status', ['pending', 'kutilmoqda']);
+          } else if (statusFilter === 'approved') {
+            query = query.in('status', ['approved', 'tasdiqlangan']);
+          } else if (statusFilter === 'rejected') {
+            query = query.in('status', ['rejected', 'rad etilgan']);
+          }
+        }
+
+        // Exclude profile updates
+        query = query.not('comment', 'ilike', '%[PROFILE_UPDATE]%');
+
+        const { data, error } = await query;
+        if (error) {
+          console.error('Applications load more error:', error);
+        }
+        if (data && data.length > 0) {
+          const rows = data.slice(0, currentPageSize);
+          const currentBase = playerPage === 0 ? (applicationsData?.items || accumulatedPlayerApps) : accumulatedPlayerApps;
+          const existingIds = new Set(currentBase.map((p: any) => String(p.id)));
+          const uniqueNew = rows.filter((p: any) => !existingIds.has(String(p.id)));
+          setAccumulatedPlayerApps([...currentBase, ...uniqueNew]);
+          setPlayerPage(nextPage);
+          setMorePlayerAppsAvailable(data.length > currentPageSize);
+        } else if (data && data.length === 0) {
+          setMorePlayerAppsAvailable(false);
+        }
+      } else if (!isPlayerTab && hasMoreTeamApps) {
+        const nextPage = teamPage + 1;
+        const from = nextPage * currentPageSize;
+        const to = from + currentPageSize;
+
+        let query = dbClient
+          .from('teams')
+          .select('id, name, logo_url, league, status, is_archived, captain_phone, organization_id, created_at')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+
+        // Org filter
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+        } else {
+          query = query.eq('organization_id', targetOrgId);
+        }
+
+        // League filter
+        if (leagueFilter && leagueFilter !== 'all' && leagueFilter.trim()) {
+          query = query.ilike('league', `%${leagueFilter.trim()}%`);
+        }
+
+        // Status filter
+        if (statusFilter !== 'all') {
+          if (statusFilter === 'pending') {
+            query = query.in('status', ['pending', 'kutilmoqda']);
+          } else if (statusFilter === 'approved') {
+            query = query.in('status', ['approved', 'tasdiqlangan']);
+          } else if (statusFilter === 'rejected') {
+            query = query.in('status', ['rejected', 'rad etilgan']);
+          }
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          console.error('Teams load more error:', error);
+        }
+        if (data && data.length > 0) {
+          const rows = data.slice(0, currentPageSize);
+          const currentBase = teamPage === 0 ? (applicationsData?.items || accumulatedTeamApps) : accumulatedTeamApps;
+          const existingIds = new Set(currentBase.map((t: any) => String(t.id)));
+          const uniqueNew = rows.filter((t: any) => !existingIds.has(String(t.id)));
+          setAccumulatedTeamApps([...currentBase, ...uniqueNew]);
+          setTeamPage(nextPage);
+          setMoreTeamAppsAvailable(data.length > currentPageSize);
+        } else if (data && data.length === 0) {
+          setMoreTeamAppsAvailable(false);
+        }
+      }
+    } catch (e) {
+      console.error('handleLoadMoreBtn error:', e);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -757,11 +941,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           (item.team_id ? (teamsMap.get(String(item.team_id))?.name || rawName || 'Yakkaxon') : (rawName || 'Yakkaxon'));
 
         const resolvedLeague =
+          item.team?.league ||
+          teamObj?.league ||
           item.league ||
           item.league_name ||
           item.team_league ||
-          teamObj?.league ||
-          item.team?.league ||
           '';
 
         return {
@@ -771,17 +955,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         };
       })
       .sort((a: any, b: any) => {
-        const stA = (a.status || 'pending').toLowerCase();
-        const stB = (b.status || 'pending').toLowerCase();
-        const isPendingA = stA === 'pending' || stA === 'kutilmoqda' ? 0 : 1;
-        const isPendingB = stB === 'pending' || stB === 'kutilmoqda' ? 0 : 1;
-
-        if (isPendingA !== isPendingB) {
-          return isPendingA - isPendingB;
-        }
-
-        const timeA = a.created_at ? new Date(a.created_at).getTime() : (Number(a.id) || 0);
-        const timeB = b.created_at ? new Date(b.created_at).getTime() : (Number(b.id) || 0);
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
         return timeB - timeA;
       });
   }, [rawItems, teamsMap]);
@@ -852,7 +1027,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* Floating Animated Toast Banner */}
       {toastMessage && (
         <Animated.View
@@ -876,7 +1051,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
       {/* Registration Status Toggle Bar (Saytda yangi arizalar qabuli holati) */}
       {userRole !== 'user' && (
-        <View style={styles.regStatusBar}>
+        <View style={[styles.regStatusBar, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <View style={styles.regStatusInfoRow}>
             <View
               style={[
@@ -885,10 +1061,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
               ]}
             />
             <View style={{ flex: 1 }}>
-              <Text style={styles.regStatusTitle}>
+              <Text style={[styles.regStatusTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                 {isRegistrationOpen ? "Arizalar Qabuli: OCHIQ" : "Arizalar Qabuli: YOPIQ"}
               </Text>
-              <Text style={styles.regStatusSub}>
+              <Text style={[styles.regStatusSub, Platform.OS === 'android' && { color: colors.textMuted }]}>
                 {isRegistrationOpen
                   ? "Sayt orqali yangi arizalar yuborish faol"
                   : "Sayt orqali yangi arizalar qabul qilish to'xtatilgan"}
@@ -905,9 +1081,13 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
       )}
 
       {/* Top Segment Sub-Tabs */}
-      <View style={styles.segmentContainer}>
+      <View style={[styles.segmentContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
         <TouchableOpacity
-          style={[styles.segmentBtn, activeTab === 'players' && styles.activeSegmentBtn]}
+          style={[
+            styles.segmentBtn,
+            activeTab === 'players' && (Platform.OS === 'android' ? { backgroundColor: colors.accentGreen } : styles.activeSegmentBtn),
+          ]}
           onPress={() => {
             setActiveTab('players');
             setShowStatusDropdown(false);
@@ -918,12 +1098,17 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           <Ionicons
             name="person"
             size={16}
-            color={activeTab === 'players' ? '#000000' : 'rgba(255,255,255,0.6)'}
+            color={
+              Platform.OS === 'android'
+                ? (activeTab === 'players' ? '#FFFFFF' : colors.textSecondary)
+                : (activeTab === 'players' ? '#000000' : 'rgba(255,255,255,0.6)')
+            }
           />
           <Text
             style={[
               styles.segmentBtnText,
-              activeTab === 'players' && styles.activeSegmentBtnText,
+              Platform.OS === 'android' && { color: activeTab === 'players' ? '#FFFFFF' : colors.textSecondary },
+              activeTab === 'players' && Platform.OS === 'ios' && styles.activeSegmentBtnText,
             ]}
           >
             {`O'yinchilar`}
@@ -931,7 +1116,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.segmentBtn, activeTab === 'teams' && styles.activeSegmentBtn]}
+          style={[
+            styles.segmentBtn,
+            activeTab === 'teams' && (Platform.OS === 'android' ? { backgroundColor: colors.accentGreen } : styles.activeSegmentBtn),
+          ]}
           onPress={() => {
             setActiveTab('teams');
             setShowStatusDropdown(false);
@@ -942,12 +1130,17 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           <Ionicons
             name="shield"
             size={16}
-            color={activeTab === 'teams' ? '#000000' : 'rgba(255,255,255,0.6)'}
+            color={
+              Platform.OS === 'android'
+                ? (activeTab === 'teams' ? '#FFFFFF' : colors.textSecondary)
+                : (activeTab === 'teams' ? '#000000' : 'rgba(255,255,255,0.6)')
+            }
           />
           <Text
             style={[
               styles.segmentBtnText,
-              activeTab === 'teams' && styles.activeSegmentBtnText,
+              Platform.OS === 'android' && { color: activeTab === 'teams' ? '#FFFFFF' : colors.textSecondary },
+              activeTab === 'teams' && Platform.OS === 'ios' && styles.activeSegmentBtnText,
             ]}
           >
             {`Jamoalar`}
@@ -957,24 +1150,28 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
       {/* Stats Counter Bar */}
       <View style={styles.statsOverviewRow}>
-        <View style={[styles.statTileCard, { borderColor: 'rgba(245, 158, 11, 0.3)' }]}>
+        <View style={[styles.statTileCard, { borderColor: 'rgba(245, 158, 11, 0.3)' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Text style={[styles.statNumberText, { color: '#F59E0B' }]}>{dbCounts.pending}</Text>
-          <Text style={styles.statLabelText}>{"Kutilmoqda"}</Text>
+          <Text style={[styles.statLabelText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Kutilmoqda"}</Text>
         </View>
 
-        <View style={[styles.statTileCard, { borderColor: 'rgba(34, 197, 94, 0.3)' }]}>
+        <View style={[styles.statTileCard, { borderColor: 'rgba(34, 197, 94, 0.3)' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Text style={[styles.statNumberText, { color: '#22C55E' }]}>{dbCounts.approved}</Text>
-          <Text style={styles.statLabelText}>{"Tasdiqlangan"}</Text>
+          <Text style={[styles.statLabelText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tasdiqlangan"}</Text>
         </View>
 
-        <View style={[styles.statTileCard, { borderColor: 'rgba(239, 68, 68, 0.3)' }]}>
+        <View style={[styles.statTileCard, { borderColor: 'rgba(239, 68, 68, 0.3)' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Text style={[styles.statNumberText, { color: '#EF4444' }]}>{dbCounts.rejected}</Text>
-          <Text style={styles.statLabelText}>{"Rad etilgan"}</Text>
+          <Text style={[styles.statLabelText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Rad etilgan"}</Text>
         </View>
 
-        <View style={[styles.statTileCard, { borderColor: 'rgba(56, 189, 248, 0.3)' }]}>
+        <View style={[styles.statTileCard, { borderColor: 'rgba(56, 189, 248, 0.3)' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Text style={[styles.statNumberText, { color: '#38BDF8' }]}>{dbCounts.total}</Text>
-          <Text style={styles.statLabelText}>{"Jami"}</Text>
+          <Text style={[styles.statLabelText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Jami"}</Text>
         </View>
       </View>
 
@@ -982,15 +1179,16 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
       <View style={styles.filtersRow}>
         {/* Status Dropdown Filter */}
         <TouchableOpacity
-          style={styles.filterSelectTile}
+          style={[styles.filterSelectTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
           onPress={() => {
             setShowStatusDropdown(!showStatusDropdown);
             setShowLeagueDropdown(false);
           }}
           activeOpacity={0.7}
         >
-          <Ionicons name="filter-outline" size={14} color="#00FF66" />
-          <Text style={styles.filterSelectText} numberOfLines={1}>
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="filter-outline" size={14} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+          <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
             {statusFilter === 'all'
               ? 'Barcha Holatlar'
               : statusFilter === 'pending'
@@ -1001,29 +1199,31 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
               ? 'Qisman'
               : 'Rad etilgan'}
           </Text>
-          <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.6)" />
+          <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
         </TouchableOpacity>
 
         {/* League Dropdown Filter */}
         <TouchableOpacity
-          style={styles.filterSelectTile}
+          style={[styles.filterSelectTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
           onPress={() => {
             setShowLeagueDropdown(!showLeagueDropdown);
             setShowStatusDropdown(false);
           }}
           activeOpacity={0.7}
         >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
-          <Text style={styles.filterSelectText} numberOfLines={1}>
+          <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
             {leagueFilter === 'all' ? 'Barcha Ligalar' : leagueFilter}
           </Text>
-          <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.6)" />
+          <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
         </TouchableOpacity>
       </View>
 
       {/* Dropdown Menu Overlay - Status */}
       {showStatusDropdown && (
-        <View style={styles.dropdownMenuBox}>
+        <View style={[styles.dropdownMenuBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           {[
             { id: 'all', title: 'Barcha Holatlar' },
             { id: 'pending', title: 'Kutilmoqda' },
@@ -1039,7 +1239,16 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 setShowStatusDropdown(false);
               }}
             >
-              <Text style={[styles.dropdownMenuText, statusFilter === st.id && { color: '#00FF66', fontWeight: '900' }]}>
+              <Text
+                style={[
+                  styles.dropdownMenuText,
+                  Platform.OS === 'android' && { color: colors.textSecondary },
+                  statusFilter === st.id && {
+                    color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66',
+                    fontWeight: '900',
+                  },
+                ]}
+              >
                 {st.title}
               </Text>
             </TouchableOpacity>
@@ -1049,7 +1258,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
       {/* Dropdown Menu Overlay - League */}
       {showLeagueDropdown && (
-        <View style={styles.dropdownMenuBox}>
+        <View style={[styles.dropdownMenuBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
             <TouchableOpacity
               style={styles.dropdownMenuItem}
@@ -1058,7 +1268,16 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 setShowLeagueDropdown(false);
               }}
             >
-              <Text style={[styles.dropdownMenuText, leagueFilter === 'all' && { color: '#00FF66', fontWeight: '900' }]}>
+              <Text
+                style={[
+                  styles.dropdownMenuText,
+                  Platform.OS === 'android' && { color: colors.textSecondary },
+                  leagueFilter === 'all' && {
+                    color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66',
+                    fontWeight: '900',
+                  },
+                ]}
+              >
                 {"Barcha Ligalar"}
               </Text>
             </TouchableOpacity>
@@ -1071,7 +1290,16 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   setShowLeagueDropdown(false);
                 }}
               >
-                <Text style={[styles.dropdownMenuText, leagueFilter === lg.name && { color: '#00FF66', fontWeight: '900' }]}>
+                <Text
+                  style={[
+                    styles.dropdownMenuText,
+                    Platform.OS === 'android' && { color: colors.textSecondary },
+                    leagueFilter === lg.name && {
+                      color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66',
+                      fontWeight: '900',
+                    },
+                  ]}
+                >
                   {lg.name}
                 </Text>
               </TouchableOpacity>
@@ -1101,15 +1329,14 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           windowSize={5}
           removeClippedSubviews={true}
           updateCellsBatchingPeriod={50}
-          onEndReached={handleLoadMoreBtn}
-          onEndReachedThreshold={0.5}
+
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
           }
           ListEmptyComponent={
             <View style={styles.emptyCard}>
-              <Ionicons name="document-text-outline" size={40} color="rgba(255,255,255,0.2)" />
-              <Text style={styles.emptyText}>
+              <Ionicons name="document-text-outline" size={40} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.2)"} />
+              <Text style={[styles.emptyText, Platform.OS === 'android' && { color: colors.textMuted }]}>
                 {activeTab === 'players' ? "O'yinchi arizalari topilmadi" : "Jamoa arizalari topilmadi"}
               </Text>
             </View>
@@ -1118,20 +1345,20 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
             ((activeTab === 'players' && hasMorePlayerApps) || (activeTab === 'teams' && hasMoreTeamApps)) ? (
               <View style={{ marginTop: 12, marginBottom: 20, alignItems: 'center' }}>
                 <TouchableOpacity
-                  style={styles.loadMoreButton}
+                  style={[styles.loadMoreButton, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                   onPress={handleLoadMoreBtn}
                   disabled={loadingMore}
                   activeOpacity={0.8}
                 >
                   {loadingMore ? (
-                    <ActivityIndicator size="small" color="#000000" />
+                    <ActivityIndicator size="small" color={Platform.OS === 'android' ? "#FFFFFF" : "#000000"} />
                   ) : (
                     <>
-                      <Ionicons name="arrow-down-circle" size={18} color="#000000" />
-                      <Text style={styles.loadMoreBtnText}>
+                      <Ionicons name="arrow-down-circle" size={18} color={Platform.OS === 'android' ? "#FFFFFF" : "#000000"} />
+                      <Text style={[styles.loadMoreBtnText, Platform.OS === 'android' && { color: "#FFFFFF" }]}>
                         {activeTab === 'players'
-                          ? "Yana 50 ta arizani yuklash"
-                          : "Yana 10 ta jamoa arizasini yuklash"}
+                          ? "Yana 25 ta arizani yuklash"
+                          : "Yana 25 ta jamoa arizasini yuklash"}
                       </Text>
                     </>
                   )}
@@ -1154,10 +1381,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
             return (
               <SwipeableCard onDelete={() => handleDeleteApplication(item, isPlayer)}>
-                <View style={styles.applicationCard}>
+                <View style={[styles.applicationCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                  {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   {/* Left Photo */}
                   <TouchableOpacity onPress={() => setZoomImageUrl(avatar)} activeOpacity={0.8}>
-                    <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={styles.avatarImage} />
+                    <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={[styles.avatarImage, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]} />
                   </TouchableOpacity>
 
                   {/* Center Details */}
@@ -1166,31 +1394,31 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                     onPress={() => openDetailModal(item, isPlayer)}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.applicantName} numberOfLines={1}>
+                    <Text style={[styles.applicantName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                       {fullName}
                     </Text>
 
                     {isPlayer ? (
-                      <Text style={[styles.metaSubText, { color: displayTeam === 'Yakkaxon' ? 'rgba(255,255,255,0.4)' : '#00FF66', fontWeight: '800' }]} numberOfLines={1}>
+                      <Text style={[styles.metaSubText, { color: displayTeam === 'Yakkaxon' ? (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)') : (Platform.OS === 'android' ? colors.accentGreen : '#00FF66'), fontWeight: '800' }]} numberOfLines={1}>
                         {`Jamoa: ${displayTeam || 'Yakkaxon'}`}
                       </Text>
                     ) : null}
 
                     {displayLeague ? (
-                      <Text style={styles.metaSubText} numberOfLines={1}>
+                      <Text style={[styles.metaSubText, Platform.OS === 'android' && { color: colors.textSecondary }]} numberOfLines={1}>
                         {`Liga: ${displayLeague}`}
                       </Text>
                     ) : null}
 
                     {(item.phone || item.contact_phone) ? (
-                      <Text style={styles.metaSubText} numberOfLines={1}>
+                      <Text style={[styles.metaSubText, Platform.OS === 'android' && { color: colors.textMuted }]} numberOfLines={1}>
                         {`Tel: ${item.phone || item.contact_phone}`}
                       </Text>
                     ) : null}
 
                     <View style={styles.metaBottomRow}>
                       {renderStatusBadge(item.status)}
-                      <Text style={styles.timeCreatedText}>
+                      <Text style={[styles.timeCreatedText, Platform.OS === 'android' && { color: colors.textMuted }]}>
                         {formatDate(item.created_at)}
                       </Text>
                     </View>
@@ -1200,15 +1428,15 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   {isPending && (
                     <View style={styles.actionIconCol}>
                       <TouchableOpacity
-                        style={styles.iconApproveBtn}
+                        style={[styles.iconApproveBtn, Platform.OS === 'android' && { backgroundColor: 'rgba(34, 197, 94, 0.15)', borderColor: 'rgba(34, 197, 94, 0.3)' }]}
                         onPress={() => (isPlayer ? handleApprovePlayerApp(item) : handleApproveTeamApp(item))}
                         activeOpacity={0.7}
                       >
-                        <Ionicons name="checkmark-circle" size={26} color="#00FF66" />
+                        <Ionicons name="checkmark-circle" size={26} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={styles.iconRejectBtn}
+                        style={[styles.iconRejectBtn, Platform.OS === 'android' && { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.3)' }]}
                         onPress={() => (isPlayer ? handleRejectPlayerApp(item) : handleRejectTeamApp(item))}
                         activeOpacity={0.7}
                       >
@@ -1256,14 +1484,15 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
       {/* FULL APPLICATION DETAILS MODAL */}
       <Modal visible={!!selectedDetailItem} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             {/* Modal Header */}
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                 {selectedDetailItem?.isPlayer ? "O'yinchi Arizasi Ma'lumotlari" : "Jamoa Arizasi Ma'lumotlari"}
               </Text>
               <TouchableOpacity onPress={() => setSelectedDetailItem(null)}>
-                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textSecondary : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
 
@@ -1284,7 +1513,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                       style={styles.detailModalAvatar}
                     />
                   </TouchableOpacity>
-                  <Text style={styles.detailModalName}>
+                  <Text style={[styles.detailModalName, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                     {selectedDetailItem.full_name ||
                       `${selectedDetailItem.first_name || ''} ${selectedDetailItem.last_name || ''} ${selectedDetailItem.middle_name || ''}`.trim() ||
                       selectedDetailItem.name ||
@@ -1294,109 +1523,113 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 </View>
 
                 {/* Complete Key-Value Grid Rows */}
-                <View style={styles.detailInfoBox}>
+                <View style={[styles.detailInfoBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
                   {(selectedDetailItem.first_name || selectedDetailItem.last_name) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Ism Familiya:"}</Text>
-                      <Text style={styles.detailValText}>
-                        {`${selectedDetailItem.first_name || ''} ${selectedDetailItem.last_name || ''}`}
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Ism Familiya:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                        {`${selectedDetailItem.first_name || ''} ${selectedDetailItem.last_name || ''}`.trim()}
                       </Text>
                     </View>
                   )}
 
-                  {selectedDetailItem.middle_name && (
+                  {(selectedDetailItem.father_name || selectedDetailItem.middle_name) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Otasining ismi:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.middle_name}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Otasining ismi:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.father_name || selectedDetailItem.middle_name}</Text>
                     </View>
                   )}
 
                   {(selectedDetailItem.resolvedTeamName || selectedDetailItem.team_name) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Jamoasi:"}</Text>
-                      <Text style={[styles.detailValText, { color: '#00FF66' }]}>{selectedDetailItem.resolvedTeamName || selectedDetailItem.team_name}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Jamoasi:"}</Text>
+                      <Text style={[styles.detailValText, { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>{selectedDetailItem.resolvedTeamName || selectedDetailItem.team_name}</Text>
                     </View>
                   )}
 
                   {(selectedDetailItem.resolvedLeague || selectedDetailItem.league || selectedDetailItem.league_name) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Ligasi:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.resolvedLeague || selectedDetailItem.league || selectedDetailItem.league_name}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Ligasi:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.resolvedLeague || selectedDetailItem.league || selectedDetailItem.league_name}</Text>
                     </View>
                   )}
 
                   {(selectedDetailItem.player_number || selectedDetailItem.number || selectedDetailItem.jersey_number) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"O'yinchi raqami:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.player_number || selectedDetailItem.number || selectedDetailItem.jersey_number}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yinchi raqami:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.player_number || selectedDetailItem.number || selectedDetailItem.jersey_number}</Text>
                     </View>
                   )}
 
                   {selectedDetailItem.position && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Pozitsiyasi:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.position}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Pozitsiyasi:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.position}</Text>
                     </View>
                   )}
 
-                  {selectedDetailItem.passport_id && (
+                  {(selectedDetailItem.passport_series || selectedDetailItem.passport_number || selectedDetailItem.passport_id) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Pasport Seriya/ID:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.passport_id}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Pasport Seriya/ID:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                        {selectedDetailItem.passport_series
+                          ? `${selectedDetailItem.passport_series} ${selectedDetailItem.passport_number || ''}`.trim()
+                          : (selectedDetailItem.passport_number || selectedDetailItem.passport_id)}
+                      </Text>
                     </View>
                   )}
 
                   {selectedDetailItem.pinfl && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"JSHSHIR / PINFL:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.pinfl}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"JSHSHIR / PINFL:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.pinfl}</Text>
                     </View>
                   )}
 
                   {(selectedDetailItem.phone || selectedDetailItem.contact_phone) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Telefon raqam:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.phone || selectedDetailItem.contact_phone}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Telefon raqam:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.phone || selectedDetailItem.contact_phone}</Text>
                     </View>
                   )}
 
                   {selectedDetailItem.birth_date && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Tug'ilgan sanasi:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.birth_date}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tug'ilgan sanasi:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.birth_date}</Text>
                     </View>
                   )}
 
                   {(selectedDetailItem.height || selectedDetailItem.weight) && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Bo'yi / Vazni:"}</Text>
-                      <Text style={styles.detailValText}>{`${selectedDetailItem.height || '-'} cm / ${selectedDetailItem.weight || '-'} kg`}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Bo'yi / Vazni:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{`${selectedDetailItem.height || '-'} cm / ${selectedDetailItem.weight || '-'} kg`}</Text>
                     </View>
                   )}
 
                   {selectedDetailItem.citizenship && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Fuqaroligi:"}</Text>
-                      <Text style={styles.detailValText}>{selectedDetailItem.citizenship}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Fuqaroligi:"}</Text>
+                      <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{selectedDetailItem.citizenship}</Text>
                     </View>
                   )}
 
                   {getInstagramUser(selectedDetailItem) !== '' && (
                     <View style={styles.detailInfoRow}>
-                      <Text style={styles.detailKeyText}>{"Instagram:"}</Text>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Instagram:"}</Text>
                       <Text style={[styles.detailValText, { color: '#E1306C' }]}>{`@${getInstagramUser(selectedDetailItem)}`}</Text>
                     </View>
                   )}
 
                   <View style={styles.detailInfoRow}>
-                    <Text style={styles.detailKeyText}>{"Topshirilgan vaqti:"}</Text>
-                    <Text style={styles.detailValText}>{formatDate(selectedDetailItem.created_at)}</Text>
+                    <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Topshirilgan vaqti:"}</Text>
+                    <Text style={[styles.detailValText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{formatDate(selectedDetailItem.created_at)}</Text>
                   </View>
 
                   {getCleanComment(selectedDetailItem.comment) !== '' && (
                     <View style={{ gap: 4, marginTop: 4 }}>
-                      <Text style={styles.detailKeyText}>{"Izoh / Sharh:"}</Text>
-                      <Text style={[styles.detailValText, { fontSize: 12, color: 'rgba(255,255,255,0.85)' }]}>
+                      <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Izoh / Sharh:"}</Text>
+                      <Text style={[styles.detailValText, { fontSize: 12 }, Platform.OS === 'android' ? { color: colors.textSecondary } : { color: 'rgba(255,255,255,0.85)' }]}>
                         {getCleanComment(selectedDetailItem.comment)}
                       </Text>
                     </View>
@@ -1406,7 +1639,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 {/* Additional Passport Image Preview */}
                 {selectedDetailItem.passport_url && (
                   <View style={{ gap: 6 }}>
-                    <Text style={styles.detailKeyText}>{"Pasport Nusxasi Rasmi:"}</Text>
+                    <Text style={[styles.detailKeyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Pasport Nusxasi Rasmi:"}</Text>
                     <TouchableOpacity onPress={() => setZoomImageUrl(selectedDetailItem.passport_url)}>
                       <Image
                         source={{ uri: selectedDetailItem.passport_url }}
@@ -1421,21 +1654,21 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 {!selectedDetailItem.isPlayer && (
                   <View style={{ gap: 10, marginTop: 10 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Text style={[styles.modalTitle, { fontSize: 14.5, color: '#00FF66' }]}>
+                      <Text style={[styles.modalTitle, { fontSize: 14.5, color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                         {`Jamoaning o'yinchilari (${teamRosterPlayers.length})`}
                       </Text>
-                      {loadingTeamRoster && <ActivityIndicator size="small" color="#00FF66" />}
+                      {loadingTeamRoster && <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />}
                     </View>
 
                     {loadingTeamRoster ? (
                       <View style={{ paddingVertical: 20, alignItems: 'center', gap: 8 }}>
-                        <ActivityIndicator size="small" color="#00FF66" />
-                        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
+                        <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                        <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)', fontSize: 12 }}>
                           {"O'yinchilar bazadan yuklanmoqda..."}
                         </Text>
                       </View>
                     ) : teamRosterPlayers.length === 0 ? (
-                      <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
+                      <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)', fontSize: 12 }}>
                         {"Ushbu jamoaga tegishli o'yinchilar hali biriktirilmagan"}
                       </Text>
                     ) : (
@@ -1451,7 +1684,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop';
 
                         return (
-                          <View key={pItem.id ? `roster-${pItem.id}-${pIdx}` : `roster-name-${pIdx}`} style={styles.rosterPlayerRowCard}>
+                          <View key={pItem.id ? `roster-${pItem.id}-${pIdx}` : `roster-name-${pIdx}`} style={[styles.rosterPlayerRowCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                            {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                             <TouchableOpacity
                               style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
                               onPress={() => setSelectedDetailItem({ ...pItem, isPlayer: true })}
@@ -1459,11 +1693,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                             >
                               <ExpoImage cachePolicy='memory-disk' source={{ uri: pAvatar }} style={styles.rosterPlayerAvatar} />
                               <View style={{ flex: 1 }}>
-                                <Text style={styles.rosterPlayerName} numberOfLines={1}>
+                                <Text style={[styles.rosterPlayerName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                                   {pName}
                                 </Text>
                                 {pItem.position && (
-                                  <Text style={styles.metaSubText}>{pItem.position}</Text>
+                                  <Text style={[styles.metaSubText, Platform.OS === 'android' && { color: colors.textSecondary }]}>{pItem.position}</Text>
                                 )}
                               </View>
                             </TouchableOpacity>
@@ -1481,19 +1715,19 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 {((selectedDetailItem.status || 'pending').toLowerCase() === 'pending' || (selectedDetailItem.status || '').toLowerCase() === 'kutilmoqda') && (
                   <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
                     <TouchableOpacity
-                      style={styles.modalApproveBtn}
+                      style={[styles.modalApproveBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                       onPress={() =>
                         selectedDetailItem.isPlayer
                           ? handleApprovePlayerApp(selectedDetailItem)
                           : handleApproveTeamApp(selectedDetailItem)
                       }
                     >
-                      <Ionicons name="checkmark-circle" size={18} color="#000000" />
-                      <Text style={styles.modalApproveBtnText}>{"Jamoani Qabul Qilish"}</Text>
+                      <Ionicons name="checkmark-circle" size={18} color={Platform.OS === 'android' ? "#FFFFFF" : "#000000"} />
+                      <Text style={[styles.modalApproveBtnText, Platform.OS === 'android' && { color: "#FFFFFF" }]}>{"Jamoani Qabul Qilish"}</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={styles.modalRejectBtn}
+                      style={[styles.modalRejectBtn, Platform.OS === 'android' && { backgroundColor: '#EF4444' }]}
                       onPress={() =>
                         selectedDetailItem.isPlayer
                           ? handleRejectPlayerApp(selectedDetailItem)
@@ -1512,15 +1746,16 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           {/* INTERNAL STATUS PICKER OVERLAY INSIDE THE SAME MODAL TREE */}
           {statusPickerPlayer && (
             <View style={styles.pickerOverlayBox}>
-              <View style={styles.pickerCard}>
+              <View style={[styles.pickerCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 <View style={styles.modalHeaderRow}>
-                  <Text style={styles.modalTitle}>{"Holatni O'zgartirish"}</Text>
+                  <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Holatni O'zgartirish"}</Text>
                   <TouchableOpacity onPress={() => setStatusPickerPlayer(null)}>
-                    <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                    <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textSecondary : "rgba(255,255,255,0.6)"} />
                   </TouchableOpacity>
                 </View>
 
-                <Text style={{ color: '#00FF66', fontSize: 14, fontWeight: '800', marginVertical: 4 }}>
+                <Text style={{ color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontSize: 14, fontWeight: '800', marginVertical: 4 }}>
                   {statusPickerPlayer.full_name ||
                     `${statusPickerPlayer.first_name || ''} ${statusPickerPlayer.last_name || ''}`.trim() ||
                     statusPickerPlayer.name ||
@@ -1528,7 +1763,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 </Text>
 
                 <TouchableOpacity
-                  style={[styles.statusOptionBtn, { borderColor: '#22C55E' }]}
+                  style={[styles.statusOptionBtn, { borderColor: '#22C55E' }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
                   onPress={() => handleSetPlayerStatus(statusPickerPlayer, 'approved')}
                 >
                   <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
@@ -1536,7 +1771,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.statusOptionBtn, { borderColor: '#F59E0B' }]}
+                  style={[styles.statusOptionBtn, { borderColor: '#F59E0B' }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
                   onPress={() => handleSetPlayerStatus(statusPickerPlayer, 'pending')}
                 >
                   <Ionicons name="time" size={20} color="#F59E0B" />
@@ -1544,7 +1779,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.statusOptionBtn, { borderColor: '#EF4444' }]}
+                  style={[styles.statusOptionBtn, { borderColor: '#EF4444' }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
                   onPress={() => handleSetPlayerStatus(statusPickerPlayer, 'rejected')}
                 >
                   <Ionicons name="close-circle" size={20} color="#EF4444" />

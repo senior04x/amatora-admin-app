@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { AppState, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';

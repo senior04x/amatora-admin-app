@@ -7,7 +7,7 @@ if (typeof global !== 'undefined' && (global as any).ErrorUtils) {
 }
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
@@ -24,7 +24,6 @@ Notifications.setNotificationHandler({
   } as any),
 });
 import { Image as ExpoImage } from 'expo-image';
-import { BlurView } from 'expo-blur';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons, Feather, FontAwesome } from '@expo/vector-icons';
@@ -32,11 +31,14 @@ import * as Font from 'expo-font';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { appQueryClient } from './src/api/queryClient';
 import { OrgProvider, useOrg } from './src/context/OrgContext';
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PlayersScreen } from './src/screens/PlayersScreen';
 import { StandingsScreen } from './src/screens/StandingsScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { WelcomeScreen } from './src/screens/WelcomeScreen';
+import { SplashScreen } from './src/screens/SplashScreen';
 import { PinScreen } from './src/screens/PinScreen';
 import { MatchControlScreen } from './src/screens/MatchControlScreen';
 import { supabase } from './src/supabaseClient';
@@ -57,8 +59,14 @@ import { NotificationsScreen } from './src/screens/NotificationsScreen';
 import { CardsScreen } from './src/screens/CardsScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 import { hasSecurePin } from './src/utils/securePin';
+import { SafeBlurView as BlurView } from './src/components/SafeBlurView';
 
 const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React.ReactNode }) => {
+  if (Platform.OS === 'android') {
+    if (!isActive) return null;
+    return <View style={{ flex: 1 }}>{children}</View>;
+  }
+
   const [hasRendered, setHasRendered] = useState(isActive);
 
   useEffect(() => {
@@ -78,10 +86,13 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, userRole } = useOrg();
+  const { isDark, colors } = useTheme();
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards'
   >('dashboard');
   const [playersSubTab, setPlayersSubTab] = useState<'players' | 'teams'>('players');
+  const [navigationHistory, setNavigationHistory] = useState<string[]>(['dashboard']);
+  const lastBackPressRef = useRef<number>(0);
 
   const handleNavigate = (
     tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards',
@@ -94,12 +105,57 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     if (subTab) {
       setPlayersSubTab(subTab);
     }
+    if (tab !== activeTab) {
+      setNavigationHistory(prev => [...prev, tab]);
+    }
     setActiveTab(tab);
   };
 
-  const handleAccountPress = () => {
-    setActiveTab('account');
+  const handleGoBack = () => {
+    setNavigationHistory(prev => {
+      if (prev.length > 1) {
+        const nextHistory = prev.slice(0, -1);
+        const prevTab = nextHistory[nextHistory.length - 1];
+        setActiveTab(prevTab as any);
+        return nextHistory;
+      } else {
+        setActiveTab('dashboard');
+        return ['dashboard'];
+      }
+    });
   };
+
+  const handleAccountPress = () => {
+    handleNavigate('account');
+  };
+
+  // Hardware Android Back Button Handler (Back in screen history, or double-tap to exit on Dashboard)
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const backAction = () => {
+      // 1. If not on dashboard, step back in navigation history
+      if (activeTab !== 'dashboard') {
+        handleGoBack();
+        return true;
+      }
+
+      // 2. If on dashboard, prevent accidental exit with double-tap
+      const now = Date.now();
+      if (lastBackPressRef.current && now - lastBackPressRef.current < 2000) {
+        BackHandler.exitApp();
+        return true;
+      }
+      lastBackPressRef.current = now;
+      if (ToastAndroid) {
+        ToastAndroid.show("Ilovadan chiqish uchun yana bir marta bosing", ToastAndroid.SHORT);
+      }
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [activeTab]);
 
   const orgColors = Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : [];
   const hasGradient = orgColors.length > 0;
@@ -252,11 +308,11 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   }, [JSON.stringify(orgColors)]);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
+      <StatusBar style={Platform.OS === 'android' ? (isDark ? 'light' : 'dark') : 'light'} />
 
-      {/* Organization Gradient Background with smooth animated fade-in */}
-      {hasGradient && (
+      {/* Organization Gradient Background on iOS only (Android uses clean solid dark theme for high performance) */}
+      {hasGradient && Platform.OS === 'ios' && (
         <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim }]}>
           <LinearGradient
             colors={(orgColors.length > 1 ? orgColors : [orgColors[0] || '#0F172A', orgColors[0] || '#0F172A']) as any}
@@ -296,27 +352,60 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'sponsors'}><SponsorsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'news'}><NewsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'standings'}><StandingsScreen /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'cards'}><CardsScreen onGoBack={() => setActiveTab('dashboard')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => setActiveTab('settings')} onNavigateToOrganizers={() => setActiveTab('organizers')} onLogout={onLogout} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'finished-matches'}><FinishedMatchesScreen onGoBack={() => setActiveTab('dashboard')} onNavigateToCreate={() => setActiveTab('create-match')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => setActiveTab('matches')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={() => setActiveTab('account')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'cards'}><CardsScreen onGoBack={handleGoBack} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={handleGoBack} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => handleNavigate('create-match')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'finished-matches'}><FinishedMatchesScreen onGoBack={handleGoBack} onNavigateToCreate={() => handleNavigate('create-match')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => handleNavigate('matches')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={() => setActiveTab('dashboard')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={handleGoBack} /></LazyScreen>
       </View>
 
-      {/* Tactile Dark Navigation Dock */}
-      <View style={styles.navDockWrapper}>
-        <View style={styles.navDock}>
-          {Platform.OS === 'android' && <View style={styles.androidNavBackdrop} />}
-          <BlurView
-            intensity={Platform.OS === 'ios' ? 60 : 85}
-            tint="dark"
-            experimentalBlurMethod="dimezisBlurView"
-            style={StyleSheet.absoluteFill}
-          />
+      {/* Tactile Navigation Dock */}
+      <View
+        style={[
+          styles.navDockWrapper,
+          Platform.OS === 'android' && {
+            bottom: 0,
+            left: 0,
+            right: 0,
+            width: '100%',
+            marginBottom: 0,
+            paddingBottom: 0,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.navDock,
+            Platform.OS === 'android' && {
+              backgroundColor: colors.bgCard,
+              borderColor: 'transparent',
+              borderTopColor: colors.border,
+              borderTopWidth: 1,
+              borderWidth: 0,
+              borderRadius: 0,
+              borderTopLeftRadius: 0,
+              borderTopRightRadius: 0,
+              borderBottomLeftRadius: 0,
+              borderBottomRightRadius: 0,
+              marginBottom: 0,
+              paddingBottom: 6,
+              bottom: 0,
+              elevation: 0,
+            },
+          ]}
+        >
+          {Platform.OS === 'ios' && (
+            <BlurView
+              intensity={60}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          )}
           
           {/* Segment 1: Dashboard (Home Outline) */}
           <TouchableOpacity
@@ -327,13 +416,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             <Ionicons
               name="home-outline"
               size={22}
-              color={activeTab === 'dashboard' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
-              style={activeTab === 'dashboard' && styles.glowingIcon}
+              color={activeTab === 'dashboard' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+              style={activeTab === 'dashboard' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'dashboard' && styles.activeDotGlow]} />
+            <View style={[styles.activeDot, activeTab === 'dashboard' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
 
-          <View style={styles.segmentDivider} />
+          <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
 
           {/* Segment 2: O'yinchilar & Jamoalar (Grid Outline) */}
           <TouchableOpacity
@@ -347,13 +436,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             <Ionicons
               name="grid-outline"
               size={22}
-              color={activeTab === 'players' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
-              style={activeTab === 'players' && styles.glowingIcon}
+              color={activeTab === 'players' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+              style={activeTab === 'players' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'players' && styles.activeDotGlow]} />
+            <View style={[styles.activeDot, activeTab === 'players' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
 
-          <View style={styles.segmentDivider} />
+          <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
 
           {/* Segment 3: CENTER '+' QUICK ADD MATCH BUTTON */}
           <TouchableOpacity
@@ -364,13 +453,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             <Ionicons
               name="add-outline"
               size={28}
-              color={activeTab === 'create-match' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.4)'}
-              style={activeTab === 'create-match' && styles.glowingIcon}
+              color={activeTab === 'create-match' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+              style={activeTab === 'create-match' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'create-match' && styles.activeDotGlow]} />
+            <View style={[styles.activeDot, activeTab === 'create-match' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
 
-          <View style={styles.segmentDivider} />
+          <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
 
           {/* Segment 5: Turnir Jadvali (Stats / Standings Outline) */}
           <TouchableOpacity
@@ -381,13 +470,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             <Ionicons
               name="stats-chart-outline"
               size={22}
-              color={activeTab === 'standings' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
-              style={activeTab === 'standings' && styles.glowingIcon}
+              color={activeTab === 'standings' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+              style={activeTab === 'standings' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'standings' && styles.activeDotGlow]} />
+            <View style={[styles.activeDot, activeTab === 'standings' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
 
-          <View style={styles.segmentDivider} />
+          <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
 
           {/* Segment 6: Admin Akkount / Profil */}
           <TouchableOpacity
@@ -395,7 +484,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             onPress={handleAccountPress}
             activeOpacity={0.7}
           >
-            {userRole !== 'user' && currentOrg?.logo_url ? (
+            {Platform.OS === 'ios' && userRole !== 'user' && currentOrg?.logo_url ? (
               <Image
                 source={{ uri: currentOrg.logo_url }}
                 style={[
@@ -407,11 +496,11 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               <Ionicons
                 name="person-outline"
                 size={22}
-                color={activeTab === 'account' ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}
-                style={activeTab === 'account' && styles.glowingIcon}
+                color={activeTab === 'account' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+                style={activeTab === 'account' && isDark && styles.glowingIcon}
               />
             )}
-            <View style={[styles.activeDot, activeTab === 'account' && styles.activeDotGlow]} />
+            <View style={[styles.activeDot, activeTab === 'account' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
         </View>
       </View>
@@ -419,7 +508,9 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-function App() {
+function AppContent() {
+  const { isDark } = useTheme();
+  const [showSplash, setShowSplash] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -524,54 +615,73 @@ function App() {
     }
   };
 
+  const handleLogoutApp = async () => {
+    setIsLoggedIn(false);
+    setPinState('checking');
+    try {
+      await supabase.auth.signOut();
+      await AsyncStorage.multiRemove([
+        '@amatora_user_role',
+        '@amatora_org_id',
+        '@amatora_user_email',
+        '@amatora_app_pin',
+        '@amatora_pin_skipped',
+      ]);
+    } catch (e) {}
+  };
+
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
   return (
-    <QueryClientProvider client={appQueryClient}>
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        {/* App-wide background image for all screens including Login/Pin */}
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: isDark ? '#0B0F17' : '#F8FAFC' }, !isLoggedIn && { backgroundColor: '#FFFFFF' }]}>
+      <StatusBar style={!isLoggedIn ? 'dark' : (Platform.OS === 'android' ? (isDark ? 'light' : 'dark') : 'light')} />
+      {/* App-wide background image for all screens when logged in on iOS */}
+      {isLoggedIn && Platform.OS === 'ios' && (
         <Image
           source={require('./assets/bg-img.png')}
           style={styles.bgImage}
           resizeMode="cover"
         />
+      )}
 
-        {authLoading || !fontsLoaded ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <ActivityIndicator size="large" color="#00FF66" />
-          </View>
-        ) : !isLoggedIn ? (
-          <LoginScreen onLoginSuccess={() => {
-            setIsLoggedIn(true);
-            checkPinStatus(true);
-          }} />
-        ) : pinState === 'locked' || pinState === 'not_set' || pinState === 'editing' ? (
-          <PinScreen
-            action={pinState === 'editing' ? 'edit' : 'login'}
-            onSuccess={() => {
-              setPinState('unlocked');
-              DeviceEventEmitter.emit('app_pin_changed');
-            }}
-            onReset={() => {
-              setIsLoggedIn(false);
-              setPinState('checking');
-              supabase.auth.signOut().catch(() => {});
-            }}
-          />
-        ) : (
-          <OrgProvider>
-            <MainAppContent onLogout={() => {
-              setIsLoggedIn(false);
-              setPinState('checking');
-              supabase.auth.signOut().catch(() => {});
-            }} />
-          </OrgProvider>
-        )}
-      </View>
-    </QueryClientProvider>
+      {authLoading || !fontsLoaded ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
+          <ActivityIndicator size="large" color="#0F172A" />
+        </View>
+      ) : !isLoggedIn ? (
+        <WelcomeScreen onLoginSuccess={() => {
+          setIsLoggedIn(true);
+          checkPinStatus(true);
+        }} />
+      ) : pinState === 'locked' || pinState === 'not_set' || pinState === 'editing' ? (
+        <PinScreen
+          action={pinState === 'editing' ? 'edit' : 'login'}
+          onSuccess={() => {
+            setPinState('unlocked');
+            DeviceEventEmitter.emit('app_pin_changed');
+          }}
+          onReset={handleLogoutApp}
+        />
+      ) : (
+        <OrgProvider>
+          <MainAppContent onLogout={handleLogoutApp} />
+        </OrgProvider>
+      )}
+    </View>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <QueryClientProvider client={appQueryClient}>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -591,10 +701,13 @@ const styles = StyleSheet.create({
   },
   navDockWrapper: {
     position: 'absolute',
-    bottom: 24,
-    left: 16,
-    right: 16,
-    alignItems: 'center',
+    bottom: Platform.OS === 'android' ? 0 : 24,
+    left: Platform.OS === 'android' ? 0 : 16,
+    right: Platform.OS === 'android' ? 0 : 16,
+    width: Platform.OS === 'android' ? '100%' : undefined,
+    alignItems: Platform.OS === 'android' ? 'stretch' : 'center',
+    margin: 0,
+    padding: 0,
   },
   androidNavBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -605,19 +718,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    height: 66,
-    backgroundColor: Platform.OS === 'android' ? 'rgba(8, 8, 14, 0.70)' : 'transparent',
-    borderRadius: 22,
-    borderWidth: 1.2,
+    height: Platform.OS === 'android' ? 62 : 66,
+    backgroundColor: Platform.OS === 'android' ? '#0F172A' : 'transparent',
+    borderRadius: Platform.OS === 'android' ? 0 : 22,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: 0,
+    borderTopWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.16)',
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    paddingBottom: Platform.OS === 'android' ? 6 : 0,
+    margin: 0,
+    marginBottom: 0,
     overflow: 'hidden',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.6,
+    shadowOpacity: Platform.OS === 'android' ? 0 : 0.6,
     shadowRadius: 18,
-    elevation: 18,
+    elevation: Platform.OS === 'android' ? 0 : 18,
   },
   segmentItem: {
     flex: 1,
@@ -626,6 +747,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 14,
     position: 'relative',
+    paddingBottom: Platform.OS === 'android' ? 4 : 0,
   },
   segmentDivider: {
     width: 1,

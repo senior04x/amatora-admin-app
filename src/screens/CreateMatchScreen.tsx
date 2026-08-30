@@ -14,11 +14,13 @@ import {
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { BlurView } from '../components/SafeBlurView';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { adminNotificationService } from '../utils/adminNotificationService';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
   onBack?: () => void;
@@ -27,6 +29,8 @@ interface Props {
 
 export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
   const { orgId } = useOrg();
+  const { isDark, colors } = useTheme();
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
 
   // DB Data
@@ -112,7 +116,49 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
   const homeTeam = teams.find((t) => t.id === homeTeamId);
   const awayTeam = teams.find((t) => t.id === awayTeamId);
 
-  // Confirm Date Selection (OK Button)
+  // Native Date Picker Opener (Android Native Dialog / iOS Glass Modal)
+  const handleOpenDatePicker = () => {
+    if (Platform.OS === 'android') {
+      const validDate = tempDate instanceof Date && !isNaN(tempDate.getTime()) ? tempDate : new Date();
+      DateTimePickerAndroid.open({
+        value: validDate,
+        mode: 'date',
+        onChange: (event, selectedDate) => {
+          if (event.type === 'set' && selectedDate) {
+            setTempDate(selectedDate);
+            const formattedDate = selectedDate.toISOString().split('T')[0];
+            setMatchDate(formattedDate);
+          }
+        },
+      });
+    } else {
+      setShowDatePicker(true);
+    }
+  };
+
+  // Native Time Picker Opener (Android Native Dialog / iOS Glass Modal)
+  const handleOpenTimePicker = () => {
+    if (Platform.OS === 'android') {
+      const validTime = tempTime instanceof Date && !isNaN(tempTime.getTime()) ? tempTime : new Date();
+      DateTimePickerAndroid.open({
+        value: validTime,
+        mode: 'time',
+        is24Hour: true,
+        onChange: (event, selectedTime) => {
+          if (event.type === 'set' && selectedTime) {
+            setTempTime(selectedTime);
+            const hours = String(selectedTime.getHours()).padStart(2, '0');
+            const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+            setMatchTime(`${hours}:${minutes}`);
+          }
+        },
+      });
+    } else {
+      setShowTimePicker(true);
+    }
+  };
+
+  // Confirm Date Selection (iOS OK Button)
   const confirmDateSelection = () => {
     const validDate = tempDate instanceof Date && !isNaN(tempDate.getTime()) ? tempDate : new Date();
     const formattedDate = validDate.toISOString().split('T')[0];
@@ -120,7 +166,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
     setShowDatePicker(false);
   };
 
-  // Confirm Time Selection (OK Button)
+  // Confirm Time Selection (iOS OK Button)
   const confirmTimeSelection = () => {
     const validTime = tempTime instanceof Date && !isNaN(tempTime.getTime()) ? tempTime : new Date();
     const hours = String(validTime.getHours()).padStart(2, '0');
@@ -210,74 +256,68 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         throw error;
       }
 
-      // Trigger push notification to both teams
-      try {
-        const homeTeamObj = teams.find((t) => t.id === homeTeamId);
-        const awayTeamObj = teams.find((t) => t.id === awayTeamId);
+      // Invalidate queries so matches list is updated immediately
+      queryClient.invalidateQueries({ queryKey: ['matches'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
 
-        adminNotificationService.notifyMatchScheduled({
-          homeTeamId,
-          awayTeamId,
-          homeTeamName: homeTeamObj?.name || 'Jamoa 1',
-          awayTeamName: awayTeamObj?.name || 'Jamoa 2',
-          matchDate,
-          matchTime,
-          stadium: stadiumName?.trim() || selectedField,
-          matchId: insertedData?.[0]?.id ? String(insertedData[0].id) : undefined,
-          organizationId: activeOrgId,
-        }).catch((err) => console.warn('Match push error:', err));
-      } catch (pushErr) {
-        console.warn('Push error:', pushErr);
-      }
+      // Trigger push notification in background
+      const homeTeamObj = teams.find((t) => t.id === homeTeamId);
+      const awayTeamObj = teams.find((t) => t.id === awayTeamId);
 
-      if (Platform.OS === 'web') {
-        window.alert("Yangi o'yin jadvalga muvaffaqiyatli kiritildi! ✓");
-        if (onSuccess) onSuccess();
-      } else {
-        Alert.alert("Muvaffaqiyatli", "Yangi o'yin jadvalga kiritildi!", [
-          {
-            text: "OK",
-            onPress: () => {
-              if (onSuccess) onSuccess();
-            },
-          },
-        ]);
+      adminNotificationService.notifyMatchScheduled({
+        homeTeamId,
+        awayTeamId,
+        homeTeamName: homeTeamObj?.name || 'Jamoa 1',
+        awayTeamName: awayTeamObj?.name || 'Jamoa 2',
+        matchDate,
+        matchTime,
+        stadium: stadiumName?.trim() || selectedField,
+        matchId: insertedData?.[0]?.id ? String(insertedData[0].id) : undefined,
+        organizationId: activeOrgId,
+      }).catch((err) => console.warn('Match push error:', err));
+
+      if (onSuccess) {
+        onSuccess();
       }
     } catch (e: any) {
       console.error('Create match error:', e);
-      if (Platform.OS === 'web') {
-        window.alert("Xatolik: " + (e.message || "O'yinni saqlashda xatolik yuz berdi"));
-      } else {
-        Alert.alert("Xatolik", e.message || "O'yinni saqlashda xatolik yuz berdi");
-      }
+      Alert.alert("Xatolik", e.message || "O'yinni saqlashda xatolik yuz berdi");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle}>{"Yangi O'yin Yaratish"}</Text>
-          <Text style={styles.headerSub}>{"Turnir o'yini jadvalini shakllantiring"}</Text>
+          <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Yangi O'yin Yaratish"}</Text>
+          <Text style={[styles.headerSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Turnir o'yini jadvalini shakllantiring"}</Text>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* 1. Liga Tanlash */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{"1. Liga / Musobaqa *"}</Text>
-          <TouchableOpacity style={styles.selectBtn} onPress={() => setShowLeaguePicker(true)}>
-            <Text style={styles.selectBtnText}>{selectedLeague || "Liganu tanlang"}</Text>
-            <Ionicons name="chevron-down" size={18} color="rgba(255, 255, 255, 0.5)" />
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"1. Liga / Musobaqa *"}</Text>
+          <TouchableOpacity
+            style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+            onPress={() => setShowLeaguePicker(true)}
+          >
+            <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+              {selectedLeague || "Liganu tanlang"}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
           </TouchableOpacity>
         </View>
 
         {/* 2. Mezbon Jamoa */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{"2. Mezbon Jamoa (Home) *"}</Text>
-          <TouchableOpacity style={styles.selectBtn} onPress={() => setShowHomePicker(true)}>
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"2. Mezbon Jamoa (Home) *"}</Text>
+          <TouchableOpacity
+            style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+            onPress={() => setShowHomePicker(true)}
+          >
             {homeTeam ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Image
@@ -286,21 +326,24 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
                       homeTeam.logo_url ||
                       'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop',
                   }}
-                  style={{ width: 22, height: 22, borderRadius: 6 }}
+                  style={{ width: 22, height: 22, borderRadius: 6, backgroundColor: colors.bgCardElevated }}
                 />
-                <Text style={styles.selectBtnText}>{homeTeam.name}</Text>
+                <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{homeTeam.name}</Text>
               </View>
             ) : (
-              <Text style={styles.selectBtnPlaceholder}>{"Mezbon jamoani tanlang"}</Text>
+              <Text style={[styles.selectBtnPlaceholder, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Mezbon jamoani tanlang"}</Text>
             )}
-            <Ionicons name="chevron-down" size={18} color="rgba(255, 255, 255, 0.5)" />
+            <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
           </TouchableOpacity>
         </View>
 
         {/* 3. Mehmon Jamoa */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{"3. Mehmon Jamoa (Away) *"}</Text>
-          <TouchableOpacity style={styles.selectBtn} onPress={() => setShowAwayPicker(true)}>
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"3. Mehmon Jamoa (Away) *"}</Text>
+          <TouchableOpacity
+            style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+            onPress={() => setShowAwayPicker(true)}
+          >
             {awayTeam ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Image
@@ -309,33 +352,33 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
                       awayTeam.logo_url ||
                       'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop',
                   }}
-                  style={{ width: 22, height: 22, borderRadius: 6 }}
+                  style={{ width: 22, height: 22, borderRadius: 6, backgroundColor: colors.bgCardElevated }}
                 />
-                <Text style={styles.selectBtnText}>{awayTeam.name}</Text>
+                <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{awayTeam.name}</Text>
               </View>
             ) : (
-              <Text style={styles.selectBtnPlaceholder}>{"Mehmon jamoani tanlang"}</Text>
+              <Text style={[styles.selectBtnPlaceholder, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Mehmon jamoani tanlang"}</Text>
             )}
-            <Ionicons name="chevron-down" size={18} color="rgba(255, 255, 255, 0.5)" />
+            <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
           </TouchableOpacity>
         </View>
 
         {/* Live Preview Card */}
         {homeTeam && awayTeam && (
-          <View style={styles.vsPreviewCard}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.vsPreviewCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
             <View style={styles.vsTeamCol}>
-              <Image source={{ uri: homeTeam.logo_url }} style={styles.vsTeamLogo} />
-              <Text style={styles.vsTeamName} numberOfLines={1}>
+              <Image source={{ uri: homeTeam.logo_url }} style={[styles.vsTeamLogo, { backgroundColor: colors.bgCardElevated }]} />
+              <Text style={[styles.vsTeamName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                 {homeTeam.name}
               </Text>
             </View>
-            <View style={styles.vsBadge}>
-              <Text style={styles.vsBadgeText}>VS</Text>
+            <View style={[styles.vsBadge, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5', borderColor: colors.accentGreen }]}>
+              <Text style={[styles.vsBadgeText, Platform.OS === 'android' && { color: colors.accentGreen }]}>VS</Text>
             </View>
             <View style={styles.vsTeamCol}>
-              <Image source={{ uri: awayTeam.logo_url }} style={styles.vsTeamLogo} />
-              <Text style={styles.vsTeamName} numberOfLines={1}>
+              <Image source={{ uri: awayTeam.logo_url }} style={[styles.vsTeamLogo, { backgroundColor: colors.bgCardElevated }]} />
+              <Text style={[styles.vsTeamName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                 {awayTeam.name}
               </Text>
             </View>
@@ -344,21 +387,24 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
         {/* 4. Maydon / Location Selection */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{"4. Maydon (Stream Joylashuvi) *"}</Text>
-          <TouchableOpacity style={styles.selectBtn} onPress={() => setShowFieldPicker(true)}>
-            <Text style={styles.selectBtnText}>
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"4. Maydon (Stream Joylashuvi) *"}</Text>
+          <TouchableOpacity
+            style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+            onPress={() => setShowFieldPicker(true)}
+          >
+            <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
               {selectedField === '1-maydon' ? "1-Maydon (Asosiy)" : "2-Maydon (Qo'shimcha)"}
             </Text>
-            <Ionicons name="chevron-down" size={18} color="rgba(255, 255, 255, 0.5)" />
+            <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
           </TouchableOpacity>
         </View>
 
         {/* 5. Tur / Bosqich */}
         <View style={styles.inputGroup}>
           <View style={styles.labelRow}>
-            <Text style={styles.label}>{"5. Tur / Bosqich *"}</Text>
+            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"5. Tur / Bosqich *"}</Text>
             <TouchableOpacity onPress={() => setShowSecretStages(!showSecretStages)}>
-              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
+              <Text style={{ color: Platform.OS === 'android' ? colors.accentGreen : '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
                 {showSecretStages ? "Yashirish ▲" : "Bosqichlar (Final/Pley-off) ▼"}
               </Text>
             </TouchableOpacity>
@@ -369,10 +415,26 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
             {['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map((num) => (
               <TouchableOpacity
                 key={num}
-                style={[styles.roundChip, matchRound === num && styles.roundChipActive]}
+                style={[
+                  styles.roundChip,
+                  matchRound === num && styles.roundChipActive,
+                  Platform.OS === 'android' && {
+                    backgroundColor: matchRound === num ? colors.accentGreen : colors.bgCard,
+                    borderColor: matchRound === num ? colors.accentGreen : colors.border,
+                  },
+                ]}
                 onPress={() => setMatchRound(num)}
               >
-                <Text style={[styles.roundChipText, matchRound === num && styles.roundChipTextActive]}>
+                <Text
+                  style={[
+                    styles.roundChipText,
+                    matchRound === num && styles.roundChipTextActive,
+                    Platform.OS === 'android' && {
+                      color: matchRound === num ? '#FFFFFF' : colors.textSecondary,
+                      fontWeight: matchRound === num ? '900' : '700',
+                    },
+                  ]}
+                >
                   {num}-tur
                 </Text>
               </TouchableOpacity>
@@ -381,16 +443,33 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
           {/* Secret Collapsible Stages */}
           {showSecretStages && (
-            <View style={styles.secretStagesContainer}>
-              <Text style={styles.secretStagesTitle}>{"Nokaut & Play-Off Bosqichlari:"}</Text>
+            <View style={[styles.secretStagesContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+              <Text style={[styles.secretStagesTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Nokaut & Play-Off Bosqichlari:"}</Text>
               <View style={styles.secretStagesGrid}>
                 {['1/16 Final', '1/8 Final', 'Chorak Final', 'Yarim Final', '3-O\'rin uchun', 'FINAL'].map((st) => (
                   <TouchableOpacity
                     key={st}
-                    style={[styles.secretStageChip, matchRound === st && styles.secretStageChipActive]}
+                    style={[
+                      styles.secretStageChip,
+                      matchRound === st && styles.secretStageChipActive,
+                      Platform.OS === 'android' && {
+                        backgroundColor: matchRound === st ? colors.accentGreen : colors.bgCardElevated,
+                        borderColor: matchRound === st ? colors.accentGreen : colors.border,
+                        borderWidth: 1,
+                      },
+                    ]}
                     onPress={() => setMatchRound(st)}
                   >
-                    <Text style={[styles.secretStageText, matchRound === st && styles.secretStageTextActive]}>
+                    <Text
+                      style={[
+                        styles.secretStageText,
+                        matchRound === st && styles.secretStageTextActive,
+                        Platform.OS === 'android' && {
+                          color: matchRound === st ? '#FFFFFF' : colors.textPrimary,
+                          fontWeight: matchRound === st ? '900' : '700',
+                        },
+                      ]}
+                    >
                       {st}
                     </Text>
                   </TouchableOpacity>
@@ -400,9 +479,16 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           )}
 
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              Platform.OS === 'android' && {
+                backgroundColor: colors.bgCard,
+                borderColor: colors.border,
+                color: colors.textPrimary,
+              },
+            ]}
             placeholder="Kiritilgan tur: masalan 1-tur yoki Final"
-            placeholderTextColor="rgba(255, 255, 255, 0.35)"
+            placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
             value={matchRound}
             onChangeText={setMatchRound}
           />
@@ -412,9 +498,26 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         <View style={styles.rowTwoCols}>
           {/* Match Date */}
           <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>{"6. Sana *"}</Text>
-            <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
-              <Text style={{ color: matchDate ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)', fontSize: 13.5 }}>
+            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"6. Sana *"}</Text>
+            <TouchableOpacity
+              style={[
+                styles.input,
+                Platform.OS === 'android' && {
+                  backgroundColor: colors.bgCard,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={handleOpenDatePicker}
+            >
+              <Text
+                style={{
+                  color: matchDate
+                    ? (Platform.OS === 'android' ? colors.textPrimary : '#FFFFFF')
+                    : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255, 255, 255, 0.35)'),
+                  fontSize: 13.5,
+                  fontWeight: '600',
+                }}
+              >
                 {matchDate || "YYYY-MM-DD"}
               </Text>
             </TouchableOpacity>
@@ -422,100 +525,143 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
           {/* Match Time */}
           <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>{"Vaqt *"}</Text>
-            <TouchableOpacity style={styles.input} onPress={() => setShowTimePicker(true)}>
-              <Text style={{ color: matchTime ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)', fontSize: 13.5 }}>
+            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Vaqt *"}</Text>
+            <TouchableOpacity
+              style={[
+                styles.input,
+                Platform.OS === 'android' && {
+                  backgroundColor: colors.bgCard,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={handleOpenTimePicker}
+            >
+              <Text
+                style={{
+                  color: matchTime
+                    ? (Platform.OS === 'android' ? colors.textPrimary : '#FFFFFF')
+                    : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255, 255, 255, 0.35)'),
+                  fontSize: 13.5,
+                  fontWeight: '600',
+                }}
+              >
                 {matchTime || "HH:MM"}
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Date Picker Modal */}
-          <Modal visible={showDatePicker} transparent animationType="fade">
-            <View style={styles.pickerModalOverlay}>
-              <View style={styles.pickerModalCard}>
-                <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-                <View style={styles.pickerModalHeader}>
-                  <Text style={styles.pickerModalTitle}>O'yin Sanasini Tanlang 📅</Text>
-                </View>
+          {/* iOS Date Picker Modal */}
+          {Platform.OS === 'ios' && (
+            <Modal visible={showDatePicker} transparent animationType="fade">
+              <View style={styles.pickerModalOverlay}>
+                <View style={styles.pickerModalCard}>
+                  <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+                  <View style={styles.pickerModalHeader}>
+                    <Text style={styles.pickerModalTitle}>O'yin Sanasini Tanlang 📅</Text>
+                  </View>
 
-                {/* Preset Quick Date Buttons */}
-                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
-                  <TouchableOpacity style={styles.roundChip} onPress={() => setPresetDate(0)}>
-                    <Text style={styles.roundChipText}>Bugun</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.roundChip} onPress={() => setPresetDate(1)}>
-                    <Text style={styles.roundChipText}>Ertaga</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.roundChip} onPress={() => setPresetDate(2)}>
-                    <Text style={styles.roundChipText}>Indin</Text>
-                  </TouchableOpacity>
-                </View>
+                  {/* Preset Quick Date Buttons */}
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                    <TouchableOpacity
+                      style={styles.roundChip}
+                      onPress={() => setPresetDate(0)}
+                    >
+                      <Text style={styles.roundChipText}>Bugun</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.roundChip}
+                      onPress={() => setPresetDate(1)}
+                    >
+                      <Text style={styles.roundChipText}>Ertaga</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.roundChip}
+                      onPress={() => setPresetDate(2)}
+                    >
+                      <Text style={styles.roundChipText}>Indin</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                <DateTimePicker
-                  value={tempDate}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  themeVariant="dark"
-                  onChange={(_, d) => d && setTempDate(d)}
-                />
+                  <DateTimePicker
+                    value={tempDate}
+                    mode="date"
+                    display="spinner"
+                    themeVariant={isDark ? "dark" : "light"}
+                    onChange={(_, d) => d && setTempDate(d)}
+                  />
 
-                <View style={styles.pickerModalActionRow}>
-                  <TouchableOpacity
-                    style={styles.pickerCancelBtn}
-                    onPress={() => setShowDatePicker(false)}
-                  >
-                    <Text style={styles.pickerCancelText}>Bekor</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.pickerOkBtn} onPress={confirmDateSelection}>
-                    <Text style={styles.pickerOkText}>OK • Tasdiqlash</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
-
-          {/* Time Picker Modal */}
-          <Modal visible={showTimePicker} transparent animationType="fade">
-            <View style={styles.pickerModalOverlay}>
-              <View style={styles.pickerModalCard}>
-                <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-                <View style={styles.pickerModalHeader}>
-                  <Text style={styles.pickerModalTitle}>O'yin Vaqtini Tanlang ⏰</Text>
-                </View>
-
-                <DateTimePicker
-                  value={tempTime}
-                  mode="time"
-                  is24Hour
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  themeVariant="dark"
-                  onChange={(_, t) => t && setTempTime(t)}
-                />
-
-                <View style={styles.pickerModalActionRow}>
-                  <TouchableOpacity
-                    style={styles.pickerCancelBtn}
-                    onPress={() => setShowTimePicker(false)}
-                  >
-                    <Text style={styles.pickerCancelText}>Bekor</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.pickerOkBtn} onPress={confirmTimeSelection}>
-                    <Text style={styles.pickerOkText}>OK • Tasdiqlash</Text>
-                  </TouchableOpacity>
+                  <View style={styles.pickerModalActionRow}>
+                    <TouchableOpacity
+                      style={styles.pickerCancelBtn}
+                      onPress={() => setShowDatePicker(false)}
+                    >
+                      <Text style={styles.pickerCancelText}>Bekor</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.pickerOkBtn}
+                      onPress={confirmDateSelection}
+                    >
+                      <Text style={styles.pickerOkText}>OK • Tasdiqlash</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
-            </View>
-          </Modal>
+            </Modal>
+          )}
+
+          {/* iOS Time Picker Modal */}
+          {Platform.OS === 'ios' && (
+            <Modal visible={showTimePicker} transparent animationType="fade">
+              <View style={styles.pickerModalOverlay}>
+                <View style={styles.pickerModalCard}>
+                  <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+                  <View style={styles.pickerModalHeader}>
+                    <Text style={styles.pickerModalTitle}>O'yin Vaqtini Tanlang ⏰</Text>
+                  </View>
+
+                  <DateTimePicker
+                    value={tempTime}
+                    mode="time"
+                    is24Hour
+                    display="spinner"
+                    themeVariant={isDark ? "dark" : "light"}
+                    onChange={(_, t) => t && setTempTime(t)}
+                  />
+
+                  <View style={styles.pickerModalActionRow}>
+                    <TouchableOpacity
+                      style={styles.pickerCancelBtn}
+                      onPress={() => setShowTimePicker(false)}
+                    >
+                      <Text style={styles.pickerCancelText}>Bekor</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.pickerOkBtn}
+                      onPress={confirmTimeSelection}
+                    >
+                      <Text style={styles.pickerOkText}>OK • Tasdiqlash</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+          )}
         </View>
 
         {/* 7. Stadion Nomi */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{"7. Stadion / Kompleks Nomi"}</Text>
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"7. Stadion / Kompleks Nomi"}</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              Platform.OS === 'android' && {
+                backgroundColor: colors.bgCard,
+                borderColor: colors.border,
+                color: colors.textPrimary,
+              },
+            ]}
             placeholder="masalan: Markaziy Arena"
-            placeholderTextColor="rgba(255, 255, 255, 0.35)"
+            placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
             value={stadiumName}
             onChangeText={setStadiumName}
           />
@@ -523,23 +669,39 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
 
         {/* 8. O'yin Muhimligi (Importance) */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{"8. O'yin Muhimligi Statusi"}</Text>
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"8. O'yin Muhimligi Statusi"}</Text>
           <View style={styles.importanceRow}>
             {(['oddiy', 'ortacha', 'markaziy'] as const).map((imp) => (
               <TouchableOpacity
                 key={imp}
-                style={[styles.impBtn, importance === imp && styles.impBtnActive]}
+                style={[
+                  styles.impBtn,
+                  importance === imp && styles.impBtnActive,
+                  Platform.OS === 'android' && {
+                    backgroundColor: importance === imp ? colors.accentGreen : colors.bgCard,
+                    borderColor: importance === imp ? colors.accentGreen : colors.border,
+                  },
+                ]}
                 onPress={() => setImportance(imp)}
               >
                 {imp === 'markaziy' ? (
                   <Ionicons
                     name="flame-outline"
                     size={16}
-                    color={importance === 'markaziy' ? '#000000' : '#FF9500'}
+                    color={importance === 'markaziy' ? (Platform.OS === 'android' ? '#FFFFFF' : '#000000') : '#FF9500'}
                     style={{ marginRight: 4 }}
                   />
                 ) : null}
-                <Text style={[styles.impBtnText, importance === imp && styles.impBtnTextActive]}>
+                <Text
+                  style={[
+                    styles.impBtnText,
+                    importance === imp && styles.impBtnTextActive,
+                    Platform.OS === 'android' && {
+                      color: importance === imp ? '#FFFFFF' : colors.textSecondary,
+                      fontWeight: importance === imp ? '900' : '700',
+                    },
+                  ]}
+                >
                   {imp === 'oddiy' ? 'Oddiy' : imp === 'ortacha' ? "O'rtacha" : 'Markaziy'}
                 </Text>
               </TouchableOpacity>
@@ -548,16 +710,16 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         </View>
 
         {/* 9. YouTube Translyatsiya Linki (Yashirin Switch Toggle) */}
-        <View style={styles.switchRowCard}>
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <View style={[styles.switchRowCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
           <View style={{ flex: 1 }}>
-            <Text style={styles.switchLabel}>{"YouTube Translyatsiya Linki 📺"}</Text>
-            <Text style={styles.switchSubText}>{"Jonli efir havolasini kiritish uchun yoqing"}</Text>
+            <Text style={[styles.switchLabel, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"YouTube Translyatsiya Linki 📺"}</Text>
+            <Text style={[styles.switchSubText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Jonli efir havolasini kiritish uchun yoqing"}</Text>
           </View>
           <Switch
             value={enableYtLink}
             onValueChange={setEnableYtLink}
-            trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+            trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: colors.accentGreen }}
             thumbColor={enableYtLink ? '#FFFFFF' : '#94A3B8'}
           />
         </View>
@@ -565,9 +727,16 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         {enableYtLink && (
           <View style={styles.inputGroup}>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                Platform.OS === 'android' && {
+                  backgroundColor: colors.bgCard,
+                  borderColor: colors.border,
+                  color: colors.textPrimary,
+                },
+              ]}
               placeholder="https://youtube.com/live/..."
-              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
               value={youtubeLink}
               onChangeText={setYoutubeLink}
             />
@@ -575,23 +744,23 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         )}
 
         {/* 10. Qoldirilgan O'yin Switcher (Postponed Toggle) */}
-        <View style={styles.switchRowCard}>
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <View style={[styles.switchRowCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
           <View style={{ flex: 1 }}>
-            <Text style={styles.switchLabel}>{"O'yin Qoldirilgan Statusi ⏸️"}</Text>
-            <Text style={styles.switchSubText}>{"Uchrashuv noma'lum muddatga qoldirilgan bo'lsa yoqing"}</Text>
+            <Text style={[styles.switchLabel, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"O'yin Qoldirilgan Statusi ⏸️"}</Text>
+            <Text style={[styles.switchSubText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Uchrashuv noma'lum muddatga qoldirilgan bo'lsa yoqing"}</Text>
           </View>
           <Switch
             value={isPostponed}
             onValueChange={setIsPostponed}
-            trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: '#EF4444' }}
+            trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: '#EF4444' }}
             thumbColor={isPostponed ? '#FFFFFF' : '#94A3B8'}
           />
         </View>
 
         {/* Submit Button */}
         <TouchableOpacity
-          style={styles.submitBtn}
+          style={[styles.submitBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen }]}
           onPress={handleSaveMatch}
           disabled={loading}
           activeOpacity={0.8}
@@ -599,7 +768,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           {loading ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.submitBtnText}>{"O'yinni Jadvalga Saqlash"}</Text>
+            <Text style={[styles.submitBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"O'yinni Jadvalga Saqlash"}</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -608,25 +777,25 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       {/* League Selector Modal */}
       <Modal visible={showLeaguePicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Liganu Tanlang 🏆</Text>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border, borderBottomWidth: 1, paddingBottom: 12 }]}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Liganu Tanlang 🏆</Text>
               <TouchableOpacity onPress={() => setShowLeaguePicker(false)}>
-                <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.6)"} />
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 300 }}>
               {leagues.map((l) => (
                 <TouchableOpacity
                   key={l.id}
-                  style={styles.pickerItem}
+                  style={[styles.pickerItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                   onPress={() => {
                     setSelectedLeague(l.name);
                     setShowLeaguePicker(false);
                   }}
                 >
-                  <Text style={styles.pickerItemText}>{l.name}</Text>
+                  <Text style={[styles.pickerItemText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{l.name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -637,25 +806,26 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       {/* Home Team Picker Modal */}
       <Modal visible={showHomePicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Mezbon Jamoani Tanlang 🏠</Text>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border, borderBottomWidth: 1, paddingBottom: 12 }]}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Mezbon Jamoani Tanlang 🏠</Text>
               <TouchableOpacity onPress={() => setShowHomePicker(false)}>
-                <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.6)"} />
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 300 }}>
               {filteredTeams.map((t) => (
                 <TouchableOpacity
                   key={t.id}
-                  style={styles.pickerItem}
+                  style={[styles.pickerItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                   onPress={() => {
                     setHomeTeamId(t.id);
                     setShowHomePicker(false);
                   }}
                 >
-                  <Image source={{ uri: t.logo_url }} style={styles.pickerTeamLogo} />
-                  <Text style={styles.pickerItemText}>{t.name}</Text>
+                  <Image source={{ uri: t.logo_url }} style={[styles.pickerTeamLogo, { backgroundColor: colors.bgCardElevated }]} />
+                  <Text style={[styles.pickerItemText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{t.name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -666,25 +836,26 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       {/* Away Team Picker Modal */}
       <Modal visible={showAwayPicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Mehmon Jamoani Tanlang ✈️</Text>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border, borderBottomWidth: 1, paddingBottom: 12 }]}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Mehmon Jamoani Tanlang ✈️</Text>
               <TouchableOpacity onPress={() => setShowAwayPicker(false)}>
-                <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.6)"} />
               </TouchableOpacity>
             </View>
             <ScrollView style={{ maxHeight: 300 }}>
               {filteredTeams.map((t) => (
                 <TouchableOpacity
                   key={t.id}
-                  style={styles.pickerItem}
+                  style={[styles.pickerItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                   onPress={() => {
                     setAwayTeamId(t.id);
                     setShowAwayPicker(false);
                   }}
                 >
-                  <Image source={{ uri: t.logo_url }} style={styles.pickerTeamLogo} />
-                  <Text style={styles.pickerItemText}>{t.name}</Text>
+                  <Image source={{ uri: t.logo_url }} style={[styles.pickerTeamLogo, { backgroundColor: colors.bgCardElevated }]} />
+                  <Text style={[styles.pickerItemText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{t.name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -695,30 +866,31 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       {/* Field Location Picker Modal */}
       <Modal visible={showFieldPicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Maydonni Tanlang 📍</Text>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border, borderBottomWidth: 1, paddingBottom: 12 }]}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Maydonni Tanlang 📍</Text>
               <TouchableOpacity onPress={() => setShowFieldPicker(false)}>
-                <Ionicons name="close" size={22} color="rgba(255, 255, 255, 0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.6)"} />
               </TouchableOpacity>
             </View>
             <TouchableOpacity
-              style={styles.pickerItem}
+              style={[styles.pickerItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
               onPress={() => {
                 setSelectedField('1-maydon');
                 setShowFieldPicker(false);
               }}
             >
-              <Text style={styles.pickerItemText}>1-Maydon (Asosiy)</Text>
+              <Text style={[styles.pickerItemText, Platform.OS === 'android' && { color: colors.textPrimary }]}>1-Maydon (Asosiy)</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.pickerItem}
+              style={[styles.pickerItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
               onPress={() => {
                 setSelectedField('2-maydon');
                 setShowFieldPicker(false);
               }}
             >
-              <Text style={styles.pickerItemText}>2-Maydon (Qo'shimcha)</Text>
+              <Text style={[styles.pickerItemText, Platform.OS === 'android' && { color: colors.textPrimary }]}>2-Maydon (Qo'shimcha)</Text>
             </TouchableOpacity>
           </View>
         </View>

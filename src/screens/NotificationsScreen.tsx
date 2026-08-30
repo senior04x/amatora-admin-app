@@ -10,7 +10,7 @@ import {
   RefreshControl,
   Dimensions,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../supabaseClient';

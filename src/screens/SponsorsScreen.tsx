@@ -11,15 +11,18 @@ import {
   Modal,
   Alert,
   Animated,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
+  const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
@@ -45,7 +48,7 @@ const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
     <Animated.View
       style={[
         {
-          backgroundColor: '#334155',
+          backgroundColor: Platform.OS === 'android' ? colors.border : '#334155',
           borderRadius: 12,
         },
         style,
@@ -97,6 +100,7 @@ const assetToArrayBuffer = async (asset: ImagePicker.ImagePickerAsset): Promise<
 
 export const SponsorsScreen: React.FC = () => {
   const { orgId, currentOrg } = useOrg();
+  const { colors, isDark } = useTheme();
   const [sponsors, setSponsors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -245,13 +249,19 @@ export const SponsorsScreen: React.FC = () => {
       const realSponsors = loadedSponsors.filter((s: any) => {
         if (!s) return false;
         const uName = String(s.name || '').toUpperCase();
-        const uUrl = String(s.logo_url || '').toUpperCase();
+        const rawUrl = String(s.logo_url || '').trim();
+        const uUrl = rawUrl.toUpperCase();
 
+        // 1. Must not be internal system signal, replay trigger, or config keys
         if (
           uName.startsWith('SCHEDULE_BANNER') ||
           uName.startsWith('YT_BANNER') ||
           uName.startsWith('YT_OAUTH') ||
           uName.startsWith('MATCH_TIMER') ||
+          uName.startsWith('REMOTE_') ||
+          uName.includes('REMOTE_FINISH') ||
+          uName.includes('REMOTE_GOAL') ||
+          uName.includes('MATCH_TIMER') ||
           uName.startsWith('LEAGUE_SHOW_SPONSORS') ||
           uName.startsWith('LEAGUE_BG') ||
           uName.startsWith('EXPORT_BG') ||
@@ -265,6 +275,12 @@ export const SponsorsScreen: React.FC = () => {
         ) {
           return false;
         }
+
+        // 2. Must be a valid image URL (not a JSON string payload like {"timestamp":...})
+        if (rawUrl.startsWith('{') || rawUrl.startsWith('[') || (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://') && !rawUrl.startsWith('file://') && !rawUrl.startsWith('data:'))) {
+          return false;
+        }
+
         return true;
       });
 
@@ -466,15 +482,15 @@ export const SponsorsScreen: React.FC = () => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
+    <ScrollView style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]} contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
       {/* HEADER SECTION */}
       <View style={styles.headerRow}>
-        <View style={styles.headerIconBox}>
+        <View style={[styles.headerIconBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7', borderColor: isDark ? 'rgba(245, 158, 11, 0.3)' : '#FDE68A' }]}>
           <Ionicons name="ribbon" size={24} color="#F59E0B" />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.screenTitle}>{"Homiylar Boshqaruvi"}</Text>
-          <Text style={styles.screenSub}>
+          <Text style={[styles.screenTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Homiylar Boshqaruvi"}</Text>
+          <Text style={[styles.screenSub, Platform.OS === 'android' && { color: colors.textMuted }]}>
             {`Tashkilot (${currentOrg?.name || 'Asosiy'}) uchun Bosh Homiy va homiylarni belgilash`}
           </Text>
         </View>
@@ -482,31 +498,32 @@ export const SponsorsScreen: React.FC = () => {
 
       {/* SECTION 1: League Sponsors Visibility Accordion */}
       {leagues.length > 0 && (
-        <View style={styles.sectionAccordionCard}>
+        <View style={[styles.sectionAccordionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
           <TouchableOpacity
-            style={styles.accordionHeaderBtn}
+            style={[styles.accordionHeaderBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
             activeOpacity={0.8}
             onPress={() => setShowLeagueSettings(!showLeagueSettings)}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Ionicons name="sparkles" size={20} color="#00FF66" />
-              <Text style={styles.accordionTitle}>{"Ligalarda Homiy Ko'rinishi"}</Text>
+              <Ionicons name="sparkles" size={20} color={colors.accentGreen} />
+              <Text style={[styles.accordionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ligalarda Homiy Ko'rinishi"}</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.accordionSubText, showLeagueSettings && { color: '#00FF66' }]}>
+              <Text style={[styles.accordionSubText, Platform.OS === 'android' && { color: colors.textMuted }, showLeagueSettings && { color: colors.accentGreen }]}>
                 {showLeagueSettings ? 'Yopish' : 'Ochish'}
               </Text>
               <Ionicons
                 name={showLeagueSettings ? "chevron-up" : "chevron-down"}
                 size={18}
-                color={showLeagueSettings ? "#00FF66" : "#94A3B8"}
+                color={showLeagueSettings ? colors.accentGreen : (Platform.OS === 'android' ? colors.textMuted : "#94A3B8")}
               />
             </View>
           </TouchableOpacity>
 
           {showLeagueSettings && (
-            <View style={styles.accordionBody}>
-              <Text style={styles.leagueTipText}>
+            <View style={[styles.accordionBody, Platform.OS === 'android' && { borderTopColor: colors.border }]}>
+              <Text style={[styles.leagueTipText, Platform.OS === 'android' && { color: colors.textSecondary }]}>
                 {"⭐ Bosh Homiy har doim barcha ligalar shablonlarida (yuqori o'ng burchakda) ko'rinadi. Pastki homiylar stripini har bir liga uchun yoqish yoki o'chirish:"}
               </Text>
 
@@ -518,7 +535,8 @@ export const SponsorsScreen: React.FC = () => {
                       key={league.id}
                       style={[
                         styles.leagueRowCard,
-                        isShow && { backgroundColor: 'rgba(0, 255, 102, 0.08)', borderColor: 'rgba(0, 255, 102, 0.4)' },
+                        Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                        isShow && (Platform.OS === 'android' ? { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.08)' : '#ECFDF5', borderColor: colors.accentGreen } : { backgroundColor: 'rgba(0, 255, 102, 0.08)', borderColor: 'rgba(0, 255, 102, 0.4)' }),
                       ]}
                       activeOpacity={0.8}
                       onPress={() => toggleLeagueSponsors(league)}
@@ -529,18 +547,18 @@ export const SponsorsScreen: React.FC = () => {
                         ) : (
                           <Ionicons name="trophy-outline" size={22} color="#F59E0B" />
                         )}
-                        <Text style={styles.leagueRowName}>{league.name}</Text>
+                        <Text style={[styles.leagueRowName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{league.name}</Text>
                       </View>
 
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Text style={[styles.leagueStatusText, { color: isShow ? '#00FF66' : 'rgba(255,255,255,0.4)' }]}>
+                        <Text style={[styles.leagueStatusText, { color: isShow ? colors.accentGreen : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)') }]}>
                           {isShow ? "YONIQLIK" : "O'CHIQ"}
                         </Text>
                         <Switch
                           value={isShow}
                           onValueChange={() => toggleLeagueSponsors(league)}
                           trackColor={{ false: '#334155', true: '#059669' }}
-                          thumbColor={isShow ? '#00FF66' : '#94A3B8'}
+                          thumbColor={isShow ? colors.accentGreen : (Platform.OS === 'android' ? colors.border : '#94A3B8')}
                         />
                       </View>
                     </TouchableOpacity>
@@ -553,56 +571,58 @@ export const SponsorsScreen: React.FC = () => {
       )}
 
       {/* SECTION 2 & 3: Main Sponsor Direct Select + Image Upload */}
-      <View style={styles.sectionAccordionCard}>
+      <View style={[styles.sectionAccordionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
         <TouchableOpacity
-          style={styles.accordionHeaderBtn}
+          style={[styles.accordionHeaderBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
           activeOpacity={0.8}
           onPress={() => setShowSponsorsSection(!showSponsorsSection)}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Ionicons name="images" size={20} color="#00FF66" />
-            <Text style={styles.accordionTitle}>{`Homiylar Ro'yxati (${sponsors.length}ta homiy)`}</Text>
+            <Ionicons name="images" size={20} color={colors.accentGreen} />
+            <Text style={[styles.accordionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{`Homiylar Ro'yxati (${sponsors.length}ta homiy)`}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={[styles.accordionSubText, showSponsorsSection && { color: '#00FF66' }]}>
+            <Text style={[styles.accordionSubText, Platform.OS === 'android' && { color: colors.textMuted }, showSponsorsSection && { color: colors.accentGreen }]}>
               {showSponsorsSection ? 'Yopish' : 'Ochish'}
             </Text>
             <Ionicons
               name={showSponsorsSection ? "chevron-up" : "chevron-down"}
               size={18}
-              color={showSponsorsSection ? "#00FF66" : "#94A3B8"}
+              color={showSponsorsSection ? colors.accentGreen : (Platform.OS === 'android' ? colors.textMuted : "#94A3B8")}
             />
           </View>
         </TouchableOpacity>
 
         {showSponsorsSection && (
-          <View style={styles.accordionBody}>
+          <View style={[styles.accordionBody, Platform.OS === 'android' && { borderTopColor: colors.border }]}>
             {/* MAIN SPONSOR DIRECT SELECT BOX */}
-            <View style={styles.mainSponsorGoldCard}>
+            <View style={[styles.mainSponsorGoldCard, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.12)' : '#FFFBEB', borderColor: isDark ? 'rgba(245, 158, 11, 0.4)' : '#FCD34D' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={styles.goldStarCircle}>
+                <View style={[styles.goldStarCircle, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.25)' : '#FEF3C7' }]}>
                   <Ionicons name="star" size={22} color="#F59E0B" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.goldCardTitle}>{"Tashkilot Bosh Homiysi"}</Text>
-                  <Text style={styles.goldCardSub}>{"Yuqori o'ng burchakda turadigan asosiy homiyni tanlang:"}</Text>
+                  <Text style={[styles.goldCardTitle, Platform.OS === 'android' && { color: isDark ? '#FEF08A' : '#B45309' }]}>{"Tashkilot Bosh Homiysi"}</Text>
+                  <Text style={[styles.goldCardSub, Platform.OS === 'android' && { color: isDark ? 'rgba(255, 255, 255, 0.7)' : '#78350F' }]}>{"Yuqori o'ng burchakda turadigan asosiy homiyni tanlang:"}</Text>
                 </View>
               </View>
 
               <TouchableOpacity
-                style={styles.mainPickerSelectBtn}
+                style={[styles.mainPickerSelectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: isDark ? 'rgba(245, 158, 11, 0.5)' : '#FCD34D' }]}
                 activeOpacity={0.8}
                 onPress={() => setShowMainPicker(true)}
               >
+                {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
                 {mainSponsor ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                     <Image source={{ uri: mainSponsor.logo_url }} style={{ width: 24, height: 24, borderRadius: 12, resizeMode: 'contain' }} />
-                    <Text style={styles.mainPickerText} numberOfLines={1}>
+                    <Text style={[styles.mainPickerText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                       {`⭐ ${mainSponsor.name || 'Homiy'} (Bosh Homiy)`}
                     </Text>
                   </View>
                 ) : (
-                  <Text style={styles.mainPickerText}>{"-- Bosh homiy yo'q (Tanlanmagan) --"}</Text>
+                  <Text style={[styles.mainPickerText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"-- Bosh homiy yo'q (Tanlanmagan) --"}</Text>
                 )}
                 <Ionicons name="chevron-down" size={18} color="#F59E0B" />
               </TouchableOpacity>
@@ -610,7 +630,7 @@ export const SponsorsScreen: React.FC = () => {
 
             {/* UPLOAD SPONSOR LOGO BUTTON */}
             <TouchableOpacity
-              style={[styles.uploadBtn, uploading && { opacity: 0.6 }]}
+              style={[styles.uploadBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }, uploading && { opacity: 0.6 }]}
               activeOpacity={0.8}
               onPress={handleUploadSponsor}
               disabled={uploading}
@@ -629,16 +649,16 @@ export const SponsorsScreen: React.FC = () => {
             {loading ? (
               <View style={styles.gridContainer}>
                 {[1, 2, 3, 4].map((k) => (
-                  <View key={k} style={styles.sponsorCardSkeleton}>
+                  <View key={k} style={[styles.sponsorCardSkeleton, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
                     <SkeletonItem style={{ width: '100%', height: 100, borderRadius: 12 }} />
                     <SkeletonItem style={{ width: 100, height: 14, borderRadius: 4, marginTop: 10 }} />
                   </View>
                 ))}
               </View>
             ) : sponsors.length === 0 ? (
-              <View style={styles.emptySponsorsBox}>
-                <Ionicons name="sparkles-outline" size={42} color="#00FF66" />
-                <Text style={styles.emptySponsorsText}>
+              <View style={[styles.emptySponsorsBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                <Ionicons name="sparkles-outline" size={42} color={colors.accentGreen} />
+                <Text style={[styles.emptySponsorsText, Platform.OS === 'android' && { color: colors.textMuted }]}>
                   {"Hali homiylar kiritilmagan. Yuqoridagi tugma orqali yangi homiy yuklang."}
                 </Text>
               </View>
@@ -653,31 +673,34 @@ export const SponsorsScreen: React.FC = () => {
                       key={sponsor.id}
                       style={[
                         styles.sponsorCard,
-                        isMain && styles.sponsorCardMain,
-                        isSelected && !isMain && styles.sponsorCardSelected,
+                        Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border },
+                        isMain && (Platform.OS === 'android' ? { borderColor: '#F59E0B', backgroundColor: isDark ? 'rgba(245, 158, 11, 0.12)' : '#FFFBEB' } : styles.sponsorCardMain),
+                        isSelected && !isMain && (Platform.OS === 'android' ? { borderColor: colors.accentGreen, backgroundColor: isDark ? 'rgba(0, 255, 102, 0.08)' : '#ECFDF5' } : styles.sponsorCardSelected),
                       ]}
                     >
-                      <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+                      {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
                       {/* Top Status Badge */}
                       <View style={{ width: '100%', alignItems: 'center' }}>
                         {isMain ? (
-                          <View style={styles.mainSponsorBadge}>
+                          <View style={[styles.mainSponsorBadge, Platform.OS === 'android' && { backgroundColor: '#F59E0B', borderColor: '#F59E0B' }]}>
                             <Ionicons name="star" size={12} color="#000000" />
-                            <Text style={styles.mainSponsorBadgeText}>{"BOSH HOMIY"}</Text>
+                            <Text style={[styles.mainSponsorBadgeText, Platform.OS === 'android' && { color: '#000000' }]}>{"BOSH HOMIY"}</Text>
                           </View>
                         ) : (
                           <View
                             style={[
                               styles.statusBadge,
                               isSelected ? styles.statusBadgeActive : styles.statusBadgeInactive,
+                              Platform.OS === 'android' && isSelected && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#DCFCE7', borderColor: colors.accentGreen },
+                              Platform.OS === 'android' && !isSelected && { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2', borderColor: '#EF4444' },
                             ]}
                           >
                             <Ionicons
                               name={isSelected ? "checkmark-circle" : "close-circle"}
                               size={12}
-                              color={isSelected ? "#00FF66" : "#EF4444"}
+                              color={isSelected ? (Platform.OS === 'android' ? colors.accentGreen : "#00FF66") : "#EF4444"}
                             />
-                            <Text style={[styles.statusBadgeText, { color: isSelected ? '#00FF66' : '#EF4444' }]}>
+                            <Text style={[styles.statusBadgeText, { color: isSelected ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF66') : '#EF4444' }]}>
                               {isSelected ? "AKTIV" : "NOFAOL"}
                             </Text>
                           </View>
@@ -687,47 +710,55 @@ export const SponsorsScreen: React.FC = () => {
                       {/* Centered Sponsor Logo Image */}
                       <TouchableOpacity
                         activeOpacity={0.8}
-                        style={styles.logoImgContainer}
+                        style={[styles.logoImgContainer, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.05)' : '#F3F4F6' }]}
                         onPress={() => toggleSelectSponsor(sponsor)}
                       >
                         <Image source={{ uri: sponsor.logo_url }} style={styles.sponsorLogoImg} />
                       </TouchableOpacity>
 
                       {/* Sponsor Name */}
-                      <Text style={styles.sponsorNameTag} numberOfLines={1}>
+                      <Text style={[styles.sponsorNameTag, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                         {sponsor.name && !sponsor.name.startsWith('sponsor_') ? sponsor.name : 'Homiy logotipi'}
                       </Text>
 
                       {/* Bottom Action Buttons in 1 single row */}
                       <View style={styles.sponsorCardFooter}>
                         <TouchableOpacity
-                          style={[styles.btnActionSmall, isMain && styles.btnActionSmallMain]}
+                          style={[
+                            styles.btnActionSmall,
+                            Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 },
+                            isMain && (Platform.OS === 'android' ? { backgroundColor: '#F59E0B', borderColor: '#F59E0B' } : styles.btnActionSmallMain),
+                          ]}
                           onPress={() => handleSetMainSponsor(sponsor)}
                         >
                           <Ionicons name="star" size={14} color={isMain ? "#000000" : "#F59E0B"} />
-                          <Text style={[styles.btnActionTextSmall, isMain && { color: '#000000' }]} numberOfLines={1}>
+                          <Text style={[styles.btnActionTextSmall, Platform.OS === 'android' && { color: colors.textPrimary }, isMain && { color: '#000000' }]} numberOfLines={1}>
                             {isMain ? "Bosh Homiy" : "Bosh Homiy Qilish"}
                           </Text>
                         </TouchableOpacity>
 
                         {!isMain && (
                           <TouchableOpacity
-                            style={[styles.btnActionSmall, isSelected && styles.btnActionSmallActive]}
+                            style={[
+                              styles.btnActionSmall,
+                              Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 },
+                              isSelected && (Platform.OS === 'android' ? { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#DCFCE7', borderColor: colors.accentGreen } : styles.btnActionSmallActive),
+                            ]}
                             onPress={() => toggleSelectSponsor(sponsor)}
                           >
                             <Ionicons
                               name={isSelected ? "eye" : "eye-off"}
                               size={14}
-                              color={isSelected ? "#00FF66" : "#94A3B8"}
+                              color={isSelected ? (Platform.OS === 'android' ? colors.accentGreen : "#00FF66") : (Platform.OS === 'android' ? colors.textMuted : "#94A3B8")}
                             />
-                            <Text style={[styles.btnActionTextSmall, isSelected && { color: '#00FF66' }]} numberOfLines={1}>
+                            <Text style={[styles.btnActionTextSmall, Platform.OS === 'android' && { color: colors.textPrimary }, isSelected && { color: colors.accentGreen }]} numberOfLines={1}>
                               {isSelected ? "Aktiv" : "Nofaol"}
                             </Text>
                           </TouchableOpacity>
                         )}
 
                         <TouchableOpacity
-                          style={styles.btnDeleteSmall}
+                          style={[styles.btnDeleteSmall, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2' }]}
                           onPress={() => setSponsorToDelete(sponsor)}
                         >
                           <Ionicons name="trash-outline" size={16} color="#EF4444" />
@@ -745,30 +776,30 @@ export const SponsorsScreen: React.FC = () => {
       {/* MAIN SPONSOR SELECTOR MODAL */}
       <Modal visible={showMainPicker} transparent animationType="fade" onRequestClose={() => setShowMainPicker(false)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowMainPicker(false)}>
-          <View style={[styles.modalCard, { maxWidth: 420, maxHeight: '80%' }]}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-            <View style={styles.modalHeader}>
+          <View style={[styles.modalCard, { maxWidth: 420, maxHeight: '80%' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="star" size={20} color="#F59E0B" />
-                <Text style={styles.modalTitle}>{"Bosh Homiyni Tanlang"}</Text>
+                <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bosh Homiyni Tanlang"}</Text>
               </View>
               <TouchableOpacity onPress={() => setShowMainPicker(false)}>
-                <Ionicons name="close" size={22} color="#94A3B8" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#94A3B8"} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={{ padding: 10 }}>
               {/* Option 0: None */}
               <TouchableOpacity
-                style={styles.pickerOptionRow}
+                style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                 onPress={() => {
                   if (mainSponsor) handleSetMainSponsor(mainSponsor);
                   setShowMainPicker(false);
                 }}
               >
-                <Ionicons name="close-circle-outline" size={22} color="#94A3B8" style={{ marginRight: 12 }} />
-                <Text style={styles.pickerOptionText}>{"-- Bosh homiy yo'q (Tanlanmagan) --"}</Text>
-                {!mainSponsor && <Ionicons name="checkmark" size={18} color="#00FF66" style={{ marginLeft: 'auto' }} />}
+                <Ionicons name="close-circle-outline" size={22} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} style={{ marginRight: 12 }} />
+                <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"-- Bosh homiy yo'q (Tanlanmagan) --"}</Text>
+                {!mainSponsor && <Ionicons name="checkmark" size={18} color={colors.accentGreen} style={{ marginLeft: 'auto' }} />}
               </TouchableOpacity>
 
               {sponsors.map((s) => {
@@ -776,14 +807,14 @@ export const SponsorsScreen: React.FC = () => {
                 return (
                   <TouchableOpacity
                     key={s.id}
-                    style={styles.pickerOptionRow}
+                    style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                     onPress={() => {
                       handleSetMainSponsor(s);
                       setShowMainPicker(false);
                     }}
                   >
                     <Image source={{ uri: s.logo_url }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 12, resizeMode: 'contain' }} />
-                    <Text style={[styles.pickerOptionText, isSelected && { color: '#F59E0B', fontWeight: '900' }]}>
+                    <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }, isSelected && { color: '#F59E0B', fontWeight: '900' }]}>
                       {`⭐ ${s.name || 'Homiy'}`}
                     </Text>
                     {isSelected && <Ionicons name="checkmark" size={18} color="#F59E0B" style={{ marginLeft: 'auto' }} />}
@@ -798,19 +829,19 @@ export const SponsorsScreen: React.FC = () => {
       {/* DELETE CONFIRMATION MODAL */}
       <Modal visible={!!sponsorToDelete} transparent animationType="fade" onRequestClose={() => setSponsorToDelete(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }]}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
             <View style={styles.deleteIconBg}>
               <Ionicons name="trash-outline" size={32} color="#EF4444" />
             </View>
-            <Text style={styles.deleteTitle}>{"Homiyni O'chirish"}</Text>
-            <Text style={styles.deleteSub}>
+            <Text style={[styles.deleteTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Homiyni O'chirish"}</Text>
+            <Text style={[styles.deleteSub, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {"Haqiqatan ham ushbu homiy logotipini bazadan va xotiradan o'chirib tashlamoqchimisiz?"}
             </Text>
 
             <View style={{ flexDirection: 'row', gap: 12, width: '100%', marginTop: 20 }}>
-              <TouchableOpacity style={[styles.modalCancelBtn, { flex: 1 }]} onPress={() => setSponsorToDelete(null)}>
-                <Text style={styles.modalCancelText}>{"Bekor qilish"}</Text>
+              <TouchableOpacity style={[styles.modalCancelBtn, { flex: 1 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setSponsorToDelete(null)}>
+                <Text style={[styles.modalCancelText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -866,10 +897,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   sectionAccordionCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'transparent',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     overflow: 'hidden',
     marginBottom: 16,
   },
@@ -879,7 +910,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 18,
     paddingVertical: 14,
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   accordionTitle: {
     color: '#FFFFFF',
@@ -894,7 +925,7 @@ const styles = StyleSheet.create({
   accordionBody: {
     padding: 18,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderTopColor: 'rgba(255, 255, 255, 0.12)',
   },
   leagueTipText: {
     color: '#94A3B8',
@@ -957,12 +988,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
+    backgroundColor: 'transparent',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.5)',
     paddingHorizontal: 14,
     paddingVertical: 12,
+    overflow: 'hidden',
   },
   mainPickerText: {
     color: '#FFFFFF',
@@ -1011,7 +1043,7 @@ const styles = StyleSheet.create({
   },
   sponsorCard: {
     width: '100%',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: 16,
     borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.18)',
@@ -1127,7 +1159,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -1135,10 +1167,10 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
     borderRadius: 20,
     borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     overflow: 'hidden',
   },
   modalHeader: {

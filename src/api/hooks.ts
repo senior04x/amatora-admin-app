@@ -149,7 +149,7 @@ export const useDashboardCountsData = (orgId: any) => {
  */
 export const useLeaguesData = (orgId: any, collabLeagueIds: number[] = []) => {
   return useQuery({
-    queryKey: queryKeys.leagues(orgId),
+    queryKey: queryKeys.leagues(orgId, collabLeagueIds),
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       let query = supabase
@@ -214,22 +214,24 @@ export const useSponsorsData = (orgId: any) => {
 };
 
 /**
- * Hook for fetching Paginated & Server-searched Players with DB joins (15 + 1 Technique)
+ * Hook for fetching Paginated & Server-searched Players with DB joins (25 + 1 Technique)
  */
 export const usePlayersData = (
   orgId: any,
   search = '',
   page = 0,
-  pageSize = 15,
+  pageSize = 25,
   archived = false,
-  collabLeagueNames: string[] = []
+  collabLeagueNames: string[] = [],
+  league = 'all',
+  teamId: string | number = 'all'
 ) => {
   return useQuery({
-    queryKey: queryKeys.players(orgId, search, page, pageSize, archived),
+    queryKey: queryKeys.players(orgId, search, page, pageSize, archived, league, String(teamId), collabLeagueNames),
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
-      const to = from + pageSize; // Fetch 16 records for hasMore check
+      const to = from + pageSize; // Fetch 26 records for hasMore check
 
       let query = supabase
         .from('applications')
@@ -251,6 +253,11 @@ export const usePlayersData = (
           comment,
           created_at,
           organization_id,
+          height,
+          weight,
+          citizenship,
+          instagram_username,
+          league,
           team:team_id (
             id,
             name,
@@ -260,7 +267,6 @@ export const usePlayersData = (
         `)
         .eq('is_archived', archived)
         .eq('status', archived ? 'archived' : 'approved')
-        .not('comment', 'ilike', '%[PROFILE_UPDATE]%')
         .order('created_at', { ascending: false })
         .range(from, to);
 
@@ -273,14 +279,35 @@ export const usePlayersData = (
           const cTeamIds = (cTeams || []).map((t: any) => t.id).filter(Boolean);
           if (cTeamIds.length > 0) {
             query = query.or(`organization_id.eq.${targetOrgId},team_id.in.(${cTeamIds.join(',')})`);
-          } else {
+          } else if (targetOrgId) {
             query = query.eq('organization_id', targetOrgId);
           }
         } catch (e) {
-          query = query.eq('organization_id', targetOrgId);
+          if (targetOrgId) query = query.eq('organization_id', targetOrgId);
         }
-      } else {
+      } else if (targetOrgId) {
         query = query.eq('organization_id', targetOrgId);
+      }
+
+      if (league && league !== 'all') {
+        try {
+          const { data: lTeams } = await supabase
+            .from('teams')
+            .select('id')
+            .ilike('league', `%${league}%`);
+          const lTeamIds = (lTeams || []).map((t: any) => t.id).filter(Boolean);
+          if (lTeamIds.length > 0) {
+            query = query.in('team_id', lTeamIds);
+          } else {
+            return { players: [], hasMore: false };
+          }
+        } catch (e) {
+          return { players: [], hasMore: false };
+        }
+      }
+
+      if (teamId && teamId !== 'all') {
+        query = query.eq('team_id', String(teamId));
       }
 
       if (search && search.trim()) {
@@ -304,27 +331,27 @@ export const usePlayersData = (
     },
     enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
-    placeholderData: (previousData) => previousData,
   });
 };
 
 /**
- * Hook for fetching Paginated Teams in PlayersScreen (15 + 1 Technique)
+ * Hook for fetching Paginated Teams in PlayersScreen (10 + 1 Technique)
  */
 export const useTeamsPaginatedData = (
   orgId: any,
   search = '',
   page = 0,
-  pageSize = 15,
+  pageSize = 10,
   archived = false,
-  collabLeagueNames: string[] = []
+  collabLeagueNames: string[] = [],
+  league = 'all'
 ) => {
   return useQuery({
-    queryKey: queryKeys.paginatedTeams(orgId, search, page, pageSize),
+    queryKey: queryKeys.paginatedTeams(orgId, search, page, pageSize, league, collabLeagueNames),
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
-      const to = from + pageSize; // 16 records
+      const to = from + pageSize; // 11 records
 
       let query = supabase
         .from('teams')
@@ -337,8 +364,12 @@ export const useTeamsPaginatedData = (
       if (collabLeagueNames && collabLeagueNames.length > 0) {
         const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
         query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
-      } else {
+      } else if (targetOrgId) {
         query = query.eq('organization_id', targetOrgId);
+      }
+
+      if (league && league !== 'all') {
+        query = query.ilike('league', `%${league}%`);
       }
 
       if (search && search.trim()) {
@@ -359,7 +390,6 @@ export const useTeamsPaginatedData = (
     },
     enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
-    placeholderData: (previousData) => previousData,
   });
 };
 
@@ -372,7 +402,7 @@ export const useApplicationsData = (
   status: string = 'all',
   league: string = 'all',
   page = 0,
-  pageSize = 15,
+  pageSize = 25,
   collabLeagueNames: string[] = []
 ) => {
   return useQuery({
@@ -389,33 +419,30 @@ export const useApplicationsData = (
           id,
           first_name,
           last_name,
-          middle_name,
           father_name,
           birth_date,
           passport_series,
           passport_number,
-          passport_id,
-          pinfl,
           phone,
           photo_url,
           position,
           player_number,
           team_id,
-          team_name,
-          league,
-          team_league,
-          citizenship,
-          height,
-          weight,
           status,
           is_archived,
           comment,
           created_at,
           organization_id,
+          height,
+          weight,
+          citizenship,
+          instagram_username,
+          league,
           team:team_id (
             id,
             name,
-            logo_url
+            logo_url,
+            league
           )
         `
         : 'id, name, logo_url, league, status, is_archived, captain_phone, organization_id, created_at';
@@ -445,6 +472,23 @@ export const useApplicationsData = (
         } else {
           query = query.eq('organization_id', targetOrgId);
         }
+
+        if (league && league !== 'all' && league.trim()) {
+          try {
+            const { data: lTeams } = await supabase
+              .from('teams')
+              .select('id')
+              .ilike('league', `%${league.trim()}%`);
+            const lTeamIds = (lTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (lTeamIds.length > 0) {
+              query = query.in('team_id', lTeamIds);
+            } else {
+              return { items: [], hasMore: false };
+            }
+          } catch (e) {
+            return { items: [], hasMore: false };
+          }
+        }
       } else {
         // Teams Tab
         if (collabLeagueNames && collabLeagueNames.length > 0) {
@@ -452,6 +496,10 @@ export const useApplicationsData = (
           query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
         } else {
           query = query.eq('organization_id', targetOrgId);
+        }
+
+        if (league && league !== 'all' && league.trim()) {
+          query = query.ilike('league', `%${league.trim()}%`);
         }
       }
 
@@ -463,10 +511,6 @@ export const useApplicationsData = (
         } else if (status === 'rejected') {
           query = query.in('status', ['rejected', 'rad etilgan']);
         }
-      }
-
-      if (!isPlayerTab && league !== 'all' && league.trim()) {
-        query = query.ilike('league', `%${league.trim()}%`);
       }
 
       if (isPlayerTab) {
@@ -578,7 +622,7 @@ export const useTeamsData = (orgId: any, collabLeagueNames: string[] = []) => {
       const targetOrgId = Number(orgId) || 1;
       let query = supabase
         .from('teams')
-        .select('id, name, logo_url, league, league_id, league_name')
+        .select('id, name, logo_url, league, organization_id, status, is_archived')
         .order('name');
 
       if (collabLeagueNames && collabLeagueNames.length > 0) {
@@ -643,7 +687,7 @@ export const useMatchesData = (
   collabLeagueNames: string[] = []
 ) => {
   return useQuery({
-    queryKey: queryKeys.matches(orgId, leagueName),
+    queryKey: queryKeys.matches(orgId, leagueName, collabLeagueNames),
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
 
@@ -672,17 +716,13 @@ export const useMatchesData = (
         .neq('status', 'finished')
         .order('id', { ascending: false });
 
-      if (targetOrgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', targetOrgId);
-        }
-      }
-
       if (leagueName && leagueName !== 'all') {
-        query = query.eq('league', leagueName);
+        query = query.ilike('league', `%${leagueName}%`);
+      } else if (collabLeagueNames && collabLeagueNames.length > 0) {
+        const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+        query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+      } else if (targetOrgId) {
+        query = query.eq('organization_id', targetOrgId);
       }
 
       const { data, error } = await query;
@@ -690,16 +730,13 @@ export const useMatchesData = (
 
       if (error || !data) {
         let fbQuery = supabase.from('matches').select('*').neq('status', 'finished');
-        if (targetOrgId) {
-          if (collabLeagueNames && collabLeagueNames.length > 0) {
-            const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-            fbQuery = fbQuery.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
-          } else {
-            fbQuery = fbQuery.eq('organization_id', targetOrgId);
-          }
-        }
         if (leagueName && leagueName !== 'all') {
-          fbQuery = fbQuery.eq('league', leagueName);
+          fbQuery = fbQuery.ilike('league', `%${leagueName}%`);
+        } else if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          fbQuery = fbQuery.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+        } else if (targetOrgId) {
+          fbQuery = fbQuery.eq('organization_id', targetOrgId);
         }
         const { data: fallbackData } = await fbQuery.order('id', { ascending: false }).limit(100);
         if (fallbackData) {
@@ -783,7 +820,7 @@ export const useFinishedMatchesData = (
   collabLeagueNames: string[] = []
 ) => {
   return useQuery({
-    queryKey: queryKeys.finishedMatches(orgId, leagueName, page, pageSize),
+    queryKey: queryKeys.finishedMatches(orgId, leagueName, page, pageSize, collabLeagueNames),
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
@@ -819,17 +856,13 @@ export const useFinishedMatchesData = (
         .order('id', { ascending: false })
         .range(from, to);
 
-      if (targetOrgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
-        } else {
-          query = query.eq('organization_id', targetOrgId);
-        }
-      }
-
       if (leagueName && leagueName !== 'all') {
-        query = query.eq('league', leagueName);
+        query = query.ilike('league', `%${leagueName}%`);
+      } else if (collabLeagueNames && collabLeagueNames.length > 0) {
+        const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+        query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+      } else if (targetOrgId) {
+        query = query.eq('organization_id', targetOrgId);
       }
 
       const { data, count, error } = await query;
@@ -874,6 +907,53 @@ export const useFinishedMatchesData = (
     staleTime: 0,
     refetchOnMount: 'always',
     placeholderData: (previousData) => previousData,
+  });
+};
+
+/**
+ * Hook for fetching dynamic distinct rounds from matches table
+ */
+export const useLeagueRoundsData = (
+  orgId: any,
+  leagueName = 'all',
+  collabLeagueNames: string[] = []
+) => {
+  return useQuery({
+    queryKey: ['leagueRounds', Number(orgId) || 1, leagueName, (collabLeagueNames || []).sort().join(',')],
+    queryFn: async () => {
+      const targetOrgId = Number(orgId) || 1;
+      let query = supabase.from('matches').select('round');
+
+      if (leagueName && leagueName !== 'all') {
+        query = query.ilike('league', `%${leagueName}%`);
+      } else if (collabLeagueNames && collabLeagueNames.length > 0) {
+        const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+        query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+      } else if (targetOrgId) {
+        query = query.eq('organization_id', targetOrgId);
+      }
+
+      const { data, error } = await query;
+      if (error) return [];
+
+      const rawRounds = (data || [])
+        .map((m: any) => m.round)
+        .filter((r: any) => r !== null && r !== undefined && String(r).trim() !== '');
+
+      const uniqueRounds = Array.from(new Set(rawRounds)).sort((a: any, b: any) => {
+        const numA = Number(String(a).replace(/[^0-9]/g, '')) || 0;
+        const numB = Number(String(b).replace(/[^0-9]/g, '')) || 0;
+        if (numA !== numB) return numA - numB;
+        return String(a).localeCompare(String(b));
+      });
+
+      return uniqueRounds.map((r: any) => {
+        const s = String(r).trim();
+        return /^[0-9]+$/.test(s) ? `${s}-tur` : s;
+      });
+    },
+    enabled: !!orgId && Number(orgId) > 0,
+    staleTime: 60 * 1000,
   });
 };
 

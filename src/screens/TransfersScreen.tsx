@@ -16,8 +16,9 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 import { useTransfersData, useTeamsData, useLeaguesData } from '../api/hooks';
@@ -25,6 +26,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
+  const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
@@ -50,7 +52,7 @@ const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
     <Animated.View
       style={[
         {
-          backgroundColor: '#334155',
+          backgroundColor: Platform.OS === 'android' ? colors.bgCardElevated : '#334155',
           borderRadius: 12,
         },
         style,
@@ -86,6 +88,7 @@ const TransferCardItem: React.FC<{
   onEditPress,
   onStatusClick,
 }) => {
+  const { isDark, colors } = useTheme();
   const translateY = useRef(new Animated.Value(0)).current;
   const translateX = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -201,6 +204,10 @@ const TransferCardItem: React.FC<{
       <Animated.View
         style={[
           styles.transferCard,
+          Platform.OS === 'android' && {
+            backgroundColor: colors.bgCard,
+            borderColor: colors.border,
+          },
           { borderColor: `${statusColor}33` },
           {
             transform: [
@@ -213,7 +220,7 @@ const TransferCardItem: React.FC<{
           },
         ]}
       >
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
 
         {/* Animated Red Overlay Filter for Rejection */}
         <Animated.View
@@ -232,13 +239,13 @@ const TransferCardItem: React.FC<{
         />
 
         {/* Card Top Action Bar */}
-        <View style={styles.cardHeader}>
+        <View style={[styles.cardHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
           {/* Status Pill (Disabled for approved transfers) */}
           {isApproved ? (
-            <View style={[styles.statusPill, { backgroundColor: 'rgba(0, 255, 102, 0.12)', borderColor: 'rgba(0, 255, 102, 0.35)' }]}>
-              <Ionicons name="checkmark-circle" size={14} color="#00FF66" />
-              <Text style={[styles.statusPillText, { color: '#00FF66' }]}>{statusLabel}</Text>
-              <Ionicons name="lock-closed" size={11} color="#00FF66" style={{ marginLeft: 4, opacity: 0.8 }} />
+            <View style={[styles.statusPill, { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.12)' : '#ECFDF5', borderColor: colors.accentGreen }]}>
+              <Ionicons name="checkmark-circle" size={14} color={colors.accentGreen} />
+              <Text style={[styles.statusPillText, { color: colors.accentGreen }]}>{statusLabel}</Text>
+              <Ionicons name="lock-closed" size={11} color={colors.accentGreen} style={{ marginLeft: 4, opacity: 0.8 }} />
             </View>
           ) : (
             <TouchableOpacity
@@ -257,8 +264,8 @@ const TransferCardItem: React.FC<{
           )}
 
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity style={styles.iconActionBtn} onPress={() => onEditPress(item)}>
-              <Ionicons name="pencil" size={16} color="#94A3B8" />
+            <TouchableOpacity style={[styles.iconActionBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]} onPress={() => onEditPress(item)}>
+              <Ionicons name="pencil" size={16} color={colors.textSecondary} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -273,39 +280,39 @@ const TransferCardItem: React.FC<{
         {/* Player Profile Header */}
         <View style={styles.playerRow}>
           {item.player_photo ? (
-            <Image source={{ uri: item.player_photo }} style={styles.playerAvatar} />
+            <Image source={{ uri: item.player_photo }} style={[styles.playerAvatar, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]} />
           ) : (
-            <View style={styles.playerAvatarFallback}>
-              <Text style={styles.playerAvatarInitial}>{(item.player_name || '?')[0]}</Text>
+            <View style={[styles.playerAvatarFallback, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+              <Text style={[styles.playerAvatarInitial, Platform.OS === 'android' && { color: colors.textPrimary }]}>{(item.player_name || '?')[0]}</Text>
             </View>
           )}
           <View style={{ flex: 1 }}>
-            <Text style={styles.playerName}>{item.player_name || "O'yinchi"}</Text>
-            <Text style={styles.transferReason}>
+            <Text style={[styles.playerName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{item.player_name || "O'yinchi"}</Text>
+            <Text style={[styles.transferReason, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {item.reason ? `"${item.reason}"` : "Transfer so'rovi"}
             </Text>
           </View>
         </View>
 
         {/* Teams Movement Flow Box */}
-        <View style={styles.teamsFlowBox}>
+        <View style={[styles.teamsFlowBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
           {/* Old Team */}
           <View style={styles.teamSide}>
             {item.old_team_logo ? (
               <Image source={{ uri: item.old_team_logo }} style={styles.teamLogo} />
             ) : (
-              <View style={styles.teamLogoFallback}>
-                <Ionicons name="shield-outline" size={18} color="rgba(255,255,255,0.4)" />
+              <View style={[styles.teamLogoFallback, Platform.OS === 'android' && { backgroundColor: colors.bgCard }]}>
+                <Ionicons name="shield-outline" size={18} color={colors.textMuted} />
               </View>
             )}
-            <Text style={styles.teamName} numberOfLines={1}>
+            <Text style={[styles.teamName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
               {item.old_team_name || 'Eski jamoasi'}
             </Text>
           </View>
 
           {/* Swap Arrow Icon */}
-          <View style={styles.swapCircle}>
-            <Ionicons name="arrow-forward" size={18} color="#00FF66" />
+          <View style={[styles.swapCircle, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Ionicons name="arrow-forward" size={18} color={colors.accentGreen} />
           </View>
 
           {/* New Team */}
@@ -313,11 +320,11 @@ const TransferCardItem: React.FC<{
             {item.new_team_logo ? (
               <Image source={{ uri: item.new_team_logo }} style={styles.teamLogo} />
             ) : (
-              <View style={styles.teamLogoFallback}>
-                <Ionicons name="shield-outline" size={18} color="rgba(255,255,255,0.4)" />
+              <View style={[styles.teamLogoFallback, Platform.OS === 'android' && { backgroundColor: colors.bgCard }]}>
+                <Ionicons name="shield-outline" size={18} color={colors.textMuted} />
               </View>
             )}
-            <Text style={[styles.teamName, { color: '#00FF66' }]} numberOfLines={1}>
+            <Text style={[styles.teamName, { color: colors.accentGreen }]} numberOfLines={1}>
               {item.new_team_name || 'Yangi jamoasi'}
             </Text>
           </View>
@@ -335,7 +342,7 @@ const TransferCardItem: React.FC<{
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.btnAction, styles.btnApprove]}
+                style={[styles.btnAction, styles.btnApprove, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                 onPress={() => onApprove(item, runApproveAnim)}
               >
                 <Ionicons name="checkmark" size={20} color="#000000" />
@@ -350,6 +357,7 @@ const TransferCardItem: React.FC<{
 
 export const TransfersScreen: React.FC = () => {
   const { orgId, currentOrg, transferWindowOpen, setTransferWindowOpen } = useOrg();
+  const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
 
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
@@ -720,8 +728,8 @@ export const TransfersScreen: React.FC = () => {
     if (!foundLeagueName && t.old_team_id) {
       const teamObj = allTeams.find((tm) => String(tm.id) === String(t.old_team_id));
       if (teamObj) {
-        foundLeagueId = teamObj.league_id || teamObj.league || foundLeagueId;
-        foundLeagueName = teamObj.league_name || teamObj.league || foundLeagueName;
+        foundLeagueId = (teamObj as any).league_id || teamObj.league || foundLeagueId;
+        foundLeagueName = (teamObj as any).league_name || teamObj.league || foundLeagueName;
       }
     }
 
@@ -769,24 +777,24 @@ export const TransfersScreen: React.FC = () => {
   ];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* FIXED TOP HEADER (Title, status filter icons) */}
-      <View style={styles.fixedHeaderContainer}>
-        <BlurView intensity={50} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+      <View style={[styles.fixedHeaderContainer, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary, borderBottomColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />}
 
         {/* HEADER ROW */}
         <View style={styles.headerRow}>
-          <View style={styles.headerIconBox}>
-            <Ionicons name="swap-horizontal" size={24} color="#00FF66" />
+          <View style={[styles.headerIconBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5', borderColor: colors.accentGreen }]}>
+            <Ionicons name="swap-horizontal" size={24} color={colors.accentGreen} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.screenTitle}>{"Transferlar Boshqaruvi"}</Text>
-            <Text style={styles.screenSub}>{"Jamoalar o'rtasidagi o'yinchilar o'tish so'rovlari"}</Text>
+            <Text style={[styles.screenTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Transferlar Boshqaruvi"}</Text>
+            <Text style={[styles.screenSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Jamoalar o'rtasidagi o'yinchilar o'tish so'rovlari"}</Text>
           </View>
 
           <View style={styles.headerStatusFilterContainer}>
             <TouchableOpacity
-              style={styles.statusFilterIconButton}
+              style={[styles.statusFilterIconButton, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
               onPress={() => setShowApprovedModal(true)}
               activeOpacity={0.7}
             >
@@ -798,7 +806,7 @@ export const TransfersScreen: React.FC = () => {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.statusFilterIconButton}
+              style={[styles.statusFilterIconButton, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
               onPress={() => setShowRejectedModal(true)}
               activeOpacity={0.7}
             >
@@ -821,24 +829,46 @@ export const TransfersScreen: React.FC = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#00FF66"
-            colors={['#00FF66']}
+            tintColor={colors.accentGreen}
+            colors={[colors.accentGreen]}
           />
         }
       >
         {/* 1. Transfer Window Toggle Switch Card */}
-        <View style={[styles.windowCard, { borderColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.4)' : 'rgba(239, 68, 68, 0.4)' }]}>
+        <View style={[
+          styles.windowCard,
+          Platform.OS === 'android' && {
+            backgroundColor: colors.bgCard,
+            borderColor: colors.border,
+          },
+          { borderColor: transferWindowOpen ? (Platform.OS === 'android' ? colors.accentGreen : 'rgba(0, 255, 102, 0.4)') : (Platform.OS === 'android' ? '#EF4444' : 'rgba(239, 68, 68, 0.4)') }
+        ]}>
           <View style={styles.windowLeft}>
-            <View style={[styles.windowIcon, { backgroundColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.15)' : 'rgba(239, 68, 68, 0.15)' }]}>
+            <View style={[
+              styles.windowIcon,
+              Platform.OS === 'android' && {
+                backgroundColor: transferWindowOpen ? (isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5') : (isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEF2F2')
+              },
+              { backgroundColor: transferWindowOpen ? 'rgba(0, 255, 102, 0.15)' : 'rgba(239, 68, 68, 0.15)' }
+            ]}>
               <Ionicons
                 name={transferWindowOpen ? "flash" : "lock-closed"}
                 size={24}
-                color={transferWindowOpen ? "#00FF66" : "#EF4444"}
+                color={transferWindowOpen ? colors.accentGreen : "#EF4444"}
               />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.windowTitle}>{"Transfer Oynasi Holati"}</Text>
-              <Text style={[styles.windowStatus, { color: transferWindowOpen ? '#00FF66' : 'rgba(255,255,255,0.6)' }]}>
+              <Text style={[styles.windowTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Transfer Oynasi Holati"}</Text>
+              <Text
+                style={[
+                  styles.windowStatus,
+                  {
+                    color: Platform.OS === 'android'
+                      ? (transferWindowOpen ? (isDark ? '#00FF66' : '#15803D') : colors.textSecondary)
+                      : (transferWindowOpen ? '#00FF66' : 'rgba(255,255,255,0.6)')
+                  }
+                ]}
+              >
                 {transferWindowOpen
                   ? "Transfer oynasi OCHIQ — o'yinchilar so'rov yuborishi mumkin"
                   : "Transfer oynasi YOPIQ — o'yinchilar so'rov yuborolmaydi"}
@@ -846,13 +876,13 @@ export const TransfersScreen: React.FC = () => {
             </View>
           </View>
           {windowLoading || windowToggling ? (
-            <ActivityIndicator size="small" color={transferWindowOpen ? "#00FF66" : "#EF4444"} />
+            <ActivityIndicator size="small" color={transferWindowOpen ? colors.accentGreen : "#EF4444"} />
           ) : (
             <Switch
               value={transferWindowOpen}
               onValueChange={handleToggleTransferWindow}
-              trackColor={{ false: '#334155', true: '#059669' }}
-              thumbColor={transferWindowOpen ? '#00FF66' : '#94A3B8'}
+              trackColor={{ false: Platform.OS === 'android' ? colors.border : '#334155', true: colors.accentGreen }}
+              thumbColor={transferWindowOpen ? '#FFFFFF' : '#94A3B8'}
             />
           )}
         </View>
@@ -861,7 +891,7 @@ export const TransfersScreen: React.FC = () => {
         {loading ? (
           <View style={{ gap: 14 }}>
             {[1, 2, 3].map((k) => (
-              <View key={k} style={styles.cardSkeleton}>
+              <View key={k} style={[styles.cardSkeleton, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <SkeletonItem style={{ width: 44, height: 44, borderRadius: 22 }} />
                   <View style={{ flex: 1, gap: 6 }}>
@@ -873,10 +903,10 @@ export const TransfersScreen: React.FC = () => {
             ))}
           </View>
         ) : filteredTransfers.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="swap-horizontal-outline" size={48} color="rgba(255,255,255,0.2)" />
-            <Text style={styles.emptyTitle}>{"Transfer so'rovlari topilmadi"}</Text>
-            <Text style={styles.emptyText}>{"Ushbu bo'limda mos keladigan transfer arizalari mavjud emas."}</Text>
+          <View style={[styles.emptyCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Ionicons name="swap-horizontal-outline" size={48} color={colors.textMuted} />
+            <Text style={[styles.emptyTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Transfer so'rovlari topilmadi"}</Text>
+            <Text style={[styles.emptyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Ushbu bo'limda mos keladigan transfer arizalari mavjud emas."}</Text>
           </View>
         ) : (
           <View style={{ gap: 14 }}>
@@ -912,11 +942,11 @@ export const TransfersScreen: React.FC = () => {
       {/* STATUS CHANGE TEST MODAL */}
       <Modal visible={!!statusModalItem} transparent animationType="fade" onRequestClose={() => setStatusModalItem(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { maxWidth: 360, padding: 22 }]}>
-            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 6, textAlign: 'center' }}>
+          <View style={[styles.modalCard, { maxWidth: 360, padding: 22 }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Text style={[{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 6, textAlign: 'center' }, Platform.OS === 'android' && { color: colors.textPrimary }]}>
               {"Transfer Holatini O'zgartirish"}
             </Text>
-            <Text style={{ color: '#94A3B8', fontSize: 12, marginBottom: 18, textAlign: 'center' }}>
+            <Text style={[{ color: '#94A3B8', fontSize: 12, marginBottom: 18, textAlign: 'center' }, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {"Animatsiyalarni va sahifani qayta-qayta sinash uchun holatni tanlang:"}
             </Text>
 
@@ -930,11 +960,11 @@ export const TransfersScreen: React.FC = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{ backgroundColor: 'rgba(74, 222, 128, 0.15)', borderWidth: 1, borderColor: '#4ADE80', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                style={{ backgroundColor: isDark ? 'rgba(74, 222, 128, 0.15)' : '#ECFDF5', borderWidth: 1, borderColor: '#4ADE80', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
                 onPress={() => handleQuickStatusChange('approved')}
                 disabled={updatingStatus}
               >
-                <Text style={{ color: '#4ADE80', fontWeight: '900', fontSize: 13 }}>{"TASDIQLANGAN (Approved)"}</Text>
+                <Text style={{ color: '#16A34A', fontWeight: '900', fontSize: 13 }}>{"TASDIQLANGAN (Approved)"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -946,10 +976,10 @@ export const TransfersScreen: React.FC = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 }}
+                style={[{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
                 onPress={() => setStatusModalItem(null)}
               >
-                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>{"Bekor qilish"}</Text>
+                <Text style={[{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -959,16 +989,16 @@ export const TransfersScreen: React.FC = () => {
       {/* Edit Transfer Modal */}
       <Modal visible={!!editingTransfer} transparent animationType="slide" onRequestClose={() => setEditingTransfer(null)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={[StyleSheet.absoluteFill, { borderRadius: 24 }]} />
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" style={[StyleSheet.absoluteFill, { borderRadius: 24 }]} />}
             {/* Modal Header */}
-            <View style={styles.modalHeader}>
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Ionicons name="pencil" size={20} color="#00FF66" />
-                <Text style={styles.modalTitle}>{"Transferni Tahrirlash"}</Text>
+                <Ionicons name="pencil" size={20} color={colors.accentGreen} />
+                <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Transferni Tahrirlash"}</Text>
               </View>
               <TouchableOpacity onPress={() => setEditingTransfer(null)}>
-                <Ionicons name="close" size={24} color="#94A3B8" />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -976,43 +1006,43 @@ export const TransfersScreen: React.FC = () => {
             <ScrollView style={{ padding: 18 }} contentContainerStyle={{ gap: 14 }}>
               {/* Field 1: Player Name (READ-ONLY) */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{"O'yinchi (Tahrirlab bo'lmaydi)"}</Text>
-                <View style={styles.readOnlyPlayerBox}>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"O'yinchi (Tahrirlab bo'lmaydi)"}</Text>
+                <View style={[styles.readOnlyPlayerBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
                   {editForm.player_photo ? (
                     <Image source={{ uri: editForm.player_photo }} style={styles.readOnlyAvatar} />
                   ) : (
-                    <View style={styles.readOnlyAvatarFallback}>
-                      <Text style={styles.readOnlyInitial}>{(editForm.player_name || '?')[0]}</Text>
+                    <View style={[styles.readOnlyAvatarFallback, Platform.OS === 'android' && { backgroundColor: colors.bgCard }]}>
+                      <Text style={[styles.readOnlyInitial, Platform.OS === 'android' && { color: colors.textPrimary }]}>{(editForm.player_name || '?')[0]}</Text>
                     </View>
                   )}
-                  <Text style={styles.readOnlyPlayerName}>{editForm.player_name || "O'yinchi"}</Text>
-                  <Ionicons name="lock-closed" size={16} color="#64748B" style={{ marginLeft: 'auto' }} />
+                  <Text style={[styles.readOnlyPlayerName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{editForm.player_name || "O'yinchi"}</Text>
+                  <Ionicons name="lock-closed" size={16} color={colors.textMuted} style={{ marginLeft: 'auto' }} />
                 </View>
               </View>
 
               {/* Field 2: League Selection (Interactive Select) */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{"Liga"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Liga"}</Text>
                 <TouchableOpacity
-                  style={styles.pickerSelectBtn}
+                  style={[styles.pickerSelectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                   activeOpacity={0.7}
                   onPress={() => setActivePicker('league')}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="trophy-outline" size={18} color="#F59E0B" />
-                    <Text style={styles.pickerSelectText}>
+                    <Text style={[styles.pickerSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                       {editForm.league_name || '-- Liganu tanlang --'}
                     </Text>
                   </View>
-                  <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+                  <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
               {/* Field 3: Old Team Selection (Interactive Select) */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{"Eski Jamoa"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Eski Jamoa"}</Text>
                 <TouchableOpacity
-                  style={styles.pickerSelectBtn}
+                  style={[styles.pickerSelectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                   activeOpacity={0.7}
                   onPress={() => setActivePicker('old_team')}
                 >
@@ -1020,21 +1050,21 @@ export const TransfersScreen: React.FC = () => {
                     {editForm.old_team_logo ? (
                       <Image source={{ uri: editForm.old_team_logo }} style={{ width: 22, height: 22, borderRadius: 11 }} />
                     ) : (
-                      <Ionicons name="shield-outline" size={18} color="#94A3B8" />
+                      <Ionicons name="shield-outline" size={18} color={colors.textSecondary} />
                     )}
-                    <Text style={styles.pickerSelectText} numberOfLines={1}>
+                    <Text style={[styles.pickerSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
                       {editForm.old_team_name || '-- Jamoani tanlang --'}
                     </Text>
                   </View>
-                  <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+                  <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
               {/* Field 4: New Team Selection (Interactive Select) */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{"Yangi Jamoa"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Yangi Jamoa"}</Text>
                 <TouchableOpacity
-                  style={styles.pickerSelectBtn}
+                  style={[styles.pickerSelectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                   activeOpacity={0.7}
                   onPress={() => setActivePicker('new_team')}
                 >
@@ -1042,32 +1072,32 @@ export const TransfersScreen: React.FC = () => {
                     {editForm.new_team_logo ? (
                       <Image source={{ uri: editForm.new_team_logo }} style={{ width: 22, height: 22, borderRadius: 11 }} />
                     ) : (
-                      <Ionicons name="shield-outline" size={18} color="#00FF66" />
+                      <Ionicons name="shield-outline" size={18} color={colors.accentGreen} />
                     )}
-                    <Text style={[styles.pickerSelectText, editForm.new_team_name ? { color: '#00FF66' } : null]} numberOfLines={1}>
+                    <Text style={[styles.pickerSelectText, Platform.OS === 'android' && { color: colors.textPrimary }, editForm.new_team_name ? { color: colors.accentGreen } : null]} numberOfLines={1}>
                       {editForm.new_team_name || '-- Jamoani tanlang --'}
                     </Text>
                   </View>
-                  <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+                  <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
               {/* Field 5: Status Selection */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{"Status"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Status"}</Text>
                 {editingTransfer?.status === 'approved' ? (
-                  <View style={[styles.pickerSelectBtn, { backgroundColor: 'rgba(0, 255, 102, 0.08)', borderColor: 'rgba(0, 255, 102, 0.3)' }]}>
+                  <View style={[styles.pickerSelectBtn, { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.08)' : '#ECFDF5', borderColor: colors.accentGreen }]}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name="checkmark-circle" size={18} color="#00FF66" />
-                      <Text style={[styles.pickerSelectText, { color: '#00FF66' }]}>
+                      <Ionicons name="checkmark-circle" size={18} color={colors.accentGreen} />
+                      <Text style={[styles.pickerSelectText, { color: colors.accentGreen }]}>
                         {"Tasdiqlangan (O'zgartirib bo'lmaydi)"}
                       </Text>
                     </View>
-                    <Ionicons name="lock-closed" size={16} color="#00FF66" />
+                    <Ionicons name="lock-closed" size={16} color={colors.accentGreen} />
                   </View>
                 ) : (
                   <TouchableOpacity
-                    style={styles.pickerSelectBtn}
+                    style={[styles.pickerSelectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                     activeOpacity={0.7}
                     onPress={() => setActivePicker('status')}
                   >
@@ -1075,9 +1105,9 @@ export const TransfersScreen: React.FC = () => {
                       <Ionicons
                         name={editForm.status === 'approved' ? "checkmark-circle" : editForm.status === 'rejected' ? "close-circle" : "time-outline"}
                         size={18}
-                        color={editForm.status === 'approved' ? "#00FF66" : editForm.status === 'rejected' ? "#EF4444" : "#F59E0B"}
+                        color={editForm.status === 'approved' ? colors.accentGreen : editForm.status === 'rejected' ? "#EF4444" : "#F59E0B"}
                       />
-                      <Text style={styles.pickerSelectText}>
+                      <Text style={[styles.pickerSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                         {editForm.status === 'approved'
                           ? 'Tasdiqlangan (Approved)'
                           : editForm.status === 'rejected'
@@ -1085,32 +1115,32 @@ export const TransfersScreen: React.FC = () => {
                           : 'Kutilmoqda (Pending)'}
                       </Text>
                     </View>
-                    <Ionicons name="chevron-down" size={18} color="#94A3B8" />
+                    <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 )}
               </View>
 
               {/* Field 6: Reason */}
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{"Transfer Sababi"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Transfer Sababi"}</Text>
                 <TextInput
-                  style={[styles.textInput, { height: 75, textAlignVertical: 'top', paddingTop: 10 }]}
+                  style={[styles.textInput, { height: 75, textAlignVertical: 'top', paddingTop: 10 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   multiline
                   value={editForm.reason}
                   onChangeText={(val) => setEditForm({ ...editForm, reason: val })}
                   placeholder="Sababini yozing..."
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                 />
               </View>
             </ScrollView>
 
             {/* Modal Footer */}
-            <View style={styles.modalFooter}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setEditingTransfer(null)}>
-                <Text style={styles.modalCancelText}>{"Bekor qilish"}</Text>
+            <View style={[styles.modalFooter, Platform.OS === 'android' && { borderTopColor: colors.border }]}>
+              <TouchableOpacity style={[styles.modalCancelBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setEditingTransfer(null)}>
+                <Text style={[styles.modalCancelText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveEdit} disabled={savingEdit}>
+              <TouchableOpacity style={[styles.modalSaveBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen }]} onPress={handleSaveEdit} disabled={savingEdit}>
                 {savingEdit ? (
                   <ActivityIndicator size="small" color="#000000" />
                 ) : (
@@ -1124,9 +1154,9 @@ export const TransfersScreen: React.FC = () => {
 
             {/* INLINE PICKER OVERLAY PANEL */}
             {activePicker && (
-              <View style={styles.inlinePickerOverlay}>
-                <View style={styles.inlinePickerHeader}>
-                  <Text style={styles.inlinePickerTitle}>
+              <View style={[styles.inlinePickerOverlay, Platform.OS === 'android' && { backgroundColor: colors.bgCard }]}>
+                <View style={[styles.inlinePickerHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.inlinePickerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                     {activePicker === 'league'
                       ? 'Liganu Tanlang'
                       : activePicker === 'old_team'
@@ -1136,19 +1166,19 @@ export const TransfersScreen: React.FC = () => {
                       : 'Statusni Tanlang'}
                   </Text>
                   <TouchableOpacity onPress={() => setActivePicker(null)}>
-                    <Ionicons name="close-circle" size={24} color="#94A3B8" />
+                    <Ionicons name="close-circle" size={24} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
 
                 <ScrollView style={{ flex: 1, padding: 12 }}>
                   {activePicker === 'league' && (
                     leagues.length === 0 ? (
-                      <Text style={styles.emptyPickerText}>{"Ligalar topilmadi"}</Text>
+                      <Text style={[styles.emptyPickerText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Ligalar topilmadi"}</Text>
                     ) : (
                       leagues.map((l) => (
                         <TouchableOpacity
                           key={l.id}
-                          style={styles.pickerOptionRow}
+                          style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                           onPress={() => {
                             setEditForm((prev) => ({
                               ...prev,
@@ -1159,9 +1189,9 @@ export const TransfersScreen: React.FC = () => {
                           }}
                         >
                           <Ionicons name="trophy-outline" size={20} color="#F59E0B" style={{ marginRight: 12 }} />
-                          <Text style={styles.pickerOptionText}>{l.name}</Text>
+                          <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{l.name}</Text>
                           {String(editForm.league_id) === String(l.id) && (
-                            <Ionicons name="checkmark" size={18} color="#00FF66" style={{ marginLeft: 'auto' }} />
+                            <Ionicons name="checkmark" size={18} color={colors.accentGreen} style={{ marginLeft: 'auto' }} />
                           )}
                         </TouchableOpacity>
                       ))
@@ -1170,7 +1200,7 @@ export const TransfersScreen: React.FC = () => {
 
                   {(activePicker === 'old_team' || activePicker === 'new_team') && (
                     allTeams.length === 0 ? (
-                      <Text style={styles.emptyPickerText}>{"Jamoalar topilmadi"}</Text>
+                      <Text style={[styles.emptyPickerText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Jamoalar topilmadi"}</Text>
                     ) : (
                       allTeams.map((t) => {
                         const isSelected =
@@ -1181,7 +1211,7 @@ export const TransfersScreen: React.FC = () => {
                         return (
                           <TouchableOpacity
                             key={t.id}
-                            style={styles.pickerOptionRow}
+                            style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                             onPress={() => {
                               if (activePicker === 'old_team') {
                                 setEditForm((prev) => ({
@@ -1204,11 +1234,11 @@ export const TransfersScreen: React.FC = () => {
                             {t.logo_url ? (
                               <Image source={{ uri: t.logo_url }} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 12 }} />
                             ) : (
-                              <Ionicons name="shield-outline" size={20} color="#94A3B8" style={{ marginRight: 12 }} />
+                              <Ionicons name="shield-outline" size={20} color={colors.textSecondary} style={{ marginRight: 12 }} />
                             )}
-                            <Text style={styles.pickerOptionText}>{t.name}</Text>
+                            <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{t.name}</Text>
                             {isSelected && (
-                              <Ionicons name="checkmark" size={18} color="#00FF66" style={{ marginLeft: 'auto' }} />
+                              <Ionicons name="checkmark" size={18} color={colors.accentGreen} style={{ marginLeft: 'auto' }} />
                             )}
                           </TouchableOpacity>
                         );
@@ -1219,44 +1249,44 @@ export const TransfersScreen: React.FC = () => {
                   {activePicker === 'status' && (
                     <>
                       <TouchableOpacity
-                        style={styles.pickerOptionRow}
+                        style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                         onPress={() => {
                           setEditForm((prev) => ({ ...prev, status: 'pending' }));
                           setActivePicker(null);
                         }}
                       >
                         <Ionicons name="time-outline" size={20} color="#F59E0B" style={{ marginRight: 12 }} />
-                        <Text style={styles.pickerOptionText}>{"Kutilmoqda (Pending)"}</Text>
+                        <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Kutilmoqda (Pending)"}</Text>
                         {editForm.status === 'pending' && (
-                          <Ionicons name="checkmark" size={18} color="#00FF66" style={{ marginLeft: 'auto' }} />
+                          <Ionicons name="checkmark" size={18} color={colors.accentGreen} style={{ marginLeft: 'auto' }} />
                         )}
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={styles.pickerOptionRow}
+                        style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                         onPress={() => {
                           setEditForm((prev) => ({ ...prev, status: 'approved' }));
                           setActivePicker(null);
                         }}
                       >
-                        <Ionicons name="checkmark-circle-outline" size={20} color="#00FF66" style={{ marginRight: 12 }} />
-                        <Text style={styles.pickerOptionText}>{"Tasdiqlangan (Approved)"}</Text>
+                        <Ionicons name="checkmark-circle-outline" size={20} color={colors.accentGreen} style={{ marginRight: 12 }} />
+                        <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Tasdiqlangan (Approved)"}</Text>
                         {editForm.status === 'approved' && (
-                          <Ionicons name="checkmark" size={18} color="#00FF66" style={{ marginLeft: 'auto' }} />
+                          <Ionicons name="checkmark" size={18} color={colors.accentGreen} style={{ marginLeft: 'auto' }} />
                         )}
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        style={styles.pickerOptionRow}
+                        style={[styles.pickerOptionRow, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                         onPress={() => {
                           setEditForm((prev) => ({ ...prev, status: 'rejected' }));
                           setActivePicker(null);
                         }}
                       >
                         <Ionicons name="close-circle-outline" size={20} color="#EF4444" style={{ marginRight: 12 }} />
-                        <Text style={styles.pickerOptionText}>{"Rad etilgan (Rejected)"}</Text>
+                        <Text style={[styles.pickerOptionText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Rad etilgan (Rejected)"}</Text>
                         {editForm.status === 'rejected' && (
-                          <Ionicons name="checkmark" size={18} color="#00FF66" style={{ marginLeft: 'auto' }} />
+                          <Ionicons name="checkmark" size={18} color={colors.accentGreen} style={{ marginLeft: 'auto' }} />
                         )}
                       </TouchableOpacity>
                     </>
@@ -1271,18 +1301,18 @@ export const TransfersScreen: React.FC = () => {
       {/* Delete Confirmation Modal */}
       <Modal visible={!!transferToDelete} transparent animationType="fade" onRequestClose={() => setTransferToDelete(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }]}>
+          <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={styles.deleteIconBg}>
               <Ionicons name="trash-outline" size={32} color="#EF4444" />
             </View>
-            <Text style={styles.deleteTitle}>{"Transfer So'rovini O'chirish"}</Text>
-            <Text style={styles.deleteSub}>
+            <Text style={[styles.deleteTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Transfer So'rovini O'chirish"}</Text>
+            <Text style={[styles.deleteSub, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {"Haqiqatan ham ushbu transfer so'rovini bazadan o'chirib tashlamoqchimisiz?"}
             </Text>
 
             <View style={{ flexDirection: 'row', gap: 12, width: '100%', marginTop: 20 }}>
-              <TouchableOpacity style={[styles.modalCancelBtn, { flex: 1 }]} onPress={() => setTransferToDelete(null)}>
-                <Text style={styles.modalCancelText}>{"Bekor qilish"}</Text>
+              <TouchableOpacity style={[styles.modalCancelBtn, { flex: 1 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setTransferToDelete(null)}>
+                <Text style={[styles.modalCancelText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1308,36 +1338,36 @@ export const TransfersScreen: React.FC = () => {
         presentationStyle="fullScreen"
         onRequestClose={() => setShowApprovedModal(false)}
       >
-        <View style={styles.modalPageContainer}>
+        <View style={[styles.modalPageContainer, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
           {/* HEADER */}
           <View style={styles.modalPageHeader}>
             <TouchableOpacity
-              style={styles.modalPageBackBtn}
+              style={[styles.modalPageBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
               onPress={() => setShowApprovedModal(false)}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+              <Ionicons name="arrow-back" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.modalPageTitle}>{"Qabul Qilingan Transferlar"}</Text>
-              <Text style={styles.modalPageSub}>{"Tasdiqlangan barcha transfer arizalari ro'yxati"}</Text>
+              <Text style={[styles.modalPageTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Qabul Qilingan Transferlar"}</Text>
+              <Text style={[styles.modalPageSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tasdiqlangan barcha transfer arizalari ro'yxati"}</Text>
             </View>
           </View>
 
           {/* SEARCH BAR */}
-          <View style={styles.modalSearchBox}>
-            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+          <View style={[styles.modalSearchBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
             <TextInput
-              style={styles.modalSearchInput}
+              style={[styles.modalSearchInput, Platform.OS === 'android' && { color: colors.textPrimary }]}
               placeholder="O'yinchi yoki Jamoa bo'yicha qidiruv..."
-              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
               value={approvedSearchQuery}
               onChangeText={setApprovedSearchQuery}
             />
             {approvedSearchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setApprovedSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+                <Ionicons name="close-circle" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
               </TouchableOpacity>
             )}
           </View>
@@ -1385,36 +1415,36 @@ export const TransfersScreen: React.FC = () => {
         presentationStyle="fullScreen"
         onRequestClose={() => setShowRejectedModal(false)}
       >
-        <View style={styles.modalPageContainer}>
+        <View style={[styles.modalPageContainer, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
           {/* HEADER */}
           <View style={styles.modalPageHeader}>
             <TouchableOpacity
-              style={styles.modalPageBackBtn}
+              style={[styles.modalPageBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
               onPress={() => setShowRejectedModal(false)}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+              <Ionicons name="arrow-back" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.modalPageTitle}>{"Rad Etilgan Transferlar"}</Text>
-              <Text style={styles.modalPageSub}>{"Rad etilgan barcha transfer arizalari ro'yxati"}</Text>
+              <Text style={[styles.modalPageTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Rad Etilgan Transferlar"}</Text>
+              <Text style={[styles.modalPageSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Rad etilgan barcha transfer arizalari ro'yxati"}</Text>
             </View>
           </View>
 
           {/* SEARCH BAR */}
-          <View style={styles.modalSearchBox}>
-            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+          <View style={[styles.modalSearchBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
             <TextInput
-              style={styles.modalSearchInput}
+              style={[styles.modalSearchInput, Platform.OS === 'android' && { color: colors.textPrimary }]}
               placeholder="O'yinchi yoki Jamoa bo'yicha qidiruv..."
-              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
               value={rejectedSearchQuery}
               onChangeText={setRejectedSearchQuery}
             />
             {rejectedSearchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setRejectedSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+                <Ionicons name="close-circle" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
               </TouchableOpacity>
             )}
           </View>

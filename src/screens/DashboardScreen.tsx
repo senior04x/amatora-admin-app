@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl, Platform, PanResponder, Easing, LayoutAnimation, UIManager, useWindowDimensions } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { Image } from 'react-native';
 import { MatchControlScreen } from './MatchControlScreen';
@@ -71,6 +72,7 @@ const DraggableCard: React.FC<DraggableCardProps> = ({
   getFinalPosition,
   pendingUpdatesCount,
 }) => {
+  const { isDark, colors } = useTheme();
   const isDragging = activeDragId === item.id;
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
@@ -329,13 +331,17 @@ const DraggableCard: React.FC<DraggableCardProps> = ({
       <Animated.View
         style={[
           styles.gridCard,
+          Platform.OS === 'android' && {
+            backgroundColor: colors.bgCard,
+            borderColor: colors.border,
+          },
           {
-            borderColor: cardBorderColor,
-            backgroundColor: cardBackgroundColor,
+            borderColor: isDark ? cardBorderColor : colors.border,
+            backgroundColor: isDark ? cardBackgroundColor : colors.bgCard,
           },
         ]}
       >
-        <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+        {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />}
 
         <View style={{ position: 'relative', marginBottom: 2 }}>
           <Ionicons name={item.icon as any} size={30} color={item.color} />
@@ -347,7 +353,7 @@ const DraggableCard: React.FC<DraggableCardProps> = ({
             </View>
           )}
         </View>
-        <Text style={styles.gridCardTitle} numberOfLines={1}>
+        <Text style={[styles.gridCardTitle, { color: colors.textPrimary }]} numberOfLines={1}>
           {item.title}
         </Text>
       </Animated.View>
@@ -396,6 +402,7 @@ export const DashboardScreen: React.FC<Props> = ({
   onRegisterSaveOrder,
 }) => {
   const { orgId, userRole, loading: orgLoading } = useOrg();
+  const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
 
   // 1. React Query Hooks for Dashboard Counts & Matches (0ms cache hit)
@@ -759,21 +766,10 @@ export const DashboardScreen: React.FC<Props> = ({
     if (status === 'finished') return { text: 'Uchrashuv Yakunlangan', color: '#10B981' };
     if (status === 'first_half' || status === 'second_half' || status === 'half_time' || status === 'live') {
       if (status === 'half_time') {
-        return { text: 'TANAFFUS (JONLI)', color: '#F59E0B' };
+        return { text: 'TANAFFUS', color: '#F59E0B' };
       }
-      let sec = timerSecs || 0;
-      if (isRunning && startedAt) {
-        const ms = new Date(startedAt).getTime();
-        if (!isNaN(ms)) {
-          const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-          if (elapsed < 14400) {
-            sec += elapsed;
-          }
-        }
-      }
-      const min = Math.max(1, Math.floor(sec / 60) + 1);
       const halfLabel = status === 'second_half' ? '2-Taym' : '1-Taym';
-      return { text: `JONLI • ${halfLabel} (${min}')`, color: '#EF4444' };
+      return { text: `JONLI • ${halfLabel}`, color: '#EF4444' };
     }
     if (!mDate || !mTime) return { text: 'Boshlanish vaqti belgilanmagan', color: 'rgba(255,255,255,0.4)' };
 
@@ -783,7 +779,7 @@ export const DashboardScreen: React.FC<Props> = ({
       const diffMs = matchDateTime.getTime() - now.getTime();
 
       if (diffMs <= 0) {
-        return { text: "O'yin vaqti kelgan / Jonli", color: '#3B82F6' };
+        return { text: "O'yin vaqti kelgan", color: '#3B82F6' };
       }
 
       const hours = Math.floor(diffMs / (1000 * 60 * 60));
@@ -798,38 +794,6 @@ export const DashboardScreen: React.FC<Props> = ({
       return { text: `${mDate} | ${mTime}`, color: 'rgba(255,255,255,0.6)' };
     }
   };
-
-  const getLiveTimerFormattedText = (status?: string, timerSecs?: number, startedAt?: string, isRunning?: boolean) => {
-    if (status === 'half_time') return 'Tanaffus';
-    let sec = timerSecs || 0;
-    if (isRunning && startedAt) {
-      const ms = new Date(startedAt).getTime();
-      if (!isNaN(ms)) {
-        const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-        if (elapsed < 14400) {
-          sec += elapsed;
-        }
-      }
-    }
-    const mins = Math.floor(sec / 60);
-    const secs = sec % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  if (activeControlMatchId) {
-    return (
-      <MatchControlScreen
-        matchId={activeControlMatchId}
-        onBack={() => {
-          setActiveControlMatchId(null);
-          queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
-          queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
-        }}
-      />
-    );
-  }
-
-
 
   const handleDragMove = useCallback(
     (draggingId: string, dx: number, dy: number) => {
@@ -873,101 +837,126 @@ export const DashboardScreen: React.FC<Props> = ({
     [cardWidth, cardHeight, gridGap, getCurrentMenuIds, updateOrderedItems]
   );
 
+  if (activeControlMatchId) {
+    return (
+      <MatchControlScreen
+        matchId={activeControlMatchId}
+        onBack={() => {
+          setActiveControlMatchId(null);
+          queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        }}
+      />
+    );
+  }
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       <ScrollView
         style={styles.container}
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
         scrollEnabled={!isEditingOrder}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
       >
       {/* Main Stats Cards (Kutilayotgan Arizalar, Qabul Qilingan O'yinchilar, Jami Ligalar, Qabul Qilingan Jamoalar) */}
-      <Text style={styles.sectionTitle}>{"Umumiy Statistika"}</Text>
+      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"Umumiy Statistika"}</Text>
       <View style={styles.statsColumn}>
         {/* Card 1: Kutilayotgan Arizalar */}
         {userRole !== 'user' && (
           <TouchableOpacity
-            style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
+            style={[
+              styles.mainStatCard,
+              Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+            ]}
             activeOpacity={0.8}
             onPress={() => onNavigate && onNavigate('applications', 'players')}
           >
-            <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-            <Ionicons name="document-text-outline" size={28} color="#60A5FA" />
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+            <Ionicons name="document-text-outline" size={28} color={isDark ? "#60A5FA" : colors.accentBlue} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.statLabel}>{"Kutilayotgan Arizalar"}</Text>
+              <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Kutilayotgan Arizalar"}</Text>
               {isContentLoading ? (
                 <SkeletonLoader width={160} height={24} />
               ) : (
-                <Text style={[styles.statValue, { color: '#FFFFFF', fontSize: 14.5, fontWeight: '900' }]}>
+                <Text style={[styles.statValue, { color: colors.textPrimary, fontSize: 14.5, fontWeight: '900' }]}>
                   {`${counts.applications}ta o'yinchi / ${counts.pendingTeams}ta jamoa`}
                 </Text>
               )}
             </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         )}
 
         {/* Card 2: Qabul Qilingan O'yinchilar */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
+          style={[
+            styles.mainStatCard,
+            Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+          ]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('players', 'players')}
         >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-          <Ionicons name="people-outline" size={28} color="#2DD4BF" />
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+          <Ionicons name="people-outline" size={28} color={isDark ? "#2DD4BF" : colors.accentGreen} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Qabul Qilingan O'yinchilar"}</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Qabul Qilingan O'yinchilar"}</Text>
             {isContentLoading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
-              <Text style={styles.statValue}>{counts.players} {"ta"}</Text>
+              <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.players} {"ta"}</Text>
             )}
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
         </TouchableOpacity>
 
         {/* Card 3: Jami Ligalar */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
+          style={[
+            styles.mainStatCard,
+            Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+          ]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('leagues')}
         >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-          <Ionicons name="trophy-outline" size={28} color="#FBBF24" />
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+          <Ionicons name="trophy-outline" size={28} color={isDark ? "#FBBF24" : colors.accentYellow} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Jami Ligalar"}</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Jami Ligalar"}</Text>
             {isContentLoading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
-              <Text style={styles.statValue}>{counts.leagues} {"ta"}</Text>
+              <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.leagues} {"ta"}</Text>
             )}
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
         </TouchableOpacity>
 
         {/* Card 4: Qabul Qilingan Jamoalar */}
         <TouchableOpacity
-          style={[styles.mainStatCard, { borderColor: 'rgba(255, 255, 255, 0.18)' }]}
+          style={[
+            styles.mainStatCard,
+            Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+          ]}
           activeOpacity={0.8}
           onPress={() => onNavigate && onNavigate('players', 'teams')}
         >
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-          <Ionicons name="shirt-outline" size={28} color="#4ADE80" />
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+          <Ionicons name="shirt-outline" size={28} color={isDark ? "#4ADE80" : colors.accentGreen} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statLabel}>{"Qabul Qilingan Jamoalar"}</Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Qabul Qilingan Jamoalar"}</Text>
             {isContentLoading ? (
               <SkeletonLoader width={70} height={24} />
             ) : (
-              <Text style={styles.statValue}>{counts.teams} {"ta"}</Text>
+              <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.teams} {"ta"}</Text>
             )}
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
 
       {/* Admin Menu Grid (Slot-Based Absolute Grid) */}
-      <Text style={styles.sectionTitle}>{"Admin Menyusi Sahifalari"}</Text>
+      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"Admin Menyusi Sahifalari"}</Text>
       <View style={[styles.menuGrid, { height: Math.ceil(menuNavItems.length / 3) * (cardHeight + gridGap) }]}>
         {menuNavItems.map((item, index) => {
           return (
@@ -998,9 +987,9 @@ export const DashboardScreen: React.FC<Props> = ({
       {userRole === 'user' && (
         <View style={{ marginTop: 24, marginBottom: 12 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={styles.sectionTitle}>{"O'yinlar Jadvali"}</Text>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"O'yinlar Jadvali"}</Text>
             <TouchableOpacity onPress={() => onNavigate && onNavigate('matches')}>
-              <Text style={{ color: '#00FF87', fontSize: 12, fontWeight: '800' }}>{"BARCHA O'YINLAR →"}</Text>
+              <Text style={{ color: colors.accentGreen, fontSize: 12, fontWeight: '800' }}>{"BARCHA O'YINLAR →"}</Text>
             </TouchableOpacity>
           </View>
 
@@ -1019,10 +1008,7 @@ export const DashboardScreen: React.FC<Props> = ({
               const countdownInfo = getMatchTimeRemainingText(
                 mDate,
                 mTime,
-                item.status,
-                item.timer_seconds,
-                item.timer_started_at,
-                item.is_timer_running
+                item.status
               );
               const homeName = item.home_team?.name || item.home_team_name || 'Mezbon';
               const awayName = item.away_team?.name || item.away_team_name || 'Mehmon';
@@ -1036,6 +1022,7 @@ export const DashboardScreen: React.FC<Props> = ({
                   key={item.id || idx}
                   style={[
                     styles.matchCard,
+                    { backgroundColor: colors.bgCard, borderColor: colors.border },
                     isCentral && styles.centralMatchCard,
                     isLive && { borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 1.5 },
                   ]}
@@ -1051,13 +1038,13 @@ export const DashboardScreen: React.FC<Props> = ({
                   {/* Match Top Info Bar */}
                   <View style={styles.cardTopRow}>
                     <View style={styles.leagueTag}>
-                      <Text style={styles.leagueTagText}>{item.league || 'LIGA'}</Text>
-                      <Text style={styles.roundTagText}>{` • ${roundStr}`}</Text>
+                      <Text style={[styles.leagueTagText, { color: colors.accentGreen }]}>{item.league || 'LIGA'}</Text>
+                      <Text style={[styles.roundTagText, { color: colors.textMuted }]}>{` • ${roundStr}`}</Text>
                     </View>
 
-                    <View style={styles.fieldTag}>
-                      <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.6)" />
-                      <Text style={styles.fieldTagText}>{locationStr}</Text>
+                    <View style={[styles.fieldTag, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated }]}>
+                      <Ionicons name="location-outline" size={12} color={colors.textMuted} />
+                      <Text style={[styles.fieldTagText, { color: colors.textSecondary }]}>{locationStr}</Text>
                     </View>
                   </View>
 
@@ -1066,44 +1053,35 @@ export const DashboardScreen: React.FC<Props> = ({
                     {/* Home Team */}
                     <View style={styles.teamCol}>
                       <Image source={{ uri: homeLogo }} style={styles.teamLogo} />
-                      <Text style={styles.teamName} numberOfLines={2}>{homeName}</Text>
+                      <Text style={[styles.teamName, { color: colors.textPrimary }]} numberOfLines={2}>{homeName}</Text>
                     </View>
 
                     {/* Score or VS Badge */}
                     <View style={styles.scoreContainer}>
                       {isFinished || isLive ? (
-                        <View style={[styles.scoreBadge, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: '#EF4444' }]}>
-                          <Text style={[styles.scoreText, isLive && { color: '#FF4D4D', fontWeight: '900' }]}>
+                        <View style={[styles.scoreBadge, { backgroundColor: colors.accentGreen }, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: '#EF4444', borderWidth: 1 }]}>
+                          <Text style={[styles.scoreText, { color: '#FFFFFF' }, isLive && { color: '#FF4D4D', fontWeight: '900' }]}>
                             {item.home_score ?? 0} : {item.away_score ?? 0}
                           </Text>
                         </View>
                       ) : (
-                        <View style={styles.vsBadge}>
-                          <Text style={styles.vsText}>VS</Text>
+                        <View style={[styles.vsBadge, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                          <Text style={[styles.vsText, { color: colors.textSecondary }]}>VS</Text>
                         </View>
                       )}
 
-                      {isLive ? (
-                        <View style={styles.liveTimerSubPill}>
-                          <Ionicons name="time-outline" size={11} color="#EF4444" />
-                          <Text style={styles.liveTimerSubText}>
-                            {getLiveTimerFormattedText(item.status, item.timer_seconds, item.timer_started_at, item.is_timer_running)}
-                          </Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.matchTimeText}>{mTime || '18:00'}</Text>
-                      )}
+                      <Text style={[styles.matchTimeText, { color: colors.textMuted }]}>{mTime || '18:00'}</Text>
                     </View>
 
                     {/* Away Team */}
                     <View style={styles.teamCol}>
                       <Image source={{ uri: awayLogo }} style={styles.teamLogo} />
-                      <Text style={styles.teamName} numberOfLines={2}>{awayName}</Text>
+                      <Text style={[styles.teamName, { color: colors.textPrimary }]} numberOfLines={2}>{awayName}</Text>
                     </View>
                   </View>
 
                   {/* Countdown & Match Status Bar */}
-                  <View style={[styles.countdownBar, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
+                  <View style={[styles.countdownBar, { backgroundColor: colors.bgCardElevated }, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
                     <Ionicons name={isLive ? "radio-outline" : "time-outline"} size={13} color={countdownInfo.color} />
                     <Text style={[styles.countdownText, { color: countdownInfo.color, fontWeight: isLive ? '900' : '700' }]}>
                       {countdownInfo.text}
@@ -1112,19 +1090,19 @@ export const DashboardScreen: React.FC<Props> = ({
 
                   {/* PROMINENT CENTERED "O'YINNI BOSHQARISH" ACTION BUTTON */}
                   <TouchableOpacity
-                    style={styles.centralManageBtn}
+                    style={[styles.centralManageBtn, { backgroundColor: colors.accentGreen }]}
                     onPress={() => setActiveControlMatchId(item.id)}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="settings-outline" size={18} color="#000000" />
-                    <Text style={styles.centralManageBtnText}>{"O'YINNI BOSHQARISH"}</Text>
+                    <Ionicons name="settings-outline" size={18} color="#FFFFFF" />
+                    <Text style={[styles.centralManageBtnText, { color: '#FFFFFF' }]}>{"O'YINNI BOSHQARISH"}</Text>
                   </TouchableOpacity>
                 </View>
               );
             })
           ) : (
-            <View style={styles.dashEmptyMatchCard}>
-              <Ionicons name="calendar-outline" size={28} color="rgba(255,255,255,0.4)" />
+            <View style={[styles.dashEmptyMatchCard, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+              <Ionicons name="calendar-outline" size={28} color={colors.textMuted} />
               <Text style={styles.dashEmptyText}>Hozircha rejalashtirilgan o'yinlar mavjud emas</Text>
             </View>
           )}

@@ -17,13 +17,15 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { SwipeRow } from '../components/SwipeRow';
+import { BlurView } from '../components/SafeBlurView';
 import { MatchControlScreen } from './MatchControlScreen';
 import { adminNotificationService } from '../utils/adminNotificationService';
-import { useMatchesData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useMatchesData, useTeamsData, useLeaguesData, useLeagueRoundsData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface Match {
@@ -85,8 +87,21 @@ const MatchCardSkeleton: React.FC = () => {
 };
 
 export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ onNavigateToCreate }) => {
-  const { orgId, collabLeagueNames } = useOrg();
+  const { orgId, userRole, collabLeagueNames, collabLeagueIds } = useOrg();
+  const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
+
+  const isCoHostLeague = (leagueName?: string) => {
+    if (!leagueName || leagueName === 'all') return false;
+    return Boolean(collabLeagueNames && collabLeagueNames.includes(leagueName));
+  };
+
+  const isMatchCoHosted = (m: any) => {
+    if (!m) return false;
+    if (m.organization_id && Number(m.organization_id) !== Number(orgId)) return true;
+    if (m.league && collabLeagueNames && collabLeagueNames.includes(m.league) && Number(m.organization_id) !== Number(orgId)) return true;
+    return false;
+  };
 
   // 3 Select Filters: Liga, Tur, Holat (Only Active Matches: Live & Scheduled)
   const [selectedLeague, setSelectedLeague] = useState<string>('all');
@@ -100,8 +115,9 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     refetch: refetchMatches,
   } = useMatchesData(orgId, selectedLeague, collabLeagueNames);
 
-  const { data: leagues = [] } = useLeaguesData(orgId);
-  const { data: teams = [] } = useTeamsData(orgId);
+  const { data: leagues = [] } = useLeaguesData(orgId, collabLeagueIds);
+  const { data: teams = [] } = useTeamsData(orgId, collabLeagueNames);
+  const { data: dbRounds = [] } = useLeagueRoundsData(orgId, selectedLeague, collabLeagueNames);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -137,18 +153,52 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   const [tempDate, setTempDate] = useState(new Date());
   const [tempTime, setTempTime] = useState(new Date());
 
+  // Native Date/Time picker openers (Android native dialog / iOS glass modal)
+  const handleOpenEditDatePicker = () => {
+    if (Platform.OS === 'android') {
+      const validDate = tempDate instanceof Date && !isNaN(tempDate.getTime()) ? tempDate : new Date();
+      DateTimePickerAndroid.open({
+        value: validDate,
+        mode: 'date',
+        onChange: (event, selectedDate) => {
+          if (event.type === 'set' && selectedDate) {
+            setTempDate(selectedDate);
+            const year = selectedDate.getFullYear();
+            const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+            const day = String(selectedDate.getDate()).padStart(2, '0');
+            setEditMatchDate(`${year}-${month}-${day}`);
+          }
+        },
+      });
+    } else {
+      setShowDatePicker(true);
+    }
+  };
+
+  const handleOpenEditTimePicker = () => {
+    if (Platform.OS === 'android') {
+      const validTime = tempTime instanceof Date && !isNaN(tempTime.getTime()) ? tempTime : new Date();
+      DateTimePickerAndroid.open({
+        value: validTime,
+        mode: 'time',
+        is24Hour: true,
+        onChange: (event, selectedTime) => {
+          if (event.type === 'set' && selectedTime) {
+            setTempTime(selectedTime);
+            const hours = String(selectedTime.getHours()).padStart(2, '0');
+            const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
+            setEditMatchTime(`${hours}:${minutes}`);
+          }
+        },
+      });
+    } else {
+      setShowTimePicker(true);
+    }
+  };
+
   // Custom Delete Modal State
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
   const [deletingMatch, setDeletingMatch] = useState(false);
-
-  // 1-second ticker effect for real-time live match card timers
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timerInterval = setInterval(() => {
-      setTick((t) => t + 1);
-    }, 1000);
-    return () => clearInterval(timerInterval);
-  }, []);
 
   // Supabase Realtime Subscription: Invalidate queries instead of full re-fetch
   useEffect(() => {
@@ -175,6 +225,10 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
   // Open Full Edit Match Modal
   const handleOpenEditModal = (match: Match) => {
+    if (isMatchCoHosted(match)) {
+      Alert.alert("Cheklangan huquq", "Ushbu o'yin hamkorlikdagi (co-host) ligaga tegishli. Siz uni tahrirlay olmaysiz.");
+      return;
+    }
     setEditingMatch(match);
     setEditLeague(match.league || (leagues[0]?.name || ''));
     setEditHomeTeamId(match.home_team_id || '');
@@ -265,81 +319,99 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
   // Open Custom App-Styled Delete Confirmation Modal
   const handleDeleteMatch = (match: Match) => {
+    if (isMatchCoHosted(match)) {
+      Alert.alert("Cheklangan huquq", "Ushbu o'yin hamkorlikdagi (co-host) ligaga tegishli. Siz uni o'chira olmaysiz.");
+      return;
+    }
     setMatchToDelete(match);
   };
 
-  // Execute Match Delete in Supabase (deleting associated timer sponsors and events first to avoid DB FK errors)
+  // Execute Match Delete in Supabase with 0ms Optimistic UI + Background Delete
   const executeDeleteMatch = async () => {
     if (!matchToDelete) return;
     const targetId = matchToDelete.id;
-    setDeletingMatch(true);
 
+    // 1. Instant 0ms Optimistic UI: close modal and remove from list cache immediately
+    setMatchToDelete(null);
+    queryClient.setQueriesData({ queryKey: ['matches'] }, (old: any) => {
+      if (!Array.isArray(old)) return old;
+      return old.filter((m: any) => String(m.id) !== String(targetId));
+    });
+
+    // 2. Background DB & Storage deletion without blocking UI
     try {
       const dbClient = supabase;
+      const orgFolder = String((matchToDelete as any).organization_id || orgId || '1');
+      const matchFolder = `${orgFolder}/${targetId}`;
 
-      // 1. Delete associated live timer sponsor row
-      await dbClient.from('sponsors').delete().eq('name', `MATCH_TIMER_${targetId}`);
+      // Clean up Replay videos from Supabase Storage in background
+      try {
+        let filesToRemove: string[] = [];
+        const { data: folderFiles } = await dbClient.storage.from('replays').list(matchFolder);
+        if (folderFiles && folderFiles.length > 0) {
+          filesToRemove = folderFiles
+            .filter((f) => f.name && !f.name.startsWith('.'))
+            .map((f) => `${matchFolder}/${f.name}`);
+        }
 
-      // 2. Delete associated match events & stats if any
-      await dbClient.from('match_events').delete().eq('match_id', targetId);
-      await dbClient.from('match_stats').delete().eq('match_id', targetId);
+        const { data: eventsWithReplay } = await dbClient
+          .from('match_events')
+          .select('replay_video_url')
+          .eq('match_id', targetId);
 
-      // 3. Delete match from matches table
-      let { error } = await dbClient.from('matches').delete().eq('id', targetId);
-      if (error && !isNaN(Number(targetId))) {
-        const { error: errNum } = await dbClient.from('matches').delete().eq('id', Number(targetId));
-        if (errNum) throw errNum;
-      } else if (error) {
-        throw error;
+        if (eventsWithReplay && eventsWithReplay.length > 0) {
+          eventsWithReplay.forEach((e: any) => {
+            if (e.replay_video_url && e.replay_video_url.includes('/replays/')) {
+              const path = e.replay_video_url.split('/replays/')[1];
+              if (path && !filesToRemove.includes(path)) {
+                filesToRemove.push(path);
+              }
+            }
+          });
+        }
+
+        if (filesToRemove.length > 0) {
+          await dbClient.storage.from('replays').remove(filesToRemove);
+        }
+      } catch (storageErr) {
+        console.warn('Storage cleanup note:', storageErr);
       }
 
-      setMatchToDelete(null);
+      // Delete associated auxiliary rows in parallel
+      await Promise.allSettled([
+        dbClient.from('sponsors').delete().eq('name', `MATCH_TIMER_${targetId}`),
+        dbClient.from('match_events').delete().eq('match_id', targetId),
+        dbClient.from('match_stats').delete().eq('match_id', targetId),
+      ]);
+
+      // Delete match from matches table
+      let { error } = await dbClient.from('matches').delete().eq('id', targetId);
+      if (error && !isNaN(Number(targetId))) {
+        await dbClient.from('matches').delete().eq('id', Number(targetId));
+      }
+
       queryClient.invalidateQueries({ queryKey: ['matches'] });
       queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.refetchQueries({ queryKey: ['matches'] });
-      queryClient.refetchQueries({ queryKey: ['finishedMatches'] });
-      refetchMatches();
     } catch (e: any) {
-      console.error('Error deleting match:', e);
-      Alert.alert("Xatolik", e?.message || "O'yinni o'chirishda xatolik yuz berdi");
+      console.warn('Background delete match error:', e);
       queryClient.invalidateQueries({ queryKey: ['matches'] });
-    } finally {
-      setDeletingMatch(false);
     }
   };
 
-  // Unified Live Forward Time Helper Calculation (00:00 -> 45:00 -> 90:00)
+  // Clean Match Status & Schedule Info Helper
   const getMatchTimeRemainingText = (
     mDate?: string,
     mTime?: string,
-    status?: string,
-    timerSecs?: number,
-    startedAt?: string,
-    isRunning?: boolean
+    status?: string
   ) => {
     if (status === 'finished') return { text: 'Uchrashuv Yakunlangan', color: '#10B981' };
     if (status === 'first_half' || status === 'second_half' || status === 'half_time' || status === 'live') {
-      let sec = timerSecs || 0;
-      if (isRunning && startedAt) {
-        const ms = new Date(startedAt).getTime();
-        if (!isNaN(ms)) {
-          const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-          if (elapsed < 14400) {
-            sec += elapsed;
-          }
-        }
-      }
-      const min = Math.max(1, Math.floor(sec / 60) + 1);
       if (status === 'half_time') {
-        const halfMin = Math.floor(sec / 60) || 30;
-        return { text: `TANAFFUS (${halfMin}')`, color: '#F59E0B' };
+        return { text: 'TANAFFUS', color: '#F59E0B' };
       }
       const halfLabel = status === 'second_half' ? '2-Taym' : '1-Taym';
-      if (!isRunning && (timerSecs || 0) > 0) {
-        return { text: `PAUZA • ${halfLabel} (${min}')`, color: '#F59E0B' };
-      }
-      return { text: `JONLI • ${halfLabel} (${min}')`, color: '#EF4444' };
+      return { text: `JONLI • ${halfLabel}`, color: '#EF4444' };
     }
     if (!mDate || !mTime) return { text: 'Boshlanish vaqti belgilanmagan', color: 'rgba(255,255,255,0.4)' };
 
@@ -349,7 +421,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       const diffMs = matchDateTime.getTime() - now.getTime();
 
       if (diffMs <= 0) {
-        return { text: "O'yin vaqti kelgan / Jonli", color: '#3B82F6' };
+        return { text: "O'yin vaqti kelgan", color: '#3B82F6' };
       }
 
       const hours = Math.floor(diffMs / (1000 * 60 * 60));
@@ -365,28 +437,13 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     }
   };
 
-  const getLiveTimerFormattedText = (status?: string, timerSecs?: number, startedAt?: string, isRunning?: boolean) => {
-    let sec = timerSecs || 0;
-    if (isRunning && startedAt) {
-      const ms = new Date(startedAt).getTime();
-      if (!isNaN(ms)) {
-        const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-        if (elapsed < 14400) {
-          sec += elapsed;
-        }
-      }
-    }
-    const mins = Math.floor(sec / 60);
-    const secs = sec % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   // Render MatchControlScreen if active
   if (activeControlMatch) {
     return (
       <MatchControlScreen
         matchId={activeControlMatch.id}
         initialMatch={activeControlMatch}
+        isReadOnly={isMatchCoHosted(activeControlMatch)}
         onBack={() => {
           setActiveControlMatch(null);
           queryClient.invalidateQueries({ queryKey: ['matches'] });
@@ -406,8 +463,24 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     // 1. NEVER show finished matches in this screen
     if (m.status === 'finished' || m.status === 'FINISHED' || m.status === 'tugagan' || m.status === 'yakunlangan') return false;
 
-    if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
-    if (selectedRound !== 'all' && String(m.round) !== selectedRound) return false;
+    if (selectedLeague !== 'all') {
+      const matchLeague = (m.league || '').trim().toLowerCase();
+      const selLeague = (selectedLeague || '').trim().toLowerCase();
+      if (matchLeague !== selLeague) return false;
+    }
+
+    if (selectedRound !== 'all') {
+      const matchRoundStr = String(m.round || '').trim().toLowerCase();
+      const selectedRoundStr = String(selectedRound).trim().toLowerCase();
+      const cleanMatch = matchRoundStr.replace(/[^0-9]/g, '');
+      const cleanSelected = selectedRoundStr.replace(/[^0-9]/g, '');
+
+      if (cleanMatch && cleanSelected) {
+        if (cleanMatch !== cleanSelected) return false;
+      } else if (matchRoundStr !== selectedRoundStr) {
+        return false;
+      }
+    }
     
     if (selectedStatus === 'live') {
       if (!isMatchLive(m.status)) return false;
@@ -442,77 +515,99 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     return dateA - dateB;
   });
 
-  // Teams filtered by currently selected edit league
-  const editAvailableTeams = teams.filter(
-    (t) => !t.league || t.league.split(',').map((s: string) => s.trim()).includes(editLeague)
+  // Unique and combined list of all leagues including co-host leagues
+  const displayLeagues: any[] = Array.from(
+    new Map<string, any>([
+      ...leagues.map((l: any): [string, any] => [l.name, l]),
+      ...(collabLeagueNames || []).map((name: string): [string, any] => [name, { id: name, name }]),
+    ]).values()
   );
 
-  const availableRounds = Array.from(
-    new Set(matches.map((m) => String(m.round || '')).filter(Boolean))
-  ).sort();
+  const standardRounds = [
+    '1-tur', '2-tur', '3-tur', '4-tur', '5-tur', '6-tur', '7-tur', '8-tur',
+    'Chorak final', 'Yarim final', 'Final'
+  ];
+
+  // Teams filtered by currently selected edit league
+  const editAvailableTeams = teams.filter(
+    (t) => (t.league || '').trim().toLowerCase() === (editLeague || '').trim().toLowerCase()
+  );
 
   return (
-    <View style={styles.container}>
-      {/* Page Header */}
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
+      {/* Header with Title and Add Match Button */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>{"O'yinlar Jadvali"}</Text>
-          <Text style={styles.headerSub}>{"Admin ma'lumotlar bazasidagi barcha uchrashuvlar"}</Text>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"O'yinlar Jadvali"}</Text>
+            {onNavigateToCreate && !isCoHostLeague(selectedLeague) && (
+              <TouchableOpacity
+                style={[
+                  styles.createBtn,
+                  Platform.OS === 'android' && { backgroundColor: colors.accentGreen },
+                ]}
+                onPress={onNavigateToCreate}
+                activeOpacity={0.8}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Ionicons name="add" size={22} color={Platform.OS === 'android' ? '#FFFFFF' : '#000000'} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <Text style={[styles.headerSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Admin ma'lumotlar bazasidagi barcha uchrashuvlar"}</Text>
         </View>
-        {onNavigateToCreate && (
-          <TouchableOpacity style={styles.createBtn} onPress={onNavigateToCreate}>
-            <Ionicons name="add" size={20} color="#000000" />
-            <Text style={styles.createBtnText}>{"O'yin Qo'shish"}</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       {/* 3 Select Filter Triggers Bar */}
       <View style={styles.filterBarContainer}>
         {/* 1. Liga Select Dropdown */}
         <TouchableOpacity
-          style={[styles.filterSelectBtn, activeDropdown === 'league' && styles.filterSelectBtnActive]}
+          style={[styles.filterSelectBtn, activeDropdown === 'league' && styles.filterSelectBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
           onPress={() => setActiveDropdown(activeDropdown === 'league' ? 'none' : 'league')}
         >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
-          <Text style={styles.filterSelectText} numberOfLines={1}>
+          <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
             {selectedLeague === 'all' ? 'Barcha Ligalar' : selectedLeague}
           </Text>
-          <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.5)" />
+          <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
 
         {/* 2. Tur Select Dropdown */}
         <TouchableOpacity
-          style={[styles.filterSelectBtn, activeDropdown === 'round' && styles.filterSelectBtnActive]}
+          style={[styles.filterSelectBtn, activeDropdown === 'round' && styles.filterSelectBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
           onPress={() => setActiveDropdown(activeDropdown === 'round' ? 'none' : 'round')}
         >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Ionicons name="layers-outline" size={14} color="#3B82F6" />
-          <Text style={styles.filterSelectText} numberOfLines={1}>
+          <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
             {selectedRound === 'all' ? 'Barcha Turlar' : selectedRound}
           </Text>
-          <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.5)" />
+          <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
 
         {/* 3. O'yin Holati Select Dropdown */}
         <TouchableOpacity
-          style={[styles.filterSelectBtn, activeDropdown === 'status' && styles.filterSelectBtnActive]}
+          style={[styles.filterSelectBtn, activeDropdown === 'status' && styles.filterSelectBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
           onPress={() => setActiveDropdown(activeDropdown === 'status' ? 'none' : 'status')}
         >
-          <Ionicons name="time-outline" size={14} color="#00FF66" />
-          <Text style={styles.filterSelectText} numberOfLines={1}>
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="time-outline" size={14} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+          <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
             {selectedStatus === 'all'
               ? 'Barcha Holat'
               : selectedStatus === 'live'
               ? 'Jonli'
               : 'Rejalashtirilgan'}
           </Text>
-          <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.5)" />
+          <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
       </View>
 
       {/* Expandable Dropdown Options Container */}
       {activeDropdown === 'league' && (
-        <View style={styles.dropdownMenuCard}>
+        <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
             <TouchableOpacity
               style={styles.dropdownMenuItem}
@@ -521,20 +616,20 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 setActiveDropdown('none');
               }}
             >
-              <Text style={[styles.dropdownMenuText, selectedLeague === 'all' && { color: '#00FF66', fontWeight: '900' }]}>
+              <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedLeague === 'all' && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontWeight: '900' }]}>
                 Barcha Ligalar
               </Text>
             </TouchableOpacity>
-            {leagues.map((lg) => (
+            {displayLeagues.map((lg) => (
               <TouchableOpacity
-                key={lg.id}
+                key={lg.id || lg.name}
                 style={styles.dropdownMenuItem}
                 onPress={() => {
                   setSelectedLeague(lg.name);
                   setActiveDropdown('none');
                 }}
               >
-                <Text style={[styles.dropdownMenuText, selectedLeague === lg.name && { color: '#00FF66', fontWeight: '900' }]}>
+                <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedLeague === lg.name && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontWeight: '900' }]}>
                   {lg.name}
                 </Text>
               </TouchableOpacity>
@@ -544,7 +639,8 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       )}
 
       {activeDropdown === 'round' && (
-        <View style={styles.dropdownMenuCard}>
+        <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
             <TouchableOpacity
               style={styles.dropdownMenuItem}
@@ -553,12 +649,12 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 setActiveDropdown('none');
               }}
             >
-              <Text style={[styles.dropdownMenuText, selectedRound === 'all' && { color: '#00FF66', fontWeight: '900' }]}>
+              <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedRound === 'all' && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontWeight: '900' }]}>
                 Barcha Turlar
               </Text>
             </TouchableOpacity>
-            {availableRounds.length > 0 ? (
-              availableRounds.map((rnd) => (
+            {dbRounds.length > 0 ? (
+              dbRounds.map((rnd: string) => (
                 <TouchableOpacity
                   key={rnd}
                   style={styles.dropdownMenuItem}
@@ -567,33 +663,25 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     setActiveDropdown('none');
                   }}
                 >
-                  <Text style={[styles.dropdownMenuText, selectedRound === rnd && { color: '#00FF66', fontWeight: '900' }]}>
+                  <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedRound === rnd && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontWeight: '900' }]}>
                     {rnd}
                   </Text>
                 </TouchableOpacity>
               ))
             ) : (
-              ['1-tur', '2-tur', '3-tur', '4-tur', 'Chorak final', 'Yarim final', 'Final'].map((rnd) => (
-                <TouchableOpacity
-                  key={rnd}
-                  style={styles.dropdownMenuItem}
-                  onPress={() => {
-                    setSelectedRound(rnd);
-                    setActiveDropdown('none');
-                  }}
-                >
-                  <Text style={[styles.dropdownMenuText, selectedRound === rnd && { color: '#00FF66', fontWeight: '900' }]}>
-                    {rnd}
-                  </Text>
-                </TouchableOpacity>
-              ))
+              <View style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
+                <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+                  {"Hozircha turlar mavjud emas"}
+                </Text>
+              </View>
             )}
           </ScrollView>
         </View>
       )}
 
       {activeDropdown === 'status' && (
-        <View style={styles.dropdownMenuCard}>
+        <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           {[
             { id: 'all', title: 'Barcha Holatlar' },
             { id: 'live', title: 'Jonli (Live)' },
@@ -607,7 +695,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 setActiveDropdown('none');
               }}
             >
-              <Text style={[styles.dropdownMenuText, selectedStatus === st.id && { color: '#00FF66', fontWeight: '900' }]}>
+              <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedStatus === st.id && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontWeight: '900' }]}>
                 {st.title}
               </Text>
             </TouchableOpacity>
@@ -629,12 +717,12 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
           contentContainerStyle={{ paddingBottom: 130, gap: 14 }}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
           }
           ListEmptyComponent={
             <View style={styles.emptyCard}>
-              <Ionicons name="calendar-outline" size={42} color="rgba(255,255,255,0.2)" />
-              <Text style={styles.emptyText}>{"Hozircha hech qanday o'yin mavjud emas"}</Text>
+              <Ionicons name="calendar-outline" size={42} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.2)"} />
+              <Text style={[styles.emptyText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Hozircha hech qanday o'yin mavjud emas"}</Text>
             </View>
           }
           renderItem={({ item }) => {
@@ -643,13 +731,11 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
             const mTime = item.match_time || item.time;
             const isLive = item.status === 'first_half' || item.status === 'second_half' || item.status === 'half_time' || item.status === 'live';
             const isFinished = item.status === 'finished';
+            const isCoHost = isMatchCoHosted(item);
             const countdownInfo = getMatchTimeRemainingText(
               mDate,
               mTime,
-              item.status,
-              (item as any).timer_seconds,
-              (item as any).timer_started_at,
-              (item as any).is_timer_running
+              item.status
             );
             const homeName = item.home_team?.name || 'Mezbon';
             const awayName = item.away_team?.name || 'Mehmon';
@@ -658,38 +744,42 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
             return (
               <SwipeRow
                 isOpen={isRowOpen}
-                onOpen={() => setActiveSwipedId(item.id)}
+                onOpen={() => !isCoHost && setActiveSwipedId(item.id)}
                 onClose={() => {
                   if (activeSwipedId === item.id) setActiveSwipedId(null);
                 }}
                 actionWidth={70}
                 actions={
-                  /* Stacked Vertical Actions (Edit Top, Delete Bottom) */
-                  <View style={styles.stackedSwipeActions}>
-                    {/* Tahrirlash (Edit) Button */}
-                    <TouchableOpacity
-                      style={styles.swipeEditBtnStacked}
-                      onPress={() => {
-                        setActiveSwipedId(null);
-                        handleOpenEditModal(item);
-                      }}
-                    >
-                      <Ionicons name="create-outline" size={18} color="#FFFFFF" />
-                      <Text style={styles.swipeBtnTextStacked}>{"Tahrir"}</Text>
-                    </TouchableOpacity>
+                  isCoHost ? null : (
+                    /* Stacked Vertical Actions (Edit Top, Delete Bottom) */
+                    <View style={styles.stackedSwipeActions}>
+                      {/* Tahrirlash (Edit) Button */}
+                      <TouchableOpacity
+                        style={styles.swipeEditBtnStacked}
+                        onPress={() => {
+                          setActiveSwipedId(null);
+                          handleOpenEditModal(item);
+                        }}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="create-outline" size={18} color="#FFFFFF" />
+                        <Text style={styles.swipeBtnTextStacked}>{"Tahrir"}</Text>
+                      </TouchableOpacity>
 
-                    {/* O'chirish (Delete) Button */}
-                    <TouchableOpacity
-                      style={styles.swipeDeleteBtnStacked}
-                      onPress={() => {
-                        setActiveSwipedId(null);
-                        handleDeleteMatch(item);
-                      }}
-                    >
-                      <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
-                      <Text style={styles.swipeBtnTextStacked}>{"O'chirish"}</Text>
-                    </TouchableOpacity>
-                  </View>
+                      {/* O'chirish (Delete) Button */}
+                      <TouchableOpacity
+                        style={styles.swipeDeleteBtnStacked}
+                        onPress={() => {
+                          setActiveSwipedId(null);
+                          handleDeleteMatch(item);
+                        }}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+                        <Text style={styles.swipeBtnTextStacked}>{"O'chirish"}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )
                 }
               >
                 {/* Foreground Match Card */}
@@ -699,8 +789,10 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     isCentral && styles.centralMatchCard,
                     item.is_postponed && styles.postponedMatchCard,
                     isLive && { borderColor: 'rgba(239, 68, 68, 0.4)', borderWidth: 1 },
+                    Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border },
                   ]}
                 >
+                  {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   {/* Central Match Header Badge */}
                   {isCentral && (
                     <View style={styles.centralHeaderBadge}>
@@ -712,13 +804,13 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                   {/* Match Top Info Bar */}
                   <View style={styles.cardTopRow}>
                     <View style={styles.leagueTag}>
-                      <Text style={styles.leagueTagText}>{item.league || 'LIGA'}</Text>
-                      {item.round && <Text style={styles.roundTagText}>{` • ${item.round}`}</Text>}
+                      <Text style={[styles.leagueTagText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{item.league || 'LIGA'}</Text>
+                      {item.round && <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>{` • ${item.round}`}</Text>}
                     </View>
 
-                    <View style={styles.fieldTag}>
-                      <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.6)" />
-                      <Text style={styles.fieldTagText}>
+                    <View style={[styles.fieldTag, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                      <Ionicons name="location-outline" size={12} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
+                      <Text style={[styles.fieldTagText, Platform.OS === 'android' && { color: colors.textSecondary }]}>
                         {item.location === '2-maydon' ? '2-Maydon' : '1-Maydon'}
                       </Text>
                     </View>
@@ -734,9 +826,9 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                             item.home_team?.logo_url ||
                             'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop',
                         }}
-                        style={styles.teamLogo}
+                        style={[styles.teamLogo, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
                       />
-                      <Text style={styles.teamName} numberOfLines={2}>
+                      <Text style={[styles.teamName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={2}>
                         {homeName}
                       </Text>
                     </View>
@@ -744,27 +836,18 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     {/* Score or VS Badge */}
                     <View style={styles.scoreContainer}>
                       {isFinished || isLive ? (
-                        <View style={[styles.scoreBadge, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: '#EF4444' }]}>
-                          <Text style={[styles.scoreText, isLive && { color: '#FF4D4D', fontWeight: '900' }]}>
+                        <View style={[styles.scoreBadge, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: '#EF4444' }, Platform.OS === 'android' && !isLive && { backgroundColor: colors.accentGreen }]}>
+                          <Text style={[styles.scoreText, isLive && { color: '#FF4D4D', fontWeight: '900' }, Platform.OS === 'android' && !isLive && { color: '#FFFFFF' }]}>
                             {item.home_score ?? 0} : {item.away_score ?? 0}
                           </Text>
                         </View>
                       ) : (
-                        <View style={styles.vsBadge}>
-                          <Text style={styles.vsText}>VS</Text>
+                        <View style={[styles.vsBadge, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                          <Text style={[styles.vsText, Platform.OS === 'android' && { color: colors.textSecondary }]}>VS</Text>
                         </View>
                       )}
 
-                      {isLive ? (
-                        <View style={styles.liveTimerSubPill}>
-                          <Ionicons name="time-outline" size={11} color="#EF4444" />
-                          <Text style={styles.liveTimerSubText}>
-                            {getLiveTimerFormattedText((item as any).status, (item as any).timer_seconds, (item as any).timer_started_at, (item as any).is_timer_running)}
-                          </Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.matchTimeText}>{mTime || '18:00'}</Text>
-                      )}
+                      <Text style={[styles.matchTimeText, Platform.OS === 'android' && { color: colors.textMuted }]}>{mTime || '18:00'}</Text>
                     </View>
 
                     {/* Away Team */}
@@ -775,61 +858,86 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                             item.away_team?.logo_url ||
                             'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop',
                         }}
-                        style={styles.teamLogo}
+                        style={[styles.teamLogo, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
                       />
-                      <Text style={styles.teamName} numberOfLines={2}>
+                      <Text style={[styles.teamName, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={2}>
                         {awayName}
                       </Text>
                     </View>
                   </View>
 
                   {/* Countdown & Match Status Bar */}
-                  <View style={[styles.countdownBar, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
+                  <View style={[styles.countdownBar, isLive && { backgroundColor: 'rgba(239, 68, 68, 0.12)' }, Platform.OS === 'android' && !isLive && { backgroundColor: colors.bgCardElevated }]}>
                     <Ionicons name={isLive ? "radio-outline" : "time-outline"} size={13} color={countdownInfo.color} />
                     <Text style={[styles.countdownText, { color: countdownInfo.color, fontWeight: isLive ? '900' : '700' }]}>
                       {countdownInfo.text}
                     </Text>
                   </View>
 
-                  {/* PROMINENT CENTERED "BOSHQARISH" ACTION BUTTON */}
-                  <TouchableOpacity
-                    style={styles.centralManageBtn}
-                    onPress={() => setActiveControlMatch(item)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="settings-outline" size={18} color="#000000" />
-                    <Text style={styles.centralManageBtnText}>{"O'YINNI BOSHQARISH"}</Text>
-                  </TouchableOpacity>
-                  </View>
-                </SwipeRow>
-              );
-            }}
-          />
-        )}
+                  {/* ACTION BUTTON: Read-Only for Co-Host or Full Control for Owner */}
+                  {isCoHost ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.centralManageBtn,
+                        {
+                          backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : colors.bgCardElevated,
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          elevation: 0,
+                        },
+                      ]}
+                      onPress={() => setActiveControlMatch(item)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="eye-outline" size={18} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                      <Text style={[styles.centralManageBtnText, { color: Platform.OS === 'android' ? colors.accentGreen : "#00FF66" }]}>
+                        {"O'yinni Ko'rish (Co-Host)"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.centralManageBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen, elevation: 0 }]}
+                      onPress={() => setActiveControlMatch(item)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="game-controller-outline" size={18} color={Platform.OS === 'android' ? "#FFFFFF" : "#000000"} />
+                      <Text style={[styles.centralManageBtnText, Platform.OS === 'android' && { color: "#FFFFFF" }]}>
+                        {"Boshqarish"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </SwipeRow>
+            );
+          }}
+        />
+      )}
 
       {/* FULL EDIT MATCH MODAL (11 Fields 1:1 Matching Admin Web) */}
       <Modal visible={!!editingMatch} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { maxHeight: '90%' }]}>
+          <View style={[styles.modalCard, { maxHeight: '90%' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>{"O'yinni Tahrirlash"}</Text>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"O'yinni Tahrirlash"}</Text>
               <TouchableOpacity onPress={() => setEditingMatch(null)}>
-                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
 
             {editingMatch && (
               <ScrollView contentContainerStyle={styles.modalScrollBody} showsVerticalScrollIndicator={false}>
                 {/* 1. Liga Selection */}
-                <Text style={styles.inputLabel}>{"Liga:"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Liga:"}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                   {leagues.map((lg) => (
                     <TouchableOpacity
                       key={lg.id}
-                      style={[styles.chipItem, editLeague === lg.name && styles.chipItemActive]}
+                      style={[styles.chipItem, editLeague === lg.name && styles.chipItemActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                       onPress={() => setEditLeague(lg.name)}
                     >
-                      <Text style={[styles.chipText, editLeague === lg.name && styles.chipTextActive]}>
+                      {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Text style={[styles.chipText, editLeague === lg.name && styles.chipTextActive, Platform.OS === 'android' && { color: colors.textSecondary }, editLeague === lg.name && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                         {lg.name}
                       </Text>
                     </TouchableOpacity>
@@ -837,15 +945,16 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 </ScrollView>
 
                 {/* 2. Home Team Selection */}
-                <Text style={styles.inputLabel}>{"Mezbon Jamoa:"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Mezbon Jamoa:"}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                   {editAvailableTeams.map((t) => (
                     <TouchableOpacity
                       key={t.id}
-                      style={[styles.chipItem, editHomeTeamId === t.id && styles.chipItemActive]}
+                      style={[styles.chipItem, editHomeTeamId === t.id && styles.chipItemActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                       onPress={() => setEditHomeTeamId(t.id)}
                     >
-                      <Text style={[styles.chipText, editHomeTeamId === t.id && styles.chipTextActive]}>
+                      {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Text style={[styles.chipText, editHomeTeamId === t.id && styles.chipTextActive, Platform.OS === 'android' && { color: colors.textSecondary }, editHomeTeamId === t.id && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                         {t.name}
                       </Text>
                     </TouchableOpacity>
@@ -853,15 +962,16 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 </ScrollView>
 
                 {/* 3. Away Team Selection */}
-                <Text style={styles.inputLabel}>{"Mehmon Jamoa:"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Mehmon Jamoa:"}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                   {editAvailableTeams.map((t) => (
                     <TouchableOpacity
                       key={t.id}
-                      style={[styles.chipItem, editAwayTeamId === t.id && styles.chipItemActive]}
+                      style={[styles.chipItem, editAwayTeamId === t.id && styles.chipItemActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                       onPress={() => setEditAwayTeamId(t.id)}
                     >
-                      <Text style={[styles.chipText, editAwayTeamId === t.id && styles.chipTextActive]}>
+                      {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Text style={[styles.chipText, editAwayTeamId === t.id && styles.chipTextActive, Platform.OS === 'android' && { color: colors.textSecondary }, editAwayTeamId === t.id && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                         {t.name}
                       </Text>
                     </TouchableOpacity>
@@ -871,9 +981,9 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 {/* 4. Tur / Bosqich Selection */}
                 <View style={{ gap: 6 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text style={styles.inputLabel}>{"Tur / Bosqich:"}</Text>
+                    <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tur / Bosqich:"}</Text>
                     <TouchableOpacity onPress={() => setShowSecretStages(!showSecretStages)}>
-                      <Text style={{ color: '#00FF66', fontSize: 11, fontWeight: '700' }}>
+                      <Text style={{ color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66', fontSize: 11, fontWeight: '700' }}>
                         {showSecretStages ? "Yashirish ▲" : "Bosqichlar (Final/Pley-off) ▼"}
                       </Text>
                     </TouchableOpacity>
@@ -884,10 +994,11 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     {['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map((num) => (
                       <TouchableOpacity
                         key={num}
-                        style={[styles.chipItem, editRound === num && styles.chipItemActive]}
+                        style={[styles.chipItem, editRound === num && styles.chipItemActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                         onPress={() => setEditRound(num)}
                       >
-                        <Text style={[styles.chipText, editRound === num && styles.chipTextActive]}>
+                        {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Text style={[styles.chipText, editRound === num && styles.chipTextActive, Platform.OS === 'android' && { color: colors.textSecondary }, editRound === num && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                           {num}-tur
                         </Text>
                       </TouchableOpacity>
@@ -896,16 +1007,18 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
                   {/* Secret Collapsible Stages */}
                   {showSecretStages && (
-                    <View style={{ backgroundColor: '#151A24', padding: 10, borderRadius: 12, gap: 6, borderWidth: 1, borderColor: 'rgba(0, 255, 102, 0.2)' }}>
-                      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700' }}>{"Nokaut & Play-Off Bosqichlari:"}</Text>
+                    <View style={[{ backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24', padding: 10, borderRadius: 12, gap: 6, borderWidth: 1, borderColor: 'rgba(0, 255, 102, 0.2)', overflow: 'hidden' }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                      {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.6)', fontSize: 11, fontWeight: '700' }}>{"Nokaut & Play-Off Bosqichlari:"}</Text>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                         {['1/16 Final', '1/8 Final', 'Chorak Final', 'Yarim Final', '3-O\'rin uchun', 'FINAL'].map((st) => (
                           <TouchableOpacity
                             key={st}
-                            style={[styles.chipItem, editRound === st && styles.chipItemActive]}
+                            style={[styles.chipItem, editRound === st && styles.chipItemActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
                             onPress={() => setEditRound(st)}
                           >
-                            <Text style={[styles.chipText, editRound === st && styles.chipTextActive]}>
+                            {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                            <Text style={[styles.chipText, editRound === st && styles.chipTextActive, Platform.OS === 'android' && { color: colors.textSecondary }, editRound === st && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                               {st}
                             </Text>
                           </TouchableOpacity>
@@ -915,49 +1028,52 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                   )}
 
                   <TextInput
-                    style={styles.modalInput}
+                    style={[styles.modalInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                     value={editRound}
                     onChangeText={setEditRound}
                     placeholder="masalan: 1-tur yoki Chorak final"
-                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.3)"}
                   />
                 </View>
 
                 {/* 5 & 6. Date and Clock Inputs with Modal Trigger */}
                 <View style={styles.rowTwoCols}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>{"O'yin Sanasi:"}</Text>
+                    <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yin Sanasi:"}</Text>
                     <TouchableOpacity
-                      style={styles.pickerTriggerBtn}
-                      onPress={() => setShowDatePicker(true)}
+                      style={[styles.pickerTriggerBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+                      onPress={handleOpenEditDatePicker}
                     >
-                      <Ionicons name="calendar-outline" size={16} color="#00FF66" />
-                      <Text style={styles.pickerTriggerText}>{editMatchDate || "Sana tanlang"}</Text>
+                      {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Ionicons name="calendar-outline" size={16} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                      <Text style={[styles.pickerTriggerText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{editMatchDate || "Sana tanlang"}</Text>
                     </TouchableOpacity>
                   </View>
 
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>{"O'yin Vaqti:"}</Text>
+                    <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yin Vaqti:"}</Text>
                     <TouchableOpacity
-                      style={styles.pickerTriggerBtn}
-                      onPress={() => setShowTimePicker(true)}
+                      style={[styles.pickerTriggerBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+                      onPress={handleOpenEditTimePicker}
                     >
-                      <Ionicons name="time-outline" size={16} color="#00FF66" />
-                      <Text style={styles.pickerTriggerText}>{editMatchTime || "Vaqt tanlang"}</Text>
+                      {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Ionicons name="time-outline" size={16} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                      <Text style={[styles.pickerTriggerText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{editMatchTime || "Vaqt tanlang"}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 {/* 7. Field (Maydon) Selection */}
-                <Text style={styles.inputLabel}>{"Maydon (OBS Stream uchun):"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Maydon (OBS Stream uchun):"}</Text>
                 <View style={styles.fieldSelectRow}>
                   {['1-maydon', '2-maydon'].map((f) => (
                     <TouchableOpacity
                       key={f}
-                      style={[styles.fieldSelectBtn, editLocation === f && styles.fieldSelectBtnActive]}
+                      style={[styles.fieldSelectBtn, editLocation === f && styles.fieldSelectBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                       onPress={() => setEditLocation(f)}
                     >
-                      <Text style={[styles.fieldSelectText, editLocation === f && styles.fieldSelectTextActive]}>
+                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Text style={[styles.fieldSelectText, editLocation === f && styles.fieldSelectTextActive, Platform.OS === 'android' && { color: colors.textSecondary }, editLocation === f && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }]}>
                         {f === '2-maydon' ? '2-Maydon' : '1-Maydon'}
                       </Text>
                     </TouchableOpacity>
@@ -965,17 +1081,17 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 </View>
 
                 {/* 8. Stadium Name Input */}
-                <Text style={styles.inputLabel}>{"Stadion Nomi (ixtiyoriy):"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Stadion Nomi (ixtiyoriy):"}</Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[styles.modalInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   value={editStadiumName}
                   onChangeText={setEditStadiumName}
                   placeholder="masalan: Dinamo Arena"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.3)"}
                 />
 
                 {/* 9. Importance Selection (Oddiy, O'rtacha, Markaziy) */}
-                <Text style={styles.inputLabel}>{"O'yin Dolzarbligi Darajasi:"}</Text>
+                <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yin Dolzarbligi Darajasi:"}</Text>
                 <View style={styles.importanceRow}>
                   {[
                     { id: 'oddiy', label: '⚪ Oddiy' },
@@ -987,13 +1103,17 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                       style={[
                         styles.importanceBtn,
                         editImportance === imp.id && styles.importanceBtnActive,
+                        Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
                       ]}
                       onPress={() => setEditImportance(imp.id as any)}
                     >
+                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                       <Text
                         style={[
                           styles.importanceBtnText,
                           editImportance === imp.id && styles.importanceBtnTextActive,
+                          Platform.OS === 'android' && { color: colors.textSecondary },
+                          editImportance === imp.id && { color: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' },
                         ]}
                       >
                         {imp.label}
@@ -1003,34 +1123,36 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 </View>
 
                 {/* 10. YouTube Link (Yashirin Switch Toggle) */}
-                <View style={styles.postponedToggleRow}>
+                <View style={[styles.postponedToggleRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                  {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.postponedToggleTitle}>{"YouTube Translyatsiya Linki 📺"}</Text>
-                    <Text style={styles.postponedToggleSub}>{"Jonli efir havolasini kiritish uchun yoqing"}</Text>
+                    <Text style={[styles.postponedToggleTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"YouTube Translyatsiya Linki 📺"}</Text>
+                    <Text style={[styles.postponedToggleSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Jonli efir havolasini kiritish uchun yoqing"}</Text>
                   </View>
                   <Switch
                     value={editEnableYtLink}
                     onValueChange={setEditEnableYtLink}
-                    trackColor={{ false: '#334155', true: '#00FF66' }}
-                    thumbColor={editEnableYtLink ? '#000000' : '#94A3B8'}
+                    trackColor={{ false: '#334155', true: Platform.OS === 'android' ? colors.accentGreen : '#00FF66' }}
+                    thumbColor={editEnableYtLink ? (Platform.OS === 'android' ? '#FFFFFF' : '#000000') : '#94A3B8'}
                   />
                 </View>
 
                 {editEnableYtLink && (
                   <TextInput
-                    style={styles.modalInput}
+                    style={[styles.modalInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                     value={editYtLink}
                     onChangeText={setEditYtLink}
                     placeholder="https://youtube.com/live/..."
-                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.3)"}
                   />
                 )}
 
                 {/* 11. Postponed Switch Toggle */}
-                <View style={styles.postponedToggleRow}>
+                <View style={[styles.postponedToggleRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                  {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.postponedToggleTitle}>{"Qoldirilgan O'yin Statusi ⏸️"}</Text>
-                    <Text style={styles.postponedToggleSub}>{"O'yinni kechiktirilgan statusga o'tkazish"}</Text>
+                    <Text style={[styles.postponedToggleTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Qoldirilgan O'yin Statusi ⏸️"}</Text>
+                    <Text style={[styles.postponedToggleSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yinni kechiktirilgan statusga o'tkazish"}</Text>
                   </View>
                   <Switch
                     value={editIsPostponed}
@@ -1042,14 +1164,15 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
                 {/* Submit Save Button */}
                 <TouchableOpacity
-                  style={styles.modalSaveBtn}
+                  style={[styles.modalSaveBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                   onPress={handleSaveEditMatch}
                   disabled={savingEdit}
                 >
+                  {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                   {savingEdit ? (
                     <ActivityIndicator size="small" color="#000000" />
                   ) : (
-                    <Text style={styles.modalSaveBtnText}>{"O'zgarishlarni Saqlash"}</Text>
+                    <Text style={[styles.modalSaveBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"O'zgarishlarni Saqlash"}</Text>
                   )}
                 </TouchableOpacity>
               </ScrollView>
@@ -1058,17 +1181,18 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         </View>
       </Modal>
 
-      {/* Date Picker Confirmation Modal */}
-      {showDatePicker && (
+      {/* iOS Date Picker Confirmation Modal */}
+      {Platform.OS === 'ios' && showDatePicker && (
         <Modal transparent animationType="fade">
           <View style={styles.pickerModalOverlay}>
             <View style={styles.pickerModalCard}>
+              <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
               <Text style={styles.pickerModalTitle}>{"O'yin Sanasini Tanlang"}</Text>
 
               <DateTimePicker
                 value={tempDate}
                 mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                display="spinner"
                 onChange={(_, d) => d && setTempDate(d)}
                 textColor="#FFFFFF"
               />
@@ -1078,6 +1202,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                   style={styles.pickerCancelBtn}
                   onPress={() => setShowDatePicker(false)}
                 >
+                  <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
                   <Text style={styles.pickerCancelText}>{"Bekor qilish"}</Text>
                 </TouchableOpacity>
 
@@ -1091,6 +1216,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     setShowDatePicker(false);
                   }}
                 >
+                  <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
                   <Text style={styles.pickerConfirmText}>{"OK • Tasdiqlash"}</Text>
                 </TouchableOpacity>
               </View>
@@ -1099,17 +1225,18 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         </Modal>
       )}
 
-      {/* Time Clock Picker Confirmation Modal */}
-      {showTimePicker && (
+      {/* iOS Time Clock Picker Confirmation Modal */}
+      {Platform.OS === 'ios' && showTimePicker && (
         <Modal transparent animationType="fade">
           <View style={styles.pickerModalOverlay}>
             <View style={styles.pickerModalCard}>
+              <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
               <Text style={styles.pickerModalTitle}>{"O'yin Vaqtini Tanlang"}</Text>
 
               <DateTimePicker
                 value={tempTime}
                 mode="time"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                display="spinner"
                 onChange={(_, t) => t && setTempTime(t)}
                 textColor="#FFFFFF"
               />
@@ -1119,6 +1246,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                   style={styles.pickerCancelBtn}
                   onPress={() => setShowTimePicker(false)}
                 >
+                  <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
                   <Text style={styles.pickerCancelText}>{"Bekor qilish"}</Text>
                 </TouchableOpacity>
 
@@ -1131,6 +1259,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     setShowTimePicker(false);
                   }}
                 >
+                  <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
                   <Text style={styles.pickerConfirmText}>{"OK • Tasdiqlash"}</Text>
                 </TouchableOpacity>
               </View>
@@ -1141,50 +1270,53 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
       {/* Custom App-Styled Delete Confirmation Modal */}
       <Modal
-          visible={!!matchToDelete}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setMatchToDelete(null)}
-        >
-          <View style={styles.confirmModalOverlay}>
-            <View style={styles.confirmModalCard}>
-              <View style={styles.confirmIconBg}>
-                <Ionicons name="trash-outline" size={32} color="#EF4444" />
-              </View>
-              <Text style={styles.confirmModalTitle}>{"O'yinni o'chirish"}</Text>
-              <Text style={styles.confirmModalSub}>
-                {matchToDelete?.home_team?.name && matchToDelete?.away_team?.name
-                  ? `${matchToDelete.home_team.name} vs ${matchToDelete.away_team.name} uchrashuvini o'chirishga ishonchingiz komilmi?`
-                  : "Ushbu uchrashuvni bazadan to'liq o'chirishga ishonchingiz komilmi?"}
-              </Text>
+        visible={!!matchToDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMatchToDelete(null)}
+      >
+        <View style={styles.confirmModalOverlay}>
+          <View style={[styles.confirmModalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            <View style={styles.confirmIconBg}>
+              <Ionicons name="trash-outline" size={32} color="#EF4444" />
+            </View>
+            <Text style={[styles.confirmModalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"O'yinni o'chirish"}</Text>
+            <Text style={[styles.confirmModalSub, Platform.OS === 'android' && { color: colors.textSecondary }]}>
+              {matchToDelete?.home_team?.name && matchToDelete?.away_team?.name
+                ? `${matchToDelete.home_team.name} vs ${matchToDelete.away_team.name} uchrashuvini o'chirishga ishonchingiz komilmi?`
+                : "Ushbu uchrashuvni bazadan to'liq o'chirishga ishonchingiz komilmi?"}
+            </Text>
 
-              <View style={styles.confirmBtnRow}>
-                <TouchableOpacity
-                  style={styles.cancelConfirmBtn}
-                  onPress={() => setMatchToDelete(null)}
-                  disabled={deletingMatch}
-                >
-                  <Text style={styles.cancelConfirmText}>{"Bekor qilish"}</Text>
-                </TouchableOpacity>
+            <View style={styles.confirmBtnRow}>
+              <TouchableOpacity
+                style={[styles.cancelConfirmBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+                onPress={() => setMatchToDelete(null)}
+                disabled={deletingMatch}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                <Text style={[styles.cancelConfirmText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.deleteConfirmBtn}
-                  onPress={executeDeleteMatch}
-                  disabled={deletingMatch}
-                >
-                  {deletingMatch ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Ionicons name="trash" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                      <Text style={styles.deleteConfirmText}>{"O'chirish"}</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.deleteConfirmBtn}
+                onPress={executeDeleteMatch}
+                disabled={deletingMatch}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                {deletingMatch ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="trash" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.deleteConfirmText}>{"O'chirish"}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1213,18 +1345,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   createBtn: {
-    flexDirection: 'row',
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#00FF66',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-  createBtnText: {
-    color: '#000000',
-    fontSize: 13,
-    fontWeight: '900',
+    justifyContent: 'center',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
+    overflow: 'hidden',
   },
   filterBarContainer: {
     flexDirection: 'row',
@@ -1237,16 +1364,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
     paddingHorizontal: 10,
     paddingVertical: 9,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   filterSelectBtnActive: {
     borderColor: '#00FF66',
-    backgroundColor: '#162232',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(22, 34, 50, 0.75)' : '#162232',
   },
   filterSelectText: {
     color: '#FFFFFF',
@@ -1256,17 +1384,19 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   dropdownMenuCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.75)' : '#1E293B',
     borderRadius: 14,
     padding: 6,
     marginBottom: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
+    overflow: 'hidden',
   },
   dropdownMenuItem: {
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
+    overflow: 'hidden',
   },
   dropdownMenuText: {
     color: '#FFFFFF',
@@ -1285,12 +1415,13 @@ const styles = StyleSheet.create({
   },
   /* Skeleton Loader Styles */
   skeletonCard: {
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
     borderColor: '#242C3D',
     gap: 12,
+    overflow: 'hidden',
   },
   skeletonTopRow: {
     flexDirection: 'row',
@@ -1307,17 +1438,18 @@ const styles = StyleSheet.create({
   },
   /* Match Card Styles */
   matchCard: {
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.75)' : '#151A24',
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#242C3D',
+    borderColor: Platform.OS === 'ios' ? 'rgba(255, 255, 255, 0.1)' : '#242C3D',
     gap: 12,
+    overflow: 'hidden',
   },
   centralMatchCard: {
     borderColor: 'rgba(255, 149, 0, 0.6)',
     borderWidth: 1.5,
-    backgroundColor: '#1A1822',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 24, 20, 0.8)' : '#1A1822',
   },
   postponedMatchCard: {
     opacity: 0.8,
@@ -1327,13 +1459,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 149, 0, 0.15)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255, 149, 0, 0.2)' : 'rgba(255, 149, 0, 0.15)',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 10,
     alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: 'rgba(255, 149, 0, 0.3)',
+    overflow: 'hidden',
   },
   centralHeaderTitle: {
     color: '#FF9500',
@@ -1364,10 +1497,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.06)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
+    overflow: 'hidden',
   },
   fieldTagText: {
     color: 'rgba(255,255,255,0.7)',
@@ -1403,10 +1537,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   scoreBadge: {
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 12,
+    overflow: 'hidden',
   },
   scoreText: {
     color: '#000000',
@@ -1414,12 +1549,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   vsBadge: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.08)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
   },
   vsText: {
     color: '#FFFFFF',
@@ -1435,12 +1571,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.15)',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
+    overflow: 'hidden',
   },
   liveTimerSubText: {
     color: '#FF4D4D',
@@ -1452,9 +1589,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.04)',
     paddingVertical: 7,
     borderRadius: 10,
+    overflow: 'hidden',
   },
   countdownText: {
     fontSize: 11.5,
@@ -1494,19 +1632,21 @@ const styles = StyleSheet.create({
   },
   swipeEditBtnStacked: {
     flex: 1,
-    backgroundColor: '#3B82F6',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(59, 130, 246, 0.85)' : '#3B82F6',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
+    overflow: 'hidden',
   },
   swipeDeleteBtnStacked: {
     flex: 1,
-    backgroundColor: '#EF4444',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(239, 68, 68, 0.85)' : '#EF4444',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
+    overflow: 'hidden',
   },
   swipeBtnTextStacked: {
     color: '#FFFFFF',
@@ -1522,11 +1662,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   modalCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.75)' : '#1E293B',
     borderRadius: 24,
     padding: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
+    overflow: 'hidden',
   },
   modalHeaderRow: {
     flexDirection: 'row',
@@ -1563,12 +1704,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   chipItemActive: {
-    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.2)' : 'rgba(0, 255, 102, 0.15)',
     borderColor: '#00FF66',
   },
   chipText: {
@@ -1588,12 +1730,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     height: 44,
     borderRadius: 12,
     paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   pickerTriggerText: {
     color: '#FFFFFF',
@@ -1608,13 +1751,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   fieldSelectBtnActive: {
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     borderColor: '#00FF66',
   },
   fieldSelectText: {
@@ -1634,14 +1778,15 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 9,
     borderRadius: 10,
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
   },
   importanceBtnActive: {
     borderColor: '#F59E0B',
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.15)',
   },
   importanceBtnText: {
     color: 'rgba(255,255,255,0.7)',
@@ -1656,12 +1801,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#151A24',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(21, 26, 36, 0.65)' : '#151A24',
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     marginTop: 4,
+    overflow: 'hidden',
   },
   postponedToggleTitle: {
     color: '#FFFFFF',
@@ -1673,11 +1819,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   modalSaveBtn: {
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',
     marginTop: 8,
+    overflow: 'hidden',
   },
   modalSaveBtnText: {
     color: '#000000',
@@ -1694,7 +1841,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   pickerModalCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.75)' : '#1E293B',
     borderRadius: 24,
     padding: 20,
     width: '100%',
@@ -1702,6 +1849,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
+    overflow: 'hidden',
   },
   pickerModalTitle: {
     color: '#FFFFFF',
@@ -1719,8 +1867,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.08)',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   pickerCancelText: {
     color: 'rgba(255,255,255,0.7)',
@@ -1731,8 +1880,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   pickerConfirmText: {
     color: '#000000',
@@ -1751,12 +1901,13 @@ const styles = StyleSheet.create({
   confirmModalCard: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: '#1E293B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.75)' : '#1E293B',
     borderRadius: 20,
     padding: 24,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
+    overflow: 'hidden',
   },
   confirmIconBg: {
     width: 60,
@@ -1792,9 +1943,10 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   cancelConfirmText: {
     fontSize: 14,
@@ -1805,10 +1957,11 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#EF4444',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(239, 68, 68, 0.85)' : '#EF4444',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   deleteConfirmText: {
     fontSize: 14,
@@ -1819,7 +1972,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#00FF66',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 14,
@@ -1828,6 +1981,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+    overflow: 'hidden',
   },
   loadMoreBtnText: {
     color: '#000000',

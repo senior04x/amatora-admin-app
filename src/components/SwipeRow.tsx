@@ -85,12 +85,44 @@ export const SwipeRow: React.FC<Props> = ({
     }
   };
 
+  // Actions slide in smoothly from the right edge with fading opacity & scale
+  const actionsTranslateX = panX.interpolate({
+    inputRange: [-actionWidth, 0],
+    outputRange: [0, actionWidth * 0.8],
+    extrapolate: 'clamp',
+  });
+
+  const actionsOpacity = panX.interpolate({
+    inputRange: [-actionWidth, -15, 0],
+    outputRange: [1, 0.3, 0],
+    extrapolate: 'clamp',
+  });
+
+  const actionsScale = panX.interpolate({
+    inputRange: [-actionWidth, 0],
+    outputRange: [1, 0.85],
+    extrapolate: 'clamp',
+  });
+
   return (
     <View style={styles.container}>
-      {/* Hidden Action Buttons behind */}
-      <View style={[styles.actionsContainer, { width: actionWidth }]}>
+      {/* Action Buttons sliding in from right */}
+      <Animated.View
+        pointerEvents={isOpen ? 'auto' : 'none'}
+        style={[
+          styles.actionsContainer,
+          {
+            width: actionWidth,
+            opacity: actionsOpacity,
+            transform: [
+              { translateX: actionsTranslateX },
+              { scale: actionsScale },
+            ],
+          },
+        ]}
+      >
         {actions}
-      </View>
+      </Animated.View>
 
       {/* Main Foreground Content */}
       <Animated.View
@@ -125,7 +157,7 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   content: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'transparent',
     borderRadius: 18,
     zIndex: 2,
   },

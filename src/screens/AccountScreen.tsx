@@ -13,17 +13,39 @@ import {
   Linking,
   Animated,
   Modal,
+  Platform,
+  AppState,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { ColorPicker } from '@darthrapid/react-native-color-picker';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
+import {
+  getYtTokens,
+  saveYtTokens,
+  fetchYtChannelInfo,
+  getValidAccessToken,
+  disconnectYouTube,
+  loadYtChannelForOrg,
+  YT_SCOPES,
+  YtChannelInfo,
+} from '../utils/youtubeService';
+
+WebBrowser.maybeCompleteAuthSession();
+
+// Google OAuth Client IDs
+const GOOGLE_WEB_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
+const GOOGLE_IOS_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
+const GOOGLE_ANDROID_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
 
 const TextSkeleton: React.FC<{ width?: number | string; height?: number; borderRadius?: number; style?: any }> = ({
   width = 120,
@@ -31,6 +53,7 @@ const TextSkeleton: React.FC<{ width?: number | string; height?: number; borderR
   borderRadius = 6,
   style,
 }) => {
+  const { colors } = useTheme();
   const opacityAnim = React.useRef(new Animated.Value(0.3)).current;
 
   React.useEffect(() => {
@@ -59,7 +82,7 @@ const TextSkeleton: React.FC<{ width?: number | string; height?: number; borderR
           width,
           height,
           borderRadius,
-          backgroundColor: 'rgba(255, 255, 255, 0.22)',
+          backgroundColor: Platform.OS === 'android' ? colors.bgCardElevated : 'rgba(255, 255, 255, 0.22)',
           opacity: opacityAnim,
         },
         style,
@@ -77,6 +100,7 @@ export const AccountScreen: React.FC<{
   onNavigateToOrganizers,
   onLogout,
 }) => {
+  const { isDark, colors, themeMode, setThemeMode } = useTheme();
   const {
     orgId,
     currentOrg,
@@ -96,6 +120,151 @@ export const AccountScreen: React.FC<{
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+
+  // YouTube state
+  const [ytChannelInfo, setYtChannelInfo] = useState<YtChannelInfo | null>(null);
+  const [ytLoading, setYtLoading] = useState(false);
+  const [ytConnecting, setYtConnecting] = useState(false);
+
+  // Google Auth Request (handles iOS/Android redirect URIs automatically)
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+    iosClientId: GOOGLE_IOS_CLIENT_ID,
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    scopes: YT_SCOPES,
+    shouldAutoExchangeCode: false,
+    extraParams: {
+      access_type: 'offline',
+      prompt: 'consent select_account',
+    },
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success' && response.params?.code) {
+      handleCodeExchange(response.params.code);
+    } else if (response?.type === 'error') {
+      console.error('YouTube OAuth error:', response.error);
+      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
+      setYtConnecting(false);
+    } else if (response?.type === 'dismiss' || response?.type === 'cancel') {
+      setYtConnecting(false);
+    }
+  }, [response]);
+
+  const handleCodeExchange = async (code: string) => {
+    setYtConnecting(true);
+    try {
+      const tokenRequestBody: Record<string, string> = {
+        code,
+        client_id: GOOGLE_IOS_CLIENT_ID,
+        redirect_uri: request?.redirectUri || '',
+        grant_type: 'authorization_code',
+      };
+
+      if (request?.codeVerifier) {
+        tokenRequestBody.code_verifier = request.codeVerifier;
+      }
+
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(tokenRequestBody).toString(),
+      });
+
+      const tokenData = await tokenResponse.json();
+
+      if (tokenData.access_token) {
+        const channelInfo = await fetchYtChannelInfo(tokenData.access_token);
+        await saveYtTokens(orgId || 1, tokenData, channelInfo);
+        setYtChannelInfo(channelInfo);
+        showToast({
+          message: channelInfo
+            ? `YouTube ulandi: ${channelInfo.title}`
+            : 'YouTube muvaffaqiyatli ulandi!',
+          type: 'success',
+        });
+      } else {
+        console.error('YouTube token exchange failed:', tokenData);
+        Alert.alert('Xatolik', `YouTube token olishda xatolik: ${tokenData?.error || 'noma\'lum'}`);
+      }
+    } catch (err) {
+      console.error('Error exchanging YouTube code:', err);
+      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
+    } finally {
+      setYtConnecting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (orgId && userRole !== 'user') {
+      loadYouTubeStatus();
+    }
+  }, [orgId, userRole]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && orgId && userRole !== 'user') {
+        loadYouTubeStatus();
+      }
+    });
+    return () => subscription.remove();
+  }, [orgId, userRole]);
+
+  const loadYouTubeStatus = async () => {
+    setYtLoading(true);
+    try {
+      const channelInfo = await loadYtChannelForOrg(orgId || 1);
+      setYtChannelInfo(channelInfo);
+    } catch (e) {
+      console.error('Load YT status error:', e);
+      setYtChannelInfo(null);
+    } finally {
+      setYtLoading(false);
+    }
+  };
+
+  const handleConnectYouTube = async () => {
+    if (!request) {
+      Alert.alert('Kutib turing', 'OAuth tayyorlanmoqda, bir necha soniya kutib qayta urinib ko\'ring.');
+      return;
+    }
+
+    setYtConnecting(true);
+    try {
+      await promptAsync();
+    } catch (err) {
+      console.error('YouTube connect error:', err);
+      setYtConnecting(false);
+      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
+    }
+  };
+
+  const handleDisconnectYouTube = () => {
+    Alert.alert(
+      'YouTube uzish',
+      `"${ytChannelInfo?.title || 'YouTube'}" kanalini uzmoqchimisiz?`,
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: 'Uzish',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await disconnectYouTube(orgId || 1);
+              setYtChannelInfo(null);
+              showToast({
+                message: 'YouTube kanal uzildi',
+                type: 'warning',
+              });
+            } catch (e) {
+              console.error('Disconnect error:', e);
+              Alert.alert('Xatolik', 'YouTube uzishda xatolik yuz berdi.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // Organizers (User Role) Management State
   const [showOrganizersModal, setShowOrganizersModal] = useState(false);
@@ -561,19 +730,19 @@ export const AccountScreen: React.FC<{
 
   return (
     <ScrollView
-      style={styles.container}
+      style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{"Admin Akkounti"}</Text>
-        <Text style={styles.headerSub}>{"Tashkilot va Admin profil boshqaruvi"}</Text>
+        <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Admin Akkounti"}</Text>
+        <Text style={[styles.headerSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tashkilot va Admin profil boshqaruvi"}</Text>
       </View>
 
       {/* Organization Profile Card */}
-      <View style={styles.profileCard}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+      <View style={[styles.profileCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
         <View style={styles.profileHeaderRow}>
           <TouchableOpacity
             style={styles.logoWrapper}
@@ -582,7 +751,7 @@ export const AccountScreen: React.FC<{
             disabled={isUploadingLogo}
           >
             {isUploadingLogo ? (
-              <ActivityIndicator size="small" color="#00FF87" />
+              <ActivityIndicator size="small" color={colors.accentGreen} />
             ) : (
               <>
                 <Image
@@ -592,10 +761,10 @@ export const AccountScreen: React.FC<{
                         ? (currentUser?.avatar_url || userAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop')
                         : (currentOrg?.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=120&auto=format&fit=crop'),
                   }}
-                  style={styles.orgLogo}
+                  style={[styles.orgLogo, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 />
-                <View style={styles.logoEditBadge}>
-                  <Ionicons name="camera" size={12} color="#000000" />
+                <View style={[styles.logoEditBadge, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}>
+                  <Ionicons name="camera" size={12} color="#FFFFFF" />
                 </View>
               </>
             )}
@@ -609,17 +778,29 @@ export const AccountScreen: React.FC<{
               </View>
             ) : (
               <>
-                <Text style={styles.orgName}>{userRole === 'user' ? (editName || 'Organizator') : currentOrg.name}</Text>
+                <Text style={[styles.orgName, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                  {userRole === 'user' ? (editName || 'Organizator') : currentOrg.name}
+                </Text>
                 <View style={styles.badgeRow}>
-                  <View style={[styles.roleBadge, userRole === 'user' && { backgroundColor: 'rgba(56, 189, 248, 0.25)', borderColor: 'rgba(56, 189, 248, 0.4)' }]}>
-                    <Ionicons name={userRole === 'user' ? "person-circle" : "shield-checkmark"} size={12} color={userRole === 'user' ? "#38BDF8" : "#FFFFFF"} />
-                    <Text style={[styles.roleBadgeText, userRole === 'user' && { color: '#38BDF8' }]}>
+                  <View style={[
+                    styles.roleBadge,
+                    Platform.OS === 'android' && {
+                      backgroundColor: userRole === 'user' ? (isDark ? 'rgba(56, 189, 248, 0.25)' : '#E0F2FE') : (isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5'),
+                      borderColor: userRole === 'user' ? '#38BDF8' : colors.accentGreen,
+                    }
+                  ]}>
+                    <Ionicons
+                      name={userRole === 'user' ? "person-circle" : "shield-checkmark"}
+                      size={12}
+                      color={userRole === 'user' ? "#38BDF8" : (Platform.OS === 'android' ? colors.accentGreen : "#FFFFFF")}
+                    />
+                    <Text style={[
+                      styles.roleBadgeText,
+                      Platform.OS === 'android' && { color: userRole === 'user' ? '#0284C7' : colors.accentGreen }
+                    ]}>
                       {userRole === 'user' ? "ORGANIZATOR" : "BOSH ADMIN"}
                     </Text>
                   </View>
-                  {userRole !== 'user' && (
-                    <Text style={styles.orgIdText}>{`Tashkilot: ${currentOrg?.name || 'Amatora'}`}</Text>
-                  )}
                 </View>
               </>
             )}
@@ -628,23 +809,23 @@ export const AccountScreen: React.FC<{
 
         {userRole !== 'user' && (
           <>
-            <View style={styles.divider} />
+            <View style={[styles.divider, Platform.OS === 'android' && { backgroundColor: colors.border }]} />
 
             {/* Quick Toggles Section */}
-            <Text style={styles.sectionTitle}>{"Tizim Kalit Sozlamalari"}</Text>
+            <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Tizim Kalit Sozlamalari"}</Text>
 
             {/* 1. Registration Switch */}
-            <View style={styles.toggleRow}>
+            <View style={[styles.toggleRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
               <View style={styles.toggleLabelGroup}>
                 <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
                   <Ionicons name="person-add" size={18} color="#38BDF8" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.toggleTitle}>{"Ro'yxatdan O'tish Holati"}</Text>
+                  <Text style={[styles.toggleTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ro'yxatdan O'tish Holati"}</Text>
                   <Text
                     style={[
                       styles.toggleSub,
-                      { color: isRegistrationOpen ? '#00FF87' : '#EF4444' },
+                      { color: isRegistrationOpen ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF87') : '#EF4444' },
                     ]}
                   >
                     {isRegistrationOpen ? "OCHIQ (Arizalar qabul qilinmoqda)" : "YOPILGAN (Qabul to'xtatilgan)"}
@@ -654,23 +835,23 @@ export const AccountScreen: React.FC<{
               <Switch
                 value={isRegistrationOpen}
                 onValueChange={handleRegistrationToggle}
-                trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(56, 189, 248, 0.4)' }}
-                thumbColor={isRegistrationOpen ? '#38BDF8' : '#94A3B8'}
+                trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: colors.accentGreen }}
+                thumbColor={isRegistrationOpen ? '#FFFFFF' : '#94A3B8'}
               />
             </View>
 
             {/* 2. Transfer Window Switch */}
-            <View style={styles.toggleRow}>
+            <View style={[styles.toggleRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
               <View style={styles.toggleLabelGroup}>
                 <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
                   <Ionicons name="swap-horizontal" size={18} color="#F59E0B" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.toggleTitle}>{"Transfer Oynasi Holati"}</Text>
+                  <Text style={[styles.toggleTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Transfer Oynasi Holati"}</Text>
                   <Text
                     style={[
                       styles.toggleSub,
-                      { color: transferWindowOpen ? '#00FF87' : '#EF4444' },
+                      { color: transferWindowOpen ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF87') : '#EF4444' },
                     ]}
                   >
                     {transferWindowOpen ? "OCHIQ (O'yinchilar ko'chishi mumkin)" : "YOPILGAN (O'yinchilar ko'chishi to'xtatilgan)"}
@@ -680,13 +861,13 @@ export const AccountScreen: React.FC<{
               <Switch
                 value={transferWindowOpen}
                 onValueChange={handleTransferToggle}
-                trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(245, 158, 11, 0.4)' }}
-                thumbColor={transferWindowOpen ? '#F59E0B' : '#94A3B8'}
+                trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: '#F59E0B' }}
+                thumbColor={transferWindowOpen ? '#FFFFFF' : '#94A3B8'}
               />
             </View>
 
             {/* Registration Website Link Card */}
-            <View style={styles.toggleRow}>
+            <View style={[styles.toggleRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
               <TouchableOpacity
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
                 activeOpacity={0.8}
@@ -697,26 +878,28 @@ export const AccountScreen: React.FC<{
                   });
                 }}
               >
-                <View style={[styles.toggleIconBox, { backgroundColor: 'rgba(0, 255, 135, 0.15)' }]}>
-                  <Ionicons name="globe-outline" size={18} color="#00FF87" />
+                <View style={[styles.toggleIconBox, { backgroundColor: isDark ? 'rgba(0, 255, 135, 0.15)' : '#ECFDF5' }]}>
+                  <Ionicons name="globe-outline" size={18} color={colors.accentGreen} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.toggleTitle}>{"Ro'yxatdan o'tkazish sayti"}</Text>
-                  <Text style={[styles.toggleSub, { color: '#00FF87', textDecorationLine: 'underline' }]} numberOfLines={1}>
+                  <Text style={[styles.toggleTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ro'yxatdan o'tkazish sayti"}</Text>
+                  <Text style={[styles.toggleSub, { color: colors.accentGreen, textDecorationLine: 'underline' }]} numberOfLines={1}>
                     {`https://amatora.uz/${currentOrg?.slug || 'hfl'}`}
                   </Text>
                 </View>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  borderRadius: 10,
-                  backgroundColor: 'rgba(0, 255, 135, 0.15)',
-                  borderWidth: 1,
-                  borderColor: 'rgba(0, 255, 135, 0.3)',
-                }}
+                style={[
+                  {
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 10,
+                    backgroundColor: isDark ? 'rgba(0, 255, 135, 0.15)' : '#ECFDF5',
+                    borderWidth: 1,
+                    borderColor: colors.accentGreen,
+                  },
+                ]}
                 activeOpacity={0.7}
                 onPress={() => {
                   const url = `https://amatora.uz/${currentOrg?.slug || 'hfl'}`;
@@ -726,7 +909,7 @@ export const AccountScreen: React.FC<{
                   );
                 }}
               >
-                <Ionicons name="copy-outline" size={16} color="#00FF87" />
+                <Ionicons name="copy-outline" size={16} color={colors.accentGreen} />
               </TouchableOpacity>
             </View>
           </>
@@ -734,47 +917,49 @@ export const AccountScreen: React.FC<{
       </View>
 
       {/* Account & Organization Details with 1-to-1 SuperAdmin Inline Editing */}
-      <View style={styles.sectionCard}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+      <View style={[styles.sectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
         <View style={styles.sectionHeaderRow}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.sectionTitle}>
-                  {userRole === 'user' ? "Mening Akkount Ma'lumotlarim" : "Tashkilot & Admin Ma'lumotlari"}
-                </Text>
-                <TouchableOpacity
-                  style={styles.inlineEditIconBtn}
-                  activeOpacity={0.8}
-                  onPress={() => setIsEditingInfo(!isEditingInfo)}
-                >
-                  <Ionicons name={isEditingInfo ? "close-circle" : "create-outline"} size={18} color="#00FF87" />
-                </TouchableOpacity>
-              </View>
-            </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+              {userRole === 'user' ? "Mening Akkount Ma'lumotlarim" : "Tashkilot & Admin Ma'lumotlari"}
+            </Text>
+            <TouchableOpacity
+              style={styles.inlineEditIconBtn}
+              activeOpacity={0.8}
+              onPress={() => setIsEditingInfo(!isEditingInfo)}
+            >
+              <Ionicons name={isEditingInfo ? "close-circle" : "create-outline"} size={18} color={colors.accentGreen} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {isEditingInfo ? (
           <View style={styles.inlineFormContainer}>
             {/* 1. Name Input */}
             <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{userRole === 'user' ? "ISMI VA FAMILIYASI *" : "TASHKILOT NOMI *"}</Text>
+              <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                {userRole === 'user' ? "ISMI VA FAMILIYASI *" : "TASHKILOT NOMI *"}
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                 value={editName}
                 onChangeText={setEditName}
                 placeholder="Ism Familiyani kiriting..."
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.textMuted}
               />
             </View>
 
             {/* 2. Slug Input (Admin Only) */}
             {userRole !== 'user' && (
               <View style={styles.inlineInputGroup}>
-                <Text style={styles.inlineInputLabel}>{"IDENTIFIKATOR / SLUG *"}</Text>
+                <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"IDENTIFIKATOR / SLUG *"}</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                   value={editSlug}
                   onChangeText={setEditSlug}
                   placeholder="tashkilot-slug"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   autoCapitalize="none"
                 />
               </View>
@@ -782,13 +967,15 @@ export const AccountScreen: React.FC<{
 
             {/* 3. Email Input */}
             <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{userRole === 'user' ? "LOGIN EMAIL *" : "ADMIN EMAIL MANZILI *"}</Text>
+              <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                {userRole === 'user' ? "LOGIN EMAIL *" : "ADMIN EMAIL MANZILI *"}
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                 value={editEmail}
                 onChangeText={setEditEmail}
                 placeholder="email@domain.com"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.textMuted}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
@@ -796,14 +983,16 @@ export const AccountScreen: React.FC<{
 
             {/* 4. Password Input with Eye Toggle */}
             <View style={styles.inlineInputGroup}>
-              <Text style={styles.inlineInputLabel}>{userRole === 'user' ? "KIRISH PAROLI *" : "ADMIN PAROLI *"}</Text>
-              <View style={styles.passwordInputWrapper}>
+              <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                {userRole === 'user' ? "KIRISH PAROLI *" : "ADMIN PAROLI *"}
+              </Text>
+              <View style={[styles.passwordInputWrapper, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
                 <TextInput
-                  style={[styles.textInput, { flex: 1, borderWidth: 0 }]}
+                  style={[styles.textInput, { flex: 1, borderWidth: 0, backgroundColor: 'transparent' }, Platform.OS === 'android' && { color: colors.textPrimary }]}
                   value={editPassword}
                   onChangeText={setEditPassword}
                   placeholder="Yangi parol..."
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                 />
@@ -811,7 +1000,7 @@ export const AccountScreen: React.FC<{
                   style={styles.eyeBtn}
                   onPress={() => setShowPassword(!showPassword)}
                 >
-                  <Ionicons name={showPassword ? "eye-off" : "eye"} size={18} color="#94A3B8" />
+                  <Ionicons name={showPassword ? "eye-off" : "eye"} size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -819,20 +1008,20 @@ export const AccountScreen: React.FC<{
             {/* 5. Contact Phone Input (Admin Only) */}
             {userRole !== 'user' && (
               <View style={styles.inlineInputGroup}>
-                <Text style={styles.inlineInputLabel}>{"BOG'LANISH TELEFONI *"}</Text>
-                <View style={styles.phoneInputWrapper}>
-                  <View style={styles.phonePrefixBox}>
-                    <Text style={styles.phonePrefixText}>{'+998'}</Text>
+                <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"BOG'LANISH TELEFONI *"}</Text>
+                <View style={[styles.phoneInputWrapper, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                  <View style={[styles.phonePrefixBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(0, 255, 135, 0.12)' : '#ECFDF5', borderRightColor: colors.border }]}>
+                    <Text style={[styles.phonePrefixText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{'+998'}</Text>
                   </View>
                   <TextInput
-                    style={styles.phoneInput}
+                    style={[styles.phoneInput, Platform.OS === 'android' && { color: colors.textPrimary }]}
                     value={editPhoneSuffix}
                     onChangeText={(v) => {
                       const digits = v.replace(/[^0-9 ]/g, '');
                       setEditPhoneSuffix(digits);
                     }}
                     placeholder="90 123 45 67"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="number-pad"
                     maxLength={12}
                   />
@@ -843,7 +1032,7 @@ export const AccountScreen: React.FC<{
             {/* 6. Brand Colors List (Admin Only) */}
             {userRole !== 'user' && (
               <View style={styles.inlineInputGroup}>
-                <Text style={styles.inlineInputLabel}>{"TASHKILOT RANGLARI *"}</Text>
+                <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"TASHKILOT RANGLARI *"}</Text>
                 <View style={styles.brandColorsList}>
                   {editBrandColors.map((colorHex, idx) => (
                     <View key={idx} style={styles.colorEditRow}>
@@ -853,11 +1042,11 @@ export const AccountScreen: React.FC<{
                         tabs={['picker', 'palettes']}
                       />
                       <TextInput
-                        style={styles.colorHexInput}
+                        style={[styles.colorHexInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                         value={colorHex}
                         onChangeText={(val) => handleUpdateBrandColor(idx, val)}
                         placeholder="#HEX"
-                        placeholderTextColor="#64748B"
+                        placeholderTextColor={colors.textMuted}
                         autoCapitalize="characters"
                         maxLength={7}
                       />
@@ -871,31 +1060,118 @@ export const AccountScreen: React.FC<{
                       )}
                     </View>
                   ))}
+
+                  {/* Add Brand Color Button */}
+                  <TouchableOpacity
+                    style={[styles.addColorBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(0, 255, 135, 0.1)' : '#ECFDF5', borderColor: colors.accentGreen, borderWidth: 1 }]}
+                    onPress={handleAddBrandColor}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="add-circle-outline" size={16} color={colors.accentGreen} />
+                    <Text style={[styles.addColorBtnText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{"Rang qo'shish"}</Text>
+                  </TouchableOpacity>
+
+                  {/* Live Gradient Preview */}
+                  {editBrandColors.length > 0 && (
+                    <LinearGradient
+                      colors={
+                        editBrandColors.length === 1
+                          ? [editBrandColors[0], editBrandColors[0]]
+                          : (editBrandColors as [string, string, ...string[]])
+                      }
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.gradientPreview}
+                    />
+                  )}
                 </View>
+              </View>
+            )}
+
+            {/* 7. YouTube Integration (Admin Only) */}
+            {userRole !== 'user' && (
+              <View style={styles.inlineInputGroup}>
+                <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"YOUTUBE KANALI"}</Text>
+                {ytLoading ? (
+                  <View style={[styles.ytBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
+                    <ActivityIndicator size="small" color="#FF0000" />
+                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>{"YouTube holati tekshirilmoqda..."}</Text>
+                  </View>
+                ) : ytChannelInfo ? (
+                  <View style={[styles.ytBox, { borderColor: 'rgba(0, 255, 102, 0.3)' }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.accentGreen }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      {ytChannelInfo.thumbnail ? (
+                        <Image source={{ uri: ytChannelInfo.thumbnail }} style={styles.ytAvatar} />
+                      ) : (
+                        <View style={[styles.ytIconBox, { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5' }]}>
+                          <Ionicons name="checkmark-circle" size={20} color={colors.accentGreen} />
+                        </View>
+                      )}
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.ytTitle, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
+                          {ytChannelInfo.title}
+                        </Text>
+                        <Text style={[styles.ytSub, { color: colors.accentGreen }]}>
+                          {"YouTube kanal ulangan ✓"}
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.ytDisconnectBtn}
+                      activeOpacity={0.7}
+                      onPress={handleDisconnectYouTube}
+                    >
+                      <Ionicons name="close-circle" size={16} color="#EF4444" />
+                      <Text style={styles.ytDisconnectText}>{"Uzish"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.ytBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+                    activeOpacity={0.7}
+                    onPress={handleConnectYouTube}
+                    disabled={ytConnecting}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={[styles.ytIconBox, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
+                        <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.ytTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"YouTube Kanal Ulash"}</Text>
+                        <Text style={[styles.ytSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Translyatsiya boshqaruvi uchun"}</Text>
+                      </View>
+                    </View>
+                    {ytConnecting ? (
+                      <ActivityIndicator size="small" color="#FF0000" />
+                    ) : (
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 
             {/* Save & Cancel Buttons */}
             <View style={styles.inlineActionRow}>
               <TouchableOpacity
-                style={styles.inlineCancelBtn}
+                style={[styles.inlineCancelBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
                 activeOpacity={0.8}
                 onPress={() => setIsEditingInfo(false)}
                 disabled={isSavingInfo}
               >
-                <Text style={styles.inlineCancelText}>{"Bekor qilish"}</Text>
+                <Text style={[styles.inlineCancelText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.inlineSaveBtn, isSavingInfo && { opacity: 0.6 }]}
+                style={[styles.inlineSaveBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }, isSavingInfo && { opacity: 0.6 }]}
                 activeOpacity={0.8}
                 onPress={handleSaveAdminInfo}
                 disabled={isSavingInfo}
               >
                 {isSavingInfo ? (
-                  <ActivityIndicator size="small" color="#000000" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.inlineSaveText}>{"Saqlash"}</Text>
+                  <Text style={[styles.inlineSaveText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"Saqlash"}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -904,58 +1180,58 @@ export const AccountScreen: React.FC<{
           <>
             {userRole === 'user' ? (
               <>
-                <View style={styles.infoRow}>
-                  <Ionicons name="person-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Ismi va Familiyasi:"}</Text>
-                  <Text style={styles.infoValue}>{editName || 'Organizator'}</Text>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="person-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Ismi va Familiyasi:"}</Text>
+                  <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>{editName || 'Organizator'}</Text>
                 </View>
 
-                <View style={styles.infoRow}>
-                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Login Email:"}</Text>
-                  <Text style={styles.infoValue}>{editEmail || '—'}</Text>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="mail-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Login Email:"}</Text>
+                  <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>{editEmail || '—'}</Text>
                 </View>
 
-                <View style={styles.infoRow}>
-                  <Ionicons name="key-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Parol:"}</Text>
-                  <Text style={styles.infoValue}>{"••••••••"}</Text>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="key-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Parol:"}</Text>
+                  <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"••••••••"}</Text>
                 </View>
               </>
             ) : (
               <>
-                <View style={styles.infoRow}>
-                  <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Tashkilot:"}</Text>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="business-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tashkilot:"}</Text>
                   {loading || (!currentOrg?.name && !editName) ? (
                     <TextSkeleton width={140} height={14} borderRadius={4} />
                   ) : (
-                    <Text style={styles.infoValue}>{currentOrg?.name || editName}</Text>
+                    <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>{currentOrg?.name || editName}</Text>
                   )}
                 </View>
 
-                <View style={styles.infoRow}>
-                  <Ionicons name="link-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Identifikator:"}</Text>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="link-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Identifikator:"}</Text>
                   {loading || (!currentOrg?.slug && !editSlug) ? (
                     <TextSkeleton width={80} height={14} borderRadius={4} />
                   ) : (
-                    <Text style={styles.infoValue}>{currentOrg?.slug || editSlug}</Text>
+                    <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>{currentOrg?.slug || editSlug}</Text>
                   )}
                 </View>
 
-                <View style={styles.infoRow}>
-                  <Ionicons name="mail-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Email:"}</Text>
-                  <Text style={styles.infoValue}>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="mail-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Email:"}</Text>
+                  <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                     {editEmail || currentOrg?.admin_email || currentOrg?.email || '—'}
                   </Text>
                 </View>
 
-                <View style={styles.infoRow}>
-                  <Ionicons name="call-outline" size={16} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.infoLabel}>{"Telefon:"}</Text>
-                  <Text style={styles.infoValue}>
+                <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                  <Ionicons name="call-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Telefon:"}</Text>
+                  <Text style={[styles.infoValue, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                     {(() => {
                       const ph = currentOrg?.contact_phone || currentOrg?.phone || '';
                       if (ph) return ph;
@@ -964,21 +1240,29 @@ export const AccountScreen: React.FC<{
                     })()}
                   </Text>
                 </View>
+
+                {ytChannelInfo && (
+                  <View style={[styles.infoRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>
+                    <Ionicons name="logo-youtube" size={16} color="#FF0000" />
+                    <Text style={[styles.infoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"YouTube:"}</Text>
+                    <Text style={[styles.infoValue, { color: colors.accentGreen }]} numberOfLines={1}>
+                      {ytChannelInfo.title}
+                    </Text>
+                  </View>
+                )}
               </>
             )}
           </>
         )}
       </View>
 
-      <View style={{ height: 20 }} />
-
       {/* Navigation Quick Links */}
-      <View style={styles.sectionCard}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-        <Text style={styles.sectionTitle}>{"Boshqaruv Menyu"}</Text>
+      <View style={[styles.sectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+        <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Boshqaruv Menyu"}</Text>
 
         <TouchableOpacity
-          style={styles.menuLinkRow}
+          style={[styles.menuLinkRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
           activeOpacity={0.8}
           onPress={() => {
             if (onNavigateToSettings) {
@@ -986,20 +1270,20 @@ export const AccountScreen: React.FC<{
             }
           }}
         >
-          <View style={styles.menuIconBox}>
-            <Ionicons name="settings-sharp" size={18} color="#FFFFFF" />
+          <View style={[styles.menuIconBox, { backgroundColor: isDark ? 'rgba(0, 255, 135, 0.12)' : '#ECFDF5' }]}>
+            <Ionicons name="settings-sharp" size={18} color={colors.accentGreen} />
           </View>
 
           <View style={{ flex: 1 }}>
-            <Text style={styles.menuLinkText}>{"Tizim Sozlamalari va Konfiguratsiya"}</Text>
-            <Text style={styles.menuLinkSub}>{"Mobil ilova, biometriya va xavfsizlik sozlamalari"}</Text>
+            <Text style={[styles.menuLinkText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Tizim Sozlamalari va Konfiguratsiya"}</Text>
+            <Text style={[styles.menuLinkSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Mobil ilova, biometriya va xavfsizlik sozlamalari"}</Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
 
         {userRole !== 'user' && (
           <TouchableOpacity
-            style={styles.menuLinkRow}
+            style={[styles.menuLinkRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
             activeOpacity={0.8}
             onPress={() => {
               if (onNavigateToOrganizers) {
@@ -1012,34 +1296,34 @@ export const AccountScreen: React.FC<{
             </View>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuLinkText}>{"Organizatorlar (Userlar)"}</Text>
-              <Text style={styles.menuLinkSub}>{"Tashkilot xodimlariga kirish huquqlarini berish va boshqarish"}</Text>
+              <Text style={[styles.menuLinkText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Organizatorlar (Userlar)"}</Text>
+              <Text style={[styles.menuLinkSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tashkilot xodimlariga kirish huquqlarini berish va boshqarish"}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </TouchableOpacity>
         )}
 
         <TouchableOpacity
-          style={styles.logoutBtn}
+          style={[styles.logoutBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2', borderColor: '#EF4444' }]}
           activeOpacity={0.8}
           onPress={handleLogout}
         >
-          <Ionicons name="log-out-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.logoutBtnText}>{"Tizimdan Chiqish"}</Text>
+          <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+          <Text style={[styles.logoutBtnText, Platform.OS === 'android' && { color: '#EF4444' }]}>{"Tizimdan Chiqish"}</Text>
         </TouchableOpacity>
       </View>
 
       {/* Sleek single-row Organization Info Badge at the VERY BOTTOM for Regular User */}
       {userRole === 'user' && currentOrg && (
-        <View style={styles.userOrgBottomCard}>
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        <View style={[styles.userOrgBottomCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
           <Image
             source={{ uri: currentOrg.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop' }}
-            style={styles.userOrgBottomLogo}
+            style={[styles.userOrgBottomLogo, { backgroundColor: colors.bgCardElevated }]}
           />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.userOrgBottomLabel}>{"Biriktirilgan Tashkilot"}</Text>
-            <Text style={styles.userOrgBottomName}>{currentOrg.name || 'Amatora'}</Text>
+            <Text style={[styles.userOrgBottomLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Biriktirilgan Tashkilot"}</Text>
+            <Text style={[styles.userOrgBottomName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{currentOrg.name || 'Amatora'}</Text>
           </View>
           <View style={styles.userOrgStatusPill}>
             <View style={styles.greenDot} />
@@ -1056,18 +1340,18 @@ export const AccountScreen: React.FC<{
         onRequestClose={() => setShowOrganizersModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} />}
 
-          <View style={[styles.glassModalCard, { maxWidth: 380, maxHeight: '85%', padding: 20 }]}>
-            <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={[styles.glassModalCard, { maxWidth: 380, maxHeight: '85%', padding: 20 }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 16 }}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.glassModalTitle, { marginBottom: 2, textAlign: 'left' }]}>{"Organizatorlar Bilan Ishlash"}</Text>
-                <Text style={{ color: '#94A3B8', fontSize: 12 }}>{`Tashkilot ID: #${currentOrg?.id || orgId}`}</Text>
+                <Text style={[styles.glassModalTitle, { marginBottom: 2, textAlign: 'left' }, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Organizatorlar Bilan Ishlash"}</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>{`Tashkilot ID: #${currentOrg?.id || orgId}`}</Text>
               </View>
               <TouchableOpacity onPress={() => setShowOrganizersModal(false)} style={{ padding: 4 }}>
-                <Ionicons name="close-circle" size={26} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close-circle" size={26} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -1078,7 +1362,7 @@ export const AccountScreen: React.FC<{
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 8,
-                  backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                  backgroundColor: isDark ? 'rgba(56, 189, 248, 0.2)' : '#E0F2FE',
                   borderColor: '#38BDF8',
                   borderWidth: 1,
                   borderRadius: 14,
@@ -1090,24 +1374,24 @@ export const AccountScreen: React.FC<{
                 onPress={() => setShowAddOrganizerForm(true)}
               >
                 <Ionicons name="person-add" size={18} color="#38BDF8" />
-                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>{"Yangi User (Organizator) Qo'shish"}</Text>
+                <Text style={{ color: Platform.OS === 'android' ? '#0284C7' : '#FFFFFF', fontWeight: '700', fontSize: 14 }}>{"Yangi User (Organizator) Qo'shish"}</Text>
               </TouchableOpacity>
             ) : (
-              <View style={{ width: '100%', backgroundColor: 'rgba(0,0,0,0.3)', padding: 14, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+              <View style={{ width: '100%', backgroundColor: Platform.OS === 'android' ? colors.bgCardElevated : 'rgba(0,0,0,0.3)', padding: 14, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: colors.border }}>
                 <Text style={{ color: '#38BDF8', fontWeight: '700', fontSize: 14, marginBottom: 10 }}>{"Yangi Organizator Kiritish"}</Text>
                 
                 <TextInput
-                  style={styles.inlineInput}
+                  style={[styles.inlineInput, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="F.I.SH (Ism Familiya)"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={newOrgName}
                   onChangeText={setNewOrgName}
                 />
                 
                 <TextInput
-                  style={[styles.inlineInput, { marginTop: 8 }]}
+                  style={[styles.inlineInput, { marginTop: 8 }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="Login Email"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={newOrgEmail}
                   onChangeText={setNewOrgEmail}
                   keyboardType="email-address"
@@ -1115,9 +1399,9 @@ export const AccountScreen: React.FC<{
                 />
 
                 <TextInput
-                  style={[styles.inlineInput, { marginTop: 8 }]}
+                  style={[styles.inlineInput, { marginTop: 8 }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                   placeholder="Parol"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.textMuted}
                   value={newOrgPassword}
                   onChangeText={setNewOrgPassword}
                   secureTextEntry
@@ -1125,10 +1409,10 @@ export const AccountScreen: React.FC<{
 
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
                   <TouchableOpacity
-                    style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center' }}
+                    style={[{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]}
                     onPress={() => setShowAddOrganizerForm(false)}
                   >
-                    <Text style={{ color: '#FFFFFF', fontSize: 13 }}>{"Bekor qilish"}</Text>
+                    <Text style={{ color: Platform.OS === 'android' ? colors.textPrimary : '#FFFFFF', fontSize: 13 }}>{"Bekor qilish"}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -1137,9 +1421,9 @@ export const AccountScreen: React.FC<{
                     disabled={isCreatingOrgUser}
                   >
                     {isCreatingOrgUser ? (
-                      <ActivityIndicator size="small" color="#000000" />
+                      <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <Text style={{ color: '#000000', fontWeight: '700', fontSize: 13 }}>{"Saqlash"}</Text>
+                      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>{"Saqlash"}</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -1151,32 +1435,38 @@ export const AccountScreen: React.FC<{
                 <ActivityIndicator size="small" color="#38BDF8" style={{ marginVertical: 20 }} />
               ) : organizersList.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
-                  <Ionicons name="people-outline" size={40} color="rgba(255,255,255,0.2)" />
-                  <Text style={{ color: '#94A3B8', fontSize: 13, marginTop: 8 }}>{"Hozircha organizatorlar yo'q"}</Text>
+                  <Ionicons name="people-outline" size={40} color={colors.textMuted} />
+                  <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 8 }}>{"Hozircha organizatorlar yo'q"}</Text>
                 </View>
               ) : (
                 organizersList.map((item) => (
                   <View
                     key={item.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: 'rgba(255,255,255,0.06)',
-                      borderRadius: 14,
-                      padding: 12,
-                      marginBottom: 8,
-                      borderWidth: 1,
-                      borderColor: 'rgba(255,255,255,0.1)',
-                    }}
+                    style={[
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        borderRadius: 14,
+                        padding: 12,
+                        marginBottom: 8,
+                        borderWidth: 1,
+                        borderColor: 'rgba(255,255,255,0.1)',
+                      },
+                      Platform.OS === 'android' && {
+                        backgroundColor: colors.bgCardElevated,
+                        borderColor: colors.border,
+                      }
+                    ]}
                   >
                     <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(56, 189, 248, 0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
                       <Ionicons name="person" size={18} color="#38BDF8" />
                     </View>
 
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>{item.full_name || 'Organizator'}</Text>
-                      <Text style={{ color: '#94A3B8', fontSize: 12, marginTop: 2 }}>{item.email}</Text>
-                      <Text style={{ color: '#64748B', fontSize: 11, marginTop: 1 }}>{`Parol: ${item.password}`}</Text>
+                      <Text style={[{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }, Platform.OS === 'android' && { color: colors.textPrimary }]}>{item.full_name || 'Organizator'}</Text>
+                      <Text style={[{ color: '#94A3B8', fontSize: 12, marginTop: 2 }, Platform.OS === 'android' && { color: colors.textMuted }]}>{item.email}</Text>
+                      <Text style={[{ color: '#64748B', fontSize: 11, marginTop: 1 }, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Parol: ${item.password}`}</Text>
                     </View>
 
                     <TouchableOpacity onPress={() => handleDeleteOrganizer(item.id)} style={{ padding: 6 }}>
@@ -1198,28 +1488,28 @@ export const AccountScreen: React.FC<{
         onRequestClose={() => setShowLogoutModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />}
           
-          <View style={styles.glassModalCard}>
-            <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <View style={[styles.glassModalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={85} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             
-            <Text style={styles.glassModalTitle}>{"Akkountdan chiqmoqchimisiz?"}</Text>
+            <Text style={[styles.glassModalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Akkountdan chiqmoqchimisiz?"}</Text>
 
             <View style={styles.glassModalActions}>
               <TouchableOpacity
-                style={styles.glassModalBtnStay}
+                style={[styles.glassModalBtnStay, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 activeOpacity={0.7}
                 onPress={() => setShowLogoutModal(false)}
               >
-                <Text style={styles.glassModalTextStay}>{"Qolish"}</Text>
+                <Text style={[styles.glassModalTextStay, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Qolish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.glassModalBtnLogout}
+                style={[styles.glassModalBtnLogout, Platform.OS === 'android' && { backgroundColor: '#EF4444', borderColor: '#EF4444' }]}
                 activeOpacity={0.7}
                 onPress={confirmLogout}
               >
-                <Text style={styles.glassModalTextLogout}>{"Chiqish"}</Text>
+                <Text style={[styles.glassModalTextLogout, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"Chiqish"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1774,5 +2064,57 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0.5,
+  },
+  // ─── YouTube Styles ──────────────────────────────────────────
+  ytBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+  },
+  ytIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ytAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 255, 102, 0.4)',
+  },
+  ytTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  ytSub: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.5)',
+    marginTop: 2,
+  },
+  ytDisconnectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  ytDisconnectText: {
+    color: '#EF4444',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

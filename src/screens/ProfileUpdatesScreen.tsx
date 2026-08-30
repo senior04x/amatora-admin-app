@@ -16,8 +16,9 @@ import {
   TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 
@@ -54,6 +55,7 @@ const extractMetaFromComment = (comment: string) => {
 
 // Skeleton Item Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
+  const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
@@ -79,7 +81,7 @@ const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
     <Animated.View
       style={[
         {
-          backgroundColor: '#334155',
+          backgroundColor: Platform.OS === 'android' ? colors.bgCardElevated : '#334155',
           borderRadius: 12,
         },
         style,
@@ -96,6 +98,7 @@ const DiffRow: React.FC<{
   newVal: string;
   showOnlyChanged: boolean;
 }> = ({ label, oldVal, newVal, showOnlyChanged }) => {
+  const { isDark, colors } = useTheme();
   const cleanOld = String(oldVal || '').trim();
   const cleanNew = String(newVal || '').trim();
 
@@ -112,9 +115,13 @@ const DiffRow: React.FC<{
     <View
       style={[
         styles.diffRowContainer,
+        Platform.OS === 'android' && {
+          backgroundColor: colors.bgCardElevated,
+          borderColor: colors.border,
+        },
         isChanged && {
-          backgroundColor: 'rgba(0, 255, 102, 0.08)',
-          borderColor: 'rgba(0, 255, 102, 0.3)',
+          backgroundColor: isDark ? 'rgba(0, 255, 102, 0.08)' : '#ECFDF5',
+          borderColor: colors.accentGreen,
         },
       ]}
     >
@@ -122,17 +129,17 @@ const DiffRow: React.FC<{
         <Text
           style={[
             styles.diffRowLabel,
-            { color: isChanged ? '#00FF66' : 'rgba(255,255,255,0.4)' },
+            { color: isChanged ? colors.accentGreen : colors.textMuted },
           ]}
         >
           {label}
         </Text>
         {isChanged ? (
-          <View style={styles.changedBadge}>
-            <Text style={styles.changedBadgeText}>{"O'ZGARGAN"}</Text>
+          <View style={[styles.changedBadge, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#D1FAE5' }]}>
+            <Text style={[styles.changedBadgeText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{"O'ZGARGAN"}</Text>
           </View>
         ) : (
-          <Text style={styles.sameText}>{"Bir xil"}</Text>
+          <Text style={[styles.sameText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Bir xil"}</Text>
         )}
       </View>
 
@@ -140,7 +147,7 @@ const DiffRow: React.FC<{
         <Text
           style={[
             styles.diffOldVal,
-            { color: isChanged ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.5)' },
+            { color: isChanged ? colors.textSecondary : colors.textMuted },
           ]}
           numberOfLines={1}
         >
@@ -150,13 +157,13 @@ const DiffRow: React.FC<{
         <Ionicons
           name="arrow-forward"
           size={14}
-          color={isChanged ? '#00FF66' : 'rgba(255,255,255,0.2)'}
+          color={isChanged ? colors.accentGreen : colors.textMuted}
         />
 
         <Text
           style={[
             styles.diffNewVal,
-            { color: isChanged ? '#00FF66' : 'rgba(255,255,255,0.7)', fontWeight: isChanged ? '900' : '400' },
+            { color: isChanged ? colors.accentGreen : colors.textSecondary, fontWeight: isChanged ? '900' : '400' },
           ]}
           numberOfLines={1}
         >
@@ -201,6 +208,7 @@ const UpdateCardItem: React.FC<{
   onDeletePress,
   onStatusClick,
 }) => {
+  const { isDark, colors } = useTheme();
   const translateY = useRef(new Animated.Value(0)).current;
   const translateX = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -367,6 +375,10 @@ const UpdateCardItem: React.FC<{
       <Animated.View
         style={[
           styles.updateCard,
+          Platform.OS === 'android' && {
+            backgroundColor: colors.bgCard,
+            borderColor: colors.border,
+          },
           { borderColor: `${statusColor}33` },
           {
             transform: [
@@ -379,7 +391,7 @@ const UpdateCardItem: React.FC<{
           },
         ]}
       >
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
 
         {/* Animated Red Overlay Filter for Rejection */}
         <Animated.View
@@ -398,8 +410,8 @@ const UpdateCardItem: React.FC<{
         />
 
         {/* CARD HEADER */}
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardDate}>
+        <View style={[styles.cardHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
+          <Text style={[styles.cardDate, Platform.OS === 'android' && { color: colors.textMuted }]}>
             {new Date(req.created_at).toLocaleString('uz-UZ', {
               day: '2-digit',
               month: '2-digit',
@@ -421,29 +433,29 @@ const UpdateCardItem: React.FC<{
         </View>
 
         {/* PHOTO COMPARISON BOX */}
-        <View style={styles.photoCompareBox}>
+        <View style={[styles.photoCompareBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
           <View style={styles.photoSide}>
             {oldPhoto ? (
-              <Image source={{ uri: oldPhoto }} style={styles.avatarImg} />
+              <Image source={{ uri: oldPhoto }} style={[styles.avatarImg, { backgroundColor: colors.bgCard }]} />
             ) : (
-              <View style={styles.avatarFallback}>
-                <Text style={styles.avatarFallbackText}>{"Yo'q"}</Text>
+              <View style={[styles.avatarFallback, Platform.OS === 'android' && { backgroundColor: colors.bgCard }]}>
+                <Text style={[styles.avatarFallbackText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Yo'q"}</Text>
               </View>
             )}
-            <Text style={styles.photoLabel}>{"ESKI RASM"}</Text>
+            <Text style={[styles.photoLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"ESKI RASM"}</Text>
           </View>
 
-          <Ionicons name="arrow-forward" size={18} color="#00FF66" />
+          <Ionicons name="arrow-forward" size={18} color={colors.accentGreen} />
 
           <View style={styles.photoSide}>
             {newPhoto ? (
-              <Image source={{ uri: newPhoto }} style={[styles.avatarImg, { borderColor: '#00FF66', borderWidth: 2 }]} />
+              <Image source={{ uri: newPhoto }} style={[styles.avatarImg, { borderColor: colors.accentGreen, borderWidth: 2, backgroundColor: colors.bgCard }]} />
             ) : (
-              <View style={[styles.avatarFallback, { backgroundColor: 'rgba(0, 255, 102, 0.1)' }]}>
-                <Text style={[styles.avatarFallbackText, { color: '#00FF66' }]}>{"Bir xil"}</Text>
+              <View style={[styles.avatarFallback, { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.1)' : '#ECFDF5' }]}>
+                <Text style={[styles.avatarFallbackText, { color: colors.accentGreen }]}>{"Bir xil"}</Text>
               </View>
             )}
-            <Text style={[styles.photoLabel, { color: '#00FF66' }]}>{"YANGI RASM"}</Text>
+            <Text style={[styles.photoLabel, { color: colors.accentGreen }]}>{"YANGI RASM"}</Text>
           </View>
         </View>
 
@@ -526,6 +538,7 @@ const UpdateCardItem: React.FC<{
 
 export const ProfileUpdatesScreen: React.FC = () => {
   const { orgId } = useOrg();
+  const { isDark, colors } = useTheme();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>('players');
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -813,21 +826,21 @@ export const ProfileUpdatesScreen: React.FC = () => {
   });
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* FIXED TOP HEADER (Title, status icons, tabs, filters) */}
-      <View style={styles.fixedHeaderContainer}>
-        <BlurView intensity={50} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
+      <View style={[styles.fixedHeaderContainer, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary, borderBottomColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />}
 
         {/* HEADER ROW */}
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.screenTitle}>{"Ma'lumotlar Almashinuvi"}</Text>
-            <Text style={styles.screenSub}>{"O'yinchilar ma'lumotlarini tahrirlash arizalari"}</Text>
+            <Text style={[styles.screenTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ma'lumotlar Almashinuvi"}</Text>
+            <Text style={[styles.screenSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yinchilar ma'lumotlarini tahrirlash arizalari"}</Text>
           </View>
 
           <View style={styles.headerStatusFilterContainer}>
             <TouchableOpacity
-              style={styles.statusFilterIconButton}
+              style={[styles.statusFilterIconButton, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
               onPress={() => setShowApprovedModal(true)}
               activeOpacity={0.7}
             >
@@ -839,7 +852,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.statusFilterIconButton}
+              style={[styles.statusFilterIconButton, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
               onPress={() => setShowRejectedModal(true)}
               activeOpacity={0.7}
             >
@@ -854,35 +867,35 @@ export const ProfileUpdatesScreen: React.FC = () => {
 
         {/* TABS & FILTER BAR */}
         <View style={styles.filterRow}>
-          <View style={[styles.tabContainer, { flex: 1 }]}>
+          <View style={[styles.tabContainer, { flex: 1 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
             <TouchableOpacity
-              style={[styles.tabBtn, activeTab === 'players' && styles.tabBtnActive]}
+              style={[styles.tabBtn, activeTab === 'players' && styles.tabBtnActive, Platform.OS === 'android' && activeTab === 'players' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setActiveTab('players')}
             >
-              <Text style={[styles.tabBtnText, activeTab === 'players' && styles.tabBtnTextActive]}>
+              <Text style={[styles.tabBtnText, activeTab === 'players' && styles.tabBtnTextActive, Platform.OS === 'android' && { color: activeTab === 'players' ? '#FFFFFF' : colors.textMuted }]}>
                 {"O'yinchilar"}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.tabBtn, activeTab === 'teams' && styles.tabBtnActive]}
+              style={[styles.tabBtn, activeTab === 'teams' && styles.tabBtnActive, Platform.OS === 'android' && activeTab === 'teams' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setActiveTab('teams')}
             >
-              <Text style={[styles.tabBtnText, activeTab === 'teams' && styles.tabBtnTextActive]}>
+              <Text style={[styles.tabBtnText, activeTab === 'teams' && styles.tabBtnTextActive, Platform.OS === 'android' && { color: activeTab === 'teams' ? '#FFFFFF' : colors.textMuted }]}>
                 {"Jamoalar"}
               </Text>
             </TouchableOpacity>
           </View>
 
           <TouchableOpacity
-            style={[styles.toggleChangedBtn, showOnlyChanged && styles.toggleChangedBtnActive]}
+            style={[styles.toggleChangedBtn, showOnlyChanged && styles.toggleChangedBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: showOnlyChanged ? colors.accentGreen : colors.border }]}
             onPress={() => setShowOnlyChanged(!showOnlyChanged)}
             activeOpacity={0.8}
           >
-            <View style={[styles.checkbox, showOnlyChanged && styles.checkboxActive]}>
+            <View style={[styles.checkbox, showOnlyChanged && styles.checkboxActive, Platform.OS === 'android' && showOnlyChanged && { backgroundColor: colors.accentGreen }]}>
               {showOnlyChanged && <Ionicons name="checkmark" size={12} color="#000000" />}
             </View>
-            <Text style={[styles.toggleChangedText, showOnlyChanged && { color: '#00FF66' }]}>
+            <Text style={[styles.toggleChangedText, showOnlyChanged && { color: colors.accentGreen }, Platform.OS === 'android' && !showOnlyChanged && { color: colors.textMuted }]}>
               {"Faqat o'zgarganlar"}
             </Text>
           </TouchableOpacity>
@@ -898,8 +911,8 @@ export const ProfileUpdatesScreen: React.FC = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#00FF66"
-            colors={['#00FF66']}
+            tintColor={colors.accentGreen}
+            colors={[colors.accentGreen]}
           />
         }
       >
@@ -907,7 +920,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
         {loading ? (
           <View style={{ gap: 16 }}>
             {[1, 2, 3].map((k) => (
-              <View key={k} style={styles.cardSkeleton}>
+              <View key={k} style={[styles.cardSkeleton, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <SkeletonItem style={{ width: 120, height: 16, borderRadius: 4 }} />
                   <SkeletonItem style={{ width: 90, height: 20, borderRadius: 6 }} />
@@ -921,11 +934,11 @@ export const ProfileUpdatesScreen: React.FC = () => {
             ))}
           </View>
         ) : filteredRequests.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-            <Ionicons name="document-text-outline" size={48} color="rgba(255,255,255,0.2)" />
-            <Text style={styles.emptyTitle}>{"Arizalar topilmadi"}</Text>
-            <Text style={styles.emptyText}>
+          <View style={[styles.emptyCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />}
+            <Ionicons name="document-text-outline" size={48} color={colors.textMuted} />
+            <Text style={[styles.emptyTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Arizalar topilmadi"}</Text>
+            <Text style={[styles.emptyText, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {"Hozircha ma'lumotlarni almashtirish bo'yicha arizalar mavjud emas."}
             </Text>
           </View>
@@ -983,11 +996,11 @@ export const ProfileUpdatesScreen: React.FC = () => {
       {/* STATUS CHANGE TEST MODAL */}
       <Modal visible={!!statusModalItem} transparent animationType="fade" onRequestClose={() => setStatusModalItem(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { maxWidth: 360, padding: 22 }]}>
-            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 6, textAlign: 'center' }}>
+          <View style={[styles.modalCard, { maxWidth: 360, padding: 22 }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Text style={[{ color: '#FFFFFF', fontSize: 16, fontWeight: '900', marginBottom: 6, textAlign: 'center' }, Platform.OS === 'android' && { color: colors.textPrimary }]}>
               {"Arizaning Holatini O'zgartirish"}
             </Text>
-            <Text style={{ color: '#94A3B8', fontSize: 12, marginBottom: 18, textAlign: 'center' }}>
+            <Text style={[{ color: '#94A3B8', fontSize: 12, marginBottom: 18, textAlign: 'center' }, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {"Animatsiyalarni va sahifani qayta-qayta sinash uchun holatni tanlang:"}
             </Text>
 
@@ -1001,11 +1014,11 @@ export const ProfileUpdatesScreen: React.FC = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{ backgroundColor: 'rgba(74, 222, 128, 0.15)', borderWidth: 1, borderColor: '#4ADE80', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
+                style={{ backgroundColor: isDark ? 'rgba(74, 222, 128, 0.15)' : '#ECFDF5', borderWidth: 1, borderColor: '#4ADE80', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
                 onPress={() => handleQuickStatusChange('approved')}
                 disabled={updatingStatus}
               >
-                <Text style={{ color: '#4ADE80', fontWeight: '900', fontSize: 13 }}>{"TASDIQLANGAN (Approved)"}</Text>
+                <Text style={{ color: '#16A34A', fontWeight: '900', fontSize: 13 }}>{"TASDIQLANGAN (Approved)"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1017,10 +1030,10 @@ export const ProfileUpdatesScreen: React.FC = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 }}
+                style={[{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
                 onPress={() => setStatusModalItem(null)}
               >
-                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>{"Bekor qilish"}</Text>
+                <Text style={[{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1030,18 +1043,18 @@ export const ProfileUpdatesScreen: React.FC = () => {
       {/* DELETE CONFIRMATION MODAL */}
       <Modal visible={!!itemToDelete} transparent animationType="fade" onRequestClose={() => setItemToDelete(null)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }]}>
+          <View style={[styles.modalCard, { maxWidth: 400, padding: 22, alignItems: 'center' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={styles.deleteIconBg}>
               <Ionicons name="trash-outline" size={32} color="#EF4444" />
             </View>
-            <Text style={styles.deleteTitle}>{"Arizani O'chirish"}</Text>
-            <Text style={styles.deleteSub}>
+            <Text style={[styles.deleteTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Arizani O'chirish"}</Text>
+            <Text style={[styles.deleteSub, Platform.OS === 'android' && { color: colors.textMuted }]}>
               {"Ushbu ma'lumotlarni almashtirish arizasini rostdan ham o'chirib tashlamoqchimisiz?"}
             </Text>
 
             <View style={{ flexDirection: 'row', gap: 12, width: '100%', marginTop: 20 }}>
-              <TouchableOpacity style={[styles.modalCancelBtn, { flex: 1 }]} onPress={() => setItemToDelete(null)}>
-                <Text style={styles.modalCancelText}>{"Bekor qilish"}</Text>
+              <TouchableOpacity style={[styles.modalCancelBtn, { flex: 1 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]} onPress={() => setItemToDelete(null)}>
+                <Text style={[styles.modalCancelText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1075,56 +1088,56 @@ export const ProfileUpdatesScreen: React.FC = () => {
         presentationStyle="fullScreen"
         onRequestClose={() => setShowApprovedModal(false)}
       >
-        <View style={styles.modalPageContainer}>
+        <View style={[styles.modalPageContainer, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
           {/* HEADER */}
           <View style={styles.modalPageHeader}>
             <TouchableOpacity
-              style={styles.modalPageBackBtn}
+              style={[styles.modalPageBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
               onPress={() => setShowApprovedModal(false)}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+              <Ionicons name="arrow-back" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.modalPageTitle}>{"Qabul Qilingan Arizalar"}</Text>
-              <Text style={styles.modalPageSub}>{"Tasdiqlangan va o'zgartirilgan profil arizalari ruyxati"}</Text>
+              <Text style={[styles.modalPageTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Qabul Qilingan Arizalar"}</Text>
+              <Text style={[styles.modalPageSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tasdiqlangan va o'zgartirilgan profil arizalari ruyxati"}</Text>
             </View>
           </View>
 
           {/* SEARCH BAR */}
-          <View style={styles.modalSearchBox}>
-            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+          <View style={[styles.modalSearchBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
             <TextInput
-              style={styles.modalSearchInput}
+              style={[styles.modalSearchInput, Platform.OS === 'android' && { color: colors.textPrimary }]}
               placeholder="F.I.SH yoki Ism bo'yicha qidiruv..."
-              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
               value={approvedSearchQuery}
               onChangeText={setApprovedSearchQuery}
             />
             {approvedSearchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setApprovedSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+                <Ionicons name="close-circle" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
               </TouchableOpacity>
             )}
           </View>
 
           {/* SUB-TABS */}
-          <View style={[styles.tabContainer, { marginBottom: 14 }]}>
+          <View style={[styles.tabContainer, { marginBottom: 14 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
             <TouchableOpacity
-              style={[styles.tabBtn, approvedTab === 'players' && styles.tabBtnActive]}
+              style={[styles.tabBtn, approvedTab === 'players' && styles.tabBtnActive, Platform.OS === 'android' && approvedTab === 'players' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setApprovedTab('players')}
             >
-              <Text style={[styles.tabBtnText, approvedTab === 'players' && styles.tabBtnTextActive]}>
+              <Text style={[styles.tabBtnText, approvedTab === 'players' && styles.tabBtnTextActive, Platform.OS === 'android' && { color: approvedTab === 'players' ? '#FFFFFF' : colors.textMuted }]}>
                 {"O'yinchilar"}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.tabBtn, approvedTab === 'teams' && styles.tabBtnActive]}
+              style={[styles.tabBtn, approvedTab === 'teams' && styles.tabBtnActive, Platform.OS === 'android' && approvedTab === 'teams' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setApprovedTab('teams')}
             >
-              <Text style={[styles.tabBtnText, approvedTab === 'teams' && styles.tabBtnTextActive]}>
+              <Text style={[styles.tabBtnText, approvedTab === 'teams' && styles.tabBtnTextActive, Platform.OS === 'android' && { color: approvedTab === 'teams' ? '#FFFFFF' : colors.textMuted }]}>
                 {"Jamoalar"}
               </Text>
             </TouchableOpacity>
@@ -1204,56 +1217,56 @@ export const ProfileUpdatesScreen: React.FC = () => {
         presentationStyle="fullScreen"
         onRequestClose={() => setShowRejectedModal(false)}
       >
-        <View style={styles.modalPageContainer}>
+        <View style={[styles.modalPageContainer, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
           {/* HEADER */}
           <View style={styles.modalPageHeader}>
             <TouchableOpacity
-              style={styles.modalPageBackBtn}
+              style={[styles.modalPageBackBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}
               onPress={() => setShowRejectedModal(false)}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+              <Ionicons name="arrow-back" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.modalPageTitle}>{"Rad Etilgan Arizalar"}</Text>
-              <Text style={styles.modalPageSub}>{"Rad etilgan profil almashtirish arizalari ruyxati"}</Text>
+              <Text style={[styles.modalPageTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Rad Etilgan Arizalar"}</Text>
+              <Text style={[styles.modalPageSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Rad etilgan profil almashtirish arizalari ruyxati"}</Text>
             </View>
           </View>
 
           {/* SEARCH BAR */}
-          <View style={styles.modalSearchBox}>
-            <Ionicons name="search" size={18} color="rgba(255, 255, 255, 0.4)" />
+          <View style={[styles.modalSearchBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
             <TextInput
-              style={styles.modalSearchInput}
+              style={[styles.modalSearchInput, Platform.OS === 'android' && { color: colors.textPrimary }]}
               placeholder="F.I.SH yoki Ism bo'yicha qidiruv..."
-              placeholderTextColor="rgba(255, 255, 255, 0.35)"
+              placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
               value={rejectedSearchQuery}
               onChangeText={setRejectedSearchQuery}
             />
             {rejectedSearchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setRejectedSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+                <Ionicons name="close-circle" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
               </TouchableOpacity>
             )}
           </View>
 
           {/* SUB-TABS */}
-          <View style={[styles.tabContainer, { marginBottom: 14 }]}>
+          <View style={[styles.tabContainer, { marginBottom: 14 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
             <TouchableOpacity
-              style={[styles.tabBtn, rejectedTab === 'players' && styles.tabBtnActive]}
+              style={[styles.tabBtn, rejectedTab === 'players' && styles.tabBtnActive, Platform.OS === 'android' && rejectedTab === 'players' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setRejectedTab('players')}
             >
-              <Text style={[styles.tabBtnText, rejectedTab === 'players' && styles.tabBtnTextActive]}>
+              <Text style={[styles.tabBtnText, rejectedTab === 'players' && styles.tabBtnTextActive, Platform.OS === 'android' && { color: rejectedTab === 'players' ? '#FFFFFF' : colors.textMuted }]}>
                 {"O'yinchilar"}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.tabBtn, rejectedTab === 'teams' && styles.tabBtnActive]}
+              style={[styles.tabBtn, rejectedTab === 'teams' && styles.tabBtnActive, Platform.OS === 'android' && rejectedTab === 'teams' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setRejectedTab('teams')}
             >
-              <Text style={[styles.tabBtnText, rejectedTab === 'teams' && styles.tabBtnTextActive]}>
+              <Text style={[styles.tabBtnText, rejectedTab === 'teams' && styles.tabBtnTextActive, Platform.OS === 'android' && { color: rejectedTab === 'teams' ? '#FFFFFF' : colors.textMuted }]}>
                 {"Jamoalar"}
               </Text>
             </TouchableOpacity>

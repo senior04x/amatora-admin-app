@@ -16,12 +16,14 @@ import {
   Animated,
   PanResponder,
   Platform,
+  Alert,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { usePlayersData, useTeamsPaginatedData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
@@ -33,13 +35,14 @@ interface Props {
 
 // Shimmer Skeleton Loader Component
 const SkeletonCard = () => {
+  const { colors } = useTheme();
   return (
-    <View style={styles.skeletonCard}>
-      <BlurView intensity={80} tint="dark" experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined} style={StyleSheet.absoluteFill} />
-      <View style={styles.skeletonAvatar} />
+    <View style={[styles.skeletonCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+      {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />}
+      <View style={[styles.skeletonAvatar, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]} />
       <View style={{ flex: 1, gap: 8 }}>
-        <View style={styles.skeletonTitleLine} />
-        <View style={styles.skeletonSubLine} />
+        <View style={[styles.skeletonTitleLine, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]} />
+        <View style={[styles.skeletonSubLine, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]} />
       </View>
     </View>
   );
@@ -61,6 +64,7 @@ const SwipeablePlayerCard = ({
   onImagePress,
   isReadOnlyUser,
 }: any) => {
+  const { isDark, colors } = useTheme();
   const panX = useRef(new Animated.Value(0)).current;
   const hapticTriggeredRef = useRef(false);
 
@@ -86,46 +90,40 @@ const SwipeablePlayerCard = ({
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponderCapture: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
         if (isReadOnlyUser) return false;
         // Only capture gesture if horizontal swipe is clearly dominant
-        return Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dy) < 10;
+        return Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dy) < 8;
       },
       onPanResponderGrant: () => {
-        setIsSwiping(true);
+        if (setIsSwiping) setIsSwiping(true);
         hapticTriggeredRef.current = false;
         onSwipeOpen();
       },
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dx < 0) {
-          const currentDx = gestureState.dx;
-          panX.setValue(currentDx);
-
-          // Telegram-style full swipe threshold (-150px)
-          if (currentDx < -150 && !hapticTriggeredRef.current) {
-            hapticTriggeredRef.current = true;
+          if (gestureState.dx <= -85 && !hapticTriggeredRef.current) {
             triggerHaptic();
+            hapticTriggeredRef.current = true;
           }
-        } else if (gestureState.dx > 0) {
-          panX.setValue(Math.min(gestureState.dx, 0));
+          panX.setValue(Math.max(gestureState.dx, -120));
+        } else {
+          panX.setValue(0);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
         setIsSwiping(false);
-
-        // Full Swipe Trigger (-150px or more)
-        if (gestureState.dx < -150) {
-          handleArchiveWithAnim();
-        } else if (gestureState.dx < -60) {
-          // Snap Open Red Delete Action (-85px)
+        if (gestureState.dx < -55) {
           Animated.spring(panX, {
             toValue: -85,
             useNativeDriver: true,
-            bounciness: 6,
-          }).start();
-          onSwipeOpen(); // ✅ FIX: Notify parent that card is opened
+            bounciness: 4,
+          }).start(() => {
+            onSwipeOpen();
+          });
         } else {
-          // Snap Closed (0px)
           Animated.spring(panX, {
             toValue: 0,
             useNativeDriver: true,
@@ -163,12 +161,37 @@ const SwipeablePlayerCard = ({
     ? item.avatar_url || item.photo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop'
     : item.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop';
 
-  let displayTeam = item.team?.name || item.team_name;
-  if (!displayTeam || !isNaN(Number(displayTeam))) {
-    displayTeam = item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon';
+  let displayTeam = '';
+  if (item.team_id) {
+    const foundTeam = allTeamsList?.find((t: any) => String(t.id) === String(item.team_id));
+    if (foundTeam?.name) {
+      displayTeam = foundTeam.name;
+    } else if (item.team?.name && item.team.name !== 'Yakkaxon') {
+      displayTeam = item.team.name;
+    } else if (item.team_name && item.team_name !== 'Yakkaxon' && isNaN(Number(item.team_name))) {
+      displayTeam = item.team_name;
+    } else {
+      displayTeam = `Jamoa #${item.team_id}`;
+    }
+  } else {
+    displayTeam = (item.team?.name && item.team.name !== 'Yakkaxon')
+      ? item.team.name
+      : (item.team_name && item.team_name !== 'Yakkaxon' && isNaN(Number(item.team_name)))
+      ? item.team_name
+      : 'Yakkaxon';
   }
 
-  const displayLeague = item.team?.league || item.league || item.league_name;
+  let displayLeague = '';
+  if (item.team_id) {
+    const foundTeam = allTeamsList?.find((t: any) => String(t.id) === String(item.team_id));
+    if (foundTeam?.league) {
+      displayLeague = foundTeam.league;
+    }
+  }
+  if (!displayLeague) {
+    const commentLeague = item.comment?.match(/\[LEAGUE:([^\]]+)\]/)?.[1]?.trim() || '';
+    displayLeague = item.team?.league || item.league || item.league_name || commentLeague || '';
+  }
 
   const deleteOpacity = panX.interpolate({
     inputRange: [-85, 0],
@@ -209,6 +232,10 @@ const SwipeablePlayerCard = ({
       <Animated.View
         style={[
           styles.cardItem,
+          Platform.OS === 'android' && {
+            borderColor: colors.border,
+            backgroundColor: colors.bgCard,
+          },
           {
             transform: [
               { translateX: panX },
@@ -220,16 +247,17 @@ const SwipeablePlayerCard = ({
         ]}
         {...panResponder.panHandlers}
       >
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
         <View style={styles.cardInnerRow}>
           {/* Left Photo Touch */}
           <TouchableOpacity
-            activeOpacity={0.8}
+            activeOpacity={0.7}
+            delayPressIn={0}
             onPress={() => {
               if (onImagePress) onImagePress(avatar);
             }}
           >
-            <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={styles.avatarImage} />
+            <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={[styles.avatarImage, { backgroundColor: isDark ? '#1E293B' : colors.bgCardElevated }]} />
           </TouchableOpacity>
 
           {/* Right Details Touch */}
@@ -239,21 +267,22 @@ const SwipeablePlayerCard = ({
               resetSwipe();
               onOpen(item, isPlayer);
             }}
-            activeOpacity={0.85}
+            activeOpacity={0.7}
+            delayPressIn={0}
           >
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={styles.titleText} numberOfLines={1}>
+              <Text style={[styles.titleText, { color: colors.textPrimary }]} numberOfLines={1}>
                 {name}
               </Text>
 
               {isPlayer ? (
-                <Text style={[styles.subText, { color: 'rgba(255, 255, 255, 0.75)', fontWeight: '800' }]} numberOfLines={1}>
+                <Text style={[styles.subText, { color: colors.textSecondary, fontWeight: '800' }]} numberOfLines={1}>
                   {`Jamoa: ${displayTeam}`}
                 </Text>
               ) : null}
 
               {displayLeague ? (
-                <Text style={styles.subText} numberOfLines={1}>
+                <Text style={[styles.subText, { color: colors.textMuted }]} numberOfLines={1}>
                   {`Liga: ${displayLeague}`}
                 </Text>
               ) : null}
@@ -262,8 +291,8 @@ const SwipeablePlayerCard = ({
             {isArchived ? (
               <TouchableOpacity
                 style={{
-                  backgroundColor: 'rgba(74, 222, 128, 0.18)',
-                  borderColor: '#4ADE80',
+                  backgroundColor: isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5',
+                  borderColor: colors.accentGreen,
                   borderWidth: 1,
                   paddingHorizontal: 10,
                   paddingVertical: 6,
@@ -274,11 +303,11 @@ const SwipeablePlayerCard = ({
                 }}
                 onPress={() => onRestore && onRestore(item)}
               >
-                <Ionicons name="refresh-outline" size={14} color="#4ADE80" />
-                <Text style={{ color: '#4ADE80', fontSize: 11, fontWeight: '800' }}>{"Qaytarish"}</Text>
+                <Ionicons name="refresh-outline" size={14} color={colors.accentGreen} />
+                <Text style={{ color: colors.accentGreen, fontSize: 11, fontWeight: '800' }}>{"Qaytarish"}</Text>
               </TouchableOpacity>
             ) : (
-              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.4)" />
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             )}
           </TouchableOpacity>
         </View>
@@ -288,7 +317,8 @@ const SwipeablePlayerCard = ({
 };
 
 export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }) => {
-  const { orgId, userRole, collabLeagueNames, collabLeagueIds, isRegistrationOpen, toggleRegistrationStatus, refreshOrg } = useOrg();
+  const { orgId, userRole, collabLeagueNames, collabLeagueIds } = useOrg();
+  const { isDark, colors } = useTheme();
   const isReadOnlyUser = userRole === 'user';
   const [fullImagePreview, setFullImagePreview] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialSegmentTab || 'players');
@@ -317,29 +347,35 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Pagination Constants (15 items per page)
-  const PLAYER_PAGE_SIZE = 15;
-  const TEAM_PAGE_SIZE = 15;
+  // Pagination Constants (25 players per page, 10 teams per page)
+  const PLAYER_PAGE_SIZE = 25;
+  const TEAM_PAGE_SIZE = 10;
 
   const [playerPage, setPlayerPage] = useState(0);
   const [accumulatedPlayers, setAccumulatedPlayers] = useState<any[]>([]);
   const [teamPage, setTeamPage] = useState(0);
   const [accumulatedTeams, setAccumulatedTeams] = useState<any[]>([]);
+  const [morePlayersAvailable, setMorePlayersAvailable] = useState<boolean | null>(null);
+  const [moreTeamsAvailable, setMoreTeamsAvailable] = useState<boolean | null>(null);
+
+  // Top Filter States (League & Team)
+  const [selectedLeagueFilter, setSelectedLeagueFilter] = useState<string>('all');
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<string | number>('all');
 
   const [showArchived, setShowArchived] = useState<boolean>(false);
 
-  // 1. React Query Hooks
+  // 1. React Query Hooks for initial page (page 0)
   const {
     data: playersData,
     isLoading: loadingPlayers,
     refetch: refetchPlayers,
-  } = usePlayersData(orgId, debouncedSearchQuery, playerPage, PLAYER_PAGE_SIZE, showArchived, collabLeagueNames);
+  } = usePlayersData(orgId, debouncedSearchQuery, 0, PLAYER_PAGE_SIZE, showArchived, collabLeagueNames, selectedLeagueFilter, selectedTeamFilter);
 
   const {
     data: teamsData,
     isLoading: loadingTeams,
     refetch: refetchTeams,
-  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, teamPage, TEAM_PAGE_SIZE, showArchived, collabLeagueNames);
+  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, 0, TEAM_PAGE_SIZE, showArchived, collabLeagueNames, selectedLeagueFilter);
 
   const { data: allTeamsList = [] } = useTeamsData(orgId, collabLeagueNames);
   const { data: leagues = [] } = useLeaguesData(orgId, collabLeagueIds);
@@ -349,42 +385,20 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     setTeamPage(0);
     setAccumulatedPlayers([]);
     setAccumulatedTeams([]);
-  }, [debouncedSearchQuery, showArchived, orgId]);
+    setMorePlayersAvailable(null);
+    setMoreTeamsAvailable(null);
+  }, [debouncedSearchQuery, showArchived, orgId, selectedLeagueFilter, selectedTeamFilter]);
 
-  useEffect(() => {
-    if (playersData?.players) {
-      if (playerPage === 0) {
-        setAccumulatedPlayers(playersData.players);
-      } else {
-        setAccumulatedPlayers((prev) => {
-          const existingIds = new Set(prev.map((p) => String(p.id)));
-          const uniqueNew = playersData.players.filter((p: any) => !existingIds.has(String(p.id)));
-          return [...prev, ...uniqueNew];
-        });
-      }
-    }
-  }, [playersData?.players, playerPage]);
+  // Instantaneous data resolution: use initial cache when page is 0, or accumulated state on pagination
+  const players = playerPage === 0 ? (playersData?.players || accumulatedPlayers) : accumulatedPlayers;
+  const teams = teamPage === 0 ? (teamsData?.teams || accumulatedTeams) : accumulatedTeams;
+  const hasMorePlayers = morePlayersAvailable !== null ? morePlayersAvailable : (playersData?.hasMore ?? false);
+  const hasMoreTeams = moreTeamsAvailable !== null ? moreTeamsAvailable : (teamsData?.hasMore ?? false);
 
-  useEffect(() => {
-    if (teamsData?.teams) {
-      if (teamPage === 0) {
-        setAccumulatedTeams(teamsData.teams);
-      } else {
-        setAccumulatedTeams((prev) => {
-          const existingIds = new Set(prev.map((t) => String(t.id)));
-          const uniqueNew = teamsData.teams.filter((t: any) => !existingIds.has(String(t.id)));
-          return [...prev, ...uniqueNew];
-        });
-      }
-    }
-  }, [teamsData?.teams, teamPage]);
-
-  const players = accumulatedPlayers;
-  const teams = accumulatedTeams;
-  const hasMorePlayers = playersData?.hasMore ?? false;
-  const hasMoreTeams = teamsData?.hasMore ?? false;
-
-  const loading = activeTab === 'players' ? (loadingPlayers && playerPage === 0) : (loadingTeams && teamPage === 0);
+  // Seamless loading state: active only while fetching initial page and no items are in memory
+  const loading = activeTab === 'players'
+    ? (loadingPlayers && players.length === 0)
+    : (loadingTeams && teams.length === 0);
   const [totalTeamsCount, setTotalTeamsCount] = useState<number>(0);
 
   // Archive Full-Page Modal State & Tabs
@@ -397,9 +411,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const [archiveLeagueFilter, setArchiveLeagueFilter] = useState<string>('all');
   const [archiveTeamFilter, setArchiveTeamFilter] = useState<string>('all');
   const [showArchiveFilterModal, setShowArchiveFilterModal] = useState(false);
-
-  // Registration Switch Toggling State
-  const [togglingReg, setTogglingReg] = useState(false);
 
   // Single Open Card & Swipe Scroll Lock State
   const [openSwipeableId, setOpenSwipeableId] = useState<string | null>(null);
@@ -511,7 +522,22 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           .or('is_archived.eq.true,status.eq.archived')
           .order('created_at', { ascending: false }); // ✅ Use created_at instead of updated_at
 
-        if (orgId) {
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          try {
+            const { data: cTeams } = await dbClient
+              .from('teams')
+              .select('id')
+              .in('league', collabLeagueNames);
+            const cTeamIds = (cTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (cTeamIds.length > 0) {
+              query = query.or(`organization_id.eq.${orgId || 1},team_id.in.(${cTeamIds.join(',')})`);
+            } else if (orgId) {
+              query = query.eq('organization_id', orgId);
+            }
+          } catch (e) {
+            if (orgId) query = query.eq('organization_id', orgId);
+          }
+        } else if (orgId) {
           query = query.eq('organization_id', orgId);
         }
 
@@ -566,7 +592,10 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           .or('is_archived.eq.true,status.eq.archived')
           .order('name');
 
-        if (orgId) {
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          query = query.or(`organization_id.eq.${orgId || 1},league.in.(${escapedNames})`);
+        } else if (orgId) {
           query = query.eq('organization_id', orgId);
         }
 
@@ -628,7 +657,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     await Promise.all([
       refetchPlayers(),
       refetchTeams(),
-      fetchRegistrationStatus(),
     ]);
     setRefreshing(false);
   };
@@ -661,33 +689,146 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     }
   };
 
-  const fetchRegistrationStatus = async () => {
-    try {
-      await refreshOrg();
-    } catch (e) {}
-  };
-
-  const handleToggleRegistration = async () => {
-    if (togglingReg) return;
-    setTogglingReg(true);
-    try {
-      await toggleRegistrationStatus(!isRegistrationOpen);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setTogglingReg(false);
-    }
-  };
-
-
-  // Manual Button Trigger to Load Next Batch (15 + 15)
-  const handleLoadMoreBtn = () => {
+  // Seamless Next Batch Fetching (50 players / 10 teams) without async rendering gaps
+  const handleLoadMoreBtn = async () => {
     if (loadingMore || loading) return;
+    setLoadingMore(true);
 
-    if (activeTab === 'players' && hasMorePlayers) {
-      setPlayerPage((prev) => prev + 1);
-    } else if (activeTab === 'teams' && hasMoreTeams) {
-      setTeamPage((prev) => prev + 1);
+    try {
+      const dbClient = supabase;
+      const targetOrgId = Number(orgId) || 1;
+
+      if (activeTab === 'players' && hasMorePlayers) {
+        const nextPage = playerPage + 1;
+        const from = nextPage * PLAYER_PAGE_SIZE;
+        const to = from + PLAYER_PAGE_SIZE;
+
+        let query = dbClient
+          .from('applications')
+          .select(`
+            id, first_name, last_name, father_name, birth_date,
+            passport_series, passport_number, phone, photo_url, position,
+            player_number, team_id, status, is_archived, comment, created_at, organization_id,
+            height, weight, citizenship, instagram_username, league,
+            team:team_id (id, name, logo_url, league)
+          `)
+          .eq('is_archived', showArchived)
+          .eq('status', showArchived ? 'archived' : 'approved')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          try {
+            const { data: cTeams } = await dbClient
+              .from('teams')
+              .select('id')
+              .in('league', collabLeagueNames);
+            const cTeamIds = (cTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (cTeamIds.length > 0) {
+              query = query.or(`organization_id.eq.${targetOrgId},team_id.in.(${cTeamIds.join(',')})`);
+            } else if (targetOrgId) {
+              query = query.eq('organization_id', targetOrgId);
+            }
+          } catch (e) {
+            if (targetOrgId) query = query.eq('organization_id', targetOrgId);
+          }
+        } else if (targetOrgId) {
+          query = query.eq('organization_id', targetOrgId);
+        }
+
+        if (selectedLeagueFilter && selectedLeagueFilter !== 'all') {
+          try {
+            const { data: lTeams } = await dbClient
+              .from('teams')
+              .select('id')
+              .ilike('league', `%${selectedLeagueFilter}%`);
+            const lTeamIds = (lTeams || []).map((t: any) => t.id).filter(Boolean);
+            if (lTeamIds.length > 0) {
+              query = query.in('team_id', lTeamIds);
+            } else {
+              setMorePlayersAvailable(false);
+              return;
+            }
+          } catch (e) {
+            setMorePlayersAvailable(false);
+            return;
+          }
+        }
+
+        if (selectedTeamFilter && selectedTeamFilter !== 'all') {
+          query = query.eq('team_id', String(selectedTeamFilter));
+        }
+
+        if (debouncedSearchQuery && debouncedSearchQuery.trim()) {
+          const s = `%${debouncedSearchQuery.trim()}%`;
+          query = query.or(
+            `first_name.ilike.${s},last_name.ilike.${s},passport_series.ilike.${s},passport_number.ilike.${s},phone.ilike.${s}`
+          );
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          console.error('Players load more query error:', error);
+        }
+        if (data && data.length > 0) {
+          const rows = data.slice(0, PLAYER_PAGE_SIZE);
+          const currentBase = playerPage === 0 ? (playersData?.players || accumulatedPlayers) : accumulatedPlayers;
+          const existingIds = new Set(currentBase.map((p) => String(p.id)));
+          const uniqueNew = rows.filter((p: any) => !existingIds.has(String(p.id)));
+          setAccumulatedPlayers([...currentBase, ...uniqueNew]);
+          setPlayerPage(nextPage);
+          setMorePlayersAvailable(data.length > PLAYER_PAGE_SIZE);
+        } else if (data && data.length === 0) {
+          setMorePlayersAvailable(false);
+        }
+      } else if (activeTab === 'teams' && hasMoreTeams) {
+        const nextPage = teamPage + 1;
+        const from = nextPage * TEAM_PAGE_SIZE;
+        const to = from + TEAM_PAGE_SIZE;
+
+        let query = dbClient
+          .from('teams')
+          .select('id, name, logo_url, league, status, is_archived, captain_phone, organization_id, created_at')
+          .eq('is_archived', showArchived)
+          .eq('status', showArchived ? 'archived' : 'approved')
+          .order('name', { ascending: true })
+          .range(from, to);
+
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
+        } else if (targetOrgId) {
+          query = query.eq('organization_id', targetOrgId);
+        }
+
+        if (selectedLeagueFilter && selectedLeagueFilter !== 'all') {
+          query = query.ilike('league', `%${selectedLeagueFilter}%`);
+        }
+
+        if (debouncedSearchQuery && debouncedSearchQuery.trim()) {
+          query = query.ilike('name', `%${debouncedSearchQuery.trim()}%`);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          console.error('Teams load more query error:', error);
+        }
+        if (data && data.length > 0) {
+          const rows = data.slice(0, TEAM_PAGE_SIZE);
+          const currentBase = teamPage === 0 ? (teamsData?.teams || accumulatedTeams) : accumulatedTeams;
+          const existingIds = new Set(currentBase.map((t) => String(t.id)));
+          const uniqueNew = rows.filter((t: any) => !existingIds.has(String(t.id)));
+          setAccumulatedTeams([...currentBase, ...uniqueNew]);
+          setTeamPage(nextPage);
+          setMoreTeamsAvailable(data.length > TEAM_PAGE_SIZE);
+        } else if (data && data.length === 0) {
+          setMoreTeamsAvailable(false);
+        }
+      }
+    } catch (e) {
+      console.error('handleLoadMoreBtn error:', e);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -719,12 +860,55 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       fatName = parts.slice(2).join(' ') || '';
     }
 
-    let resolvedTeamName = item.team?.name || item.team_name;
-    if (!resolvedTeamName || !isNaN(Number(resolvedTeamName))) {
-      resolvedTeamName = item.team_id ? `Jamoa #${item.team_id}` : 'Yakkaxon';
+    const currentTeamId = item.team_id || (item.team ? item.team.id : '');
+    let resolvedTeamName = '';
+    if (currentTeamId) {
+      const foundTeam = allTeamsList?.find((t: any) => String(t.id) === String(currentTeamId));
+      if (foundTeam?.name) {
+        resolvedTeamName = foundTeam.name;
+      } else if (item.team?.name && item.team.name !== 'Yakkaxon') {
+        resolvedTeamName = item.team.name;
+      } else if (item.team_name && item.team_name !== 'Yakkaxon' && isNaN(Number(item.team_name))) {
+        resolvedTeamName = item.team_name;
+      } else {
+        resolvedTeamName = `Jamoa #${currentTeamId}`;
+      }
+    } else {
+      resolvedTeamName = (item.team?.name && item.team.name !== 'Yakkaxon')
+        ? item.team.name
+        : (item.team_name && item.team_name !== 'Yakkaxon' && isNaN(Number(item.team_name)))
+        ? item.team_name
+        : 'Yakkaxon';
     }
 
-    let resolvedLeague = item.team?.league || item.league || item.league_name || '';
+    let resolvedLeague = '';
+    if (currentTeamId) {
+      const foundTeam = allTeamsList?.find((t: any) => String(t.id) === String(currentTeamId));
+      if (foundTeam?.league) {
+        resolvedLeague = foundTeam.league;
+      }
+    }
+    if (!resolvedLeague) {
+      const commentLeague = item.comment?.match(/\[LEAGUE:([^\]]+)\]/)?.[1]?.trim() || '';
+      resolvedLeague = item.team?.league || item.league || item.league_name || commentLeague || '';
+    }
+
+    let itemCitizenship = item.citizenship || '';
+    let itemHeight = item.height !== null && item.height !== undefined && item.height !== '' ? String(item.height) : '';
+    let itemWeight = item.weight !== null && item.weight !== undefined && item.weight !== '' ? String(item.weight) : '';
+    let itemInsta = (item.instagram_username || getInstagramUser(item) || '').replace(/^@/, '');
+
+    if (item.comment) {
+      const metaMatch = item.comment.match(/\[METADATA:({[^\]]+})\]/);
+      if (metaMatch?.[1]) {
+        try {
+          const obj = JSON.parse(metaMatch[1]);
+          if (!itemCitizenship && obj.citizenship) itemCitizenship = obj.citizenship;
+          if (!itemHeight && obj.height) itemHeight = String(obj.height);
+          if (!itemWeight && obj.weight) itemWeight = String(obj.weight);
+        } catch (e) {}
+      }
+    }
 
     setEditForm({
       first_name: fName,
@@ -736,13 +920,13 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       birth_date: item.birth_date || item.age || '',
       position: item.position || '',
       player_number: item.player_number ? String(item.player_number) : (item.number ? String(item.number) : ''),
-      league: resolvedLeague,
-      team_id: item.team_id || (item.team ? item.team.id : ''),
+      league: item.league || resolvedLeague,
+      team_id: currentTeamId || '',
       team_name: resolvedTeamName,
-      citizenship: item.citizenship || "O'zbekiston",
-      height: item.height ? String(item.height) : '',
-      weight: item.weight ? String(item.weight) : '',
-      instagram_username: item.instagram_username || getInstagramUser(item),
+      citizenship: itemCitizenship,
+      height: itemHeight,
+      weight: itemWeight,
+      instagram_username: itemInsta,
       name: item.name || '',
       city: item.city || '',
     });
@@ -763,15 +947,43 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
   const handleOpenTeamPicker = () => {
     if (!isEditing) return;
-    const filteredTeams = allTeamsList.filter(
-      (t) => !editForm.league || !t.league || t.league.includes(editForm.league)
-    );
+    const targetLeague = (editForm.league || '').trim().toLowerCase();
+    let filteredTeams = allTeamsList;
+
+    if (targetLeague) {
+      filteredTeams = allTeamsList.filter((t: any) => {
+        const teamLeague = (t.league || t.league_name || '').trim().toLowerCase();
+        return !teamLeague || teamLeague.includes(targetLeague) || targetLeague.includes(teamLeague);
+      });
+      // Fallback: If no teams matched that specific string, show all teams
+      if (filteredTeams.length === 0) {
+        filteredTeams = allTeamsList;
+      }
+    }
+
     setSelectPickerConfig({
       title: 'Jamoani Tanlang',
-      selectedValue: editForm.team_id || editForm.team_name,
-      options: filteredTeams.map((t) => ({ label: t.name, value: t.id })),
+      selectedValue: editForm.team_id ? String(editForm.team_id) : '',
+      options: [
+        { label: 'Yakkaxon (Jamoasiz)', value: '' },
+        ...filteredTeams.map((t: any) => ({
+          label: t.league ? `${t.name} (${t.league})` : t.name,
+          value: String(t.id),
+        })),
+      ],
       onSelect: (val: any, label: string) => {
-        setEditForm((prev) => ({ ...prev, team_id: val, team_name: label }));
+        if (!val) {
+          setEditForm((prev) => ({ ...prev, team_id: '', team_name: 'Yakkaxon' }));
+          return;
+        }
+        const pureName = label.replace(/\s*\([^)]*\)$/, '').trim();
+        const selectedTeam = allTeamsList?.find((t: any) => String(t.id) === String(val));
+        setEditForm((prev) => ({
+          ...prev,
+          team_id: val,
+          team_name: selectedTeam?.name || pureName,
+          league: selectedTeam?.league || prev.league,
+        }));
       },
     });
   };
@@ -907,74 +1119,241 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       const isPlayer = selectedItem.isPlayer;
 
       if (isPlayer) {
-        const combinedFullName = [editForm.first_name, editForm.last_name, editForm.father_name]
-          .filter(Boolean)
-          .join(' ');
+        // Build updated comment containing METADATA & INSTAGRAM & LEAGUE if provided
+        const currentComment = selectedItem.comment || '';
+        const cleanComment = currentComment
+          .replace(/\[METADATA:[^\]]+\]/g, '')
+          .replace(/\[INSTAGRAM:[^\]]+\]/g, '')
+          .replace(/\[LEAGUE:[^\]]+\]/g, '')
+          .replace(/\[INDIVIDUAL\]/g, '')
+          .trim();
 
-        // Update applications table
-        await dbClient
+        const metaObj: Record<string, string> = {};
+        if (editForm.citizenship) metaObj.citizenship = editForm.citizenship;
+        if (editForm.height) metaObj.height = editForm.height;
+        if (editForm.weight) metaObj.weight = editForm.weight;
+
+        const newTeamId = editForm.team_id && editForm.team_id !== 'all' && editForm.team_id !== '' ? String(editForm.team_id) : null;
+        const matchedTeam = allTeamsList.find((t: any) => String(t.id) === String(newTeamId)) || null;
+
+        let updatedComment = cleanComment;
+        if (!newTeamId) {
+          updatedComment = `[INDIVIDUAL] ${updatedComment}`.trim();
+        }
+        if (editForm.league) {
+          updatedComment += ` [LEAGUE:${editForm.league}]`;
+        }
+        if (Object.keys(metaObj).length > 0) {
+          updatedComment += ` [METADATA:${JSON.stringify(metaObj)}]`;
+        }
+        if (editForm.instagram_username) {
+          const rawInsta = editForm.instagram_username.trim();
+          const instaUrl = rawInsta.startsWith('http')
+            ? rawInsta
+            : `https://instagram.com/${rawInsta.replace('@', '')}`;
+          updatedComment += ` [INSTAGRAM:${instaUrl}]`;
+        }
+
+        const cleanInsta = (editForm.instagram_username || '').trim().replace(/^@/, '').replace(/[^a-zA-Z0-9._]/g, '');
+
+        // Direct SQL columns in `applications` table
+        const updatePayload: Record<string, any> = {
+          first_name: editForm.first_name || '',
+          last_name: editForm.last_name || '',
+          father_name: editForm.father_name || '',
+          phone: editForm.phone || '',
+          passport_series: editForm.passport_series || '',
+          passport_number: editForm.passport_number || '',
+          birth_date: editForm.birth_date || null,
+          position: editForm.position || '',
+          player_number: editForm.player_number ? Number(editForm.player_number) : null,
+          team_id: newTeamId,
+          height: editForm.height ? Number(editForm.height) : null,
+          weight: editForm.weight ? Number(editForm.weight) : null,
+          citizenship: editForm.citizenship || null,
+          instagram_username: cleanInsta || null,
+          league: editForm.league || null,
+          comment: updatedComment.trim(),
+        };
+
+        const { error } = await dbClient
           .from('applications')
-          .update({
-            first_name: editForm.first_name,
-            last_name: editForm.last_name,
-            father_name: editForm.father_name,
-            full_name: combinedFullName,
-            team_name: editForm.team_name,
-            team_id: editForm.team_id || null,
-            position: editForm.position,
-            phone: editForm.phone,
-            league: editForm.league,
-            birth_date: editForm.birth_date,
-            passport_series: editForm.passport_series,
-            passport_number: editForm.passport_number,
-            player_number: editForm.player_number ? Number(editForm.player_number) : null,
-          })
+          .update(updatePayload)
           .eq('id', selectedItem.id);
 
-        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
-      } else {
-        // Optimistically update teams list state
-        setAccumulatedTeams((prev) =>
-          prev.map((t) =>
-            t.id === selectedItem.id
-              ? {
-                  ...t,
-                  name: editForm.name,
-                  league: editForm.league,
-                  phone: editForm.phone,
-                  city: editForm.city,
-                }
-              : t
-          )
+        if (error) {
+          console.error('Update player error:', error);
+          Alert.alert('Xatolik', "O'yinchi ma'lumotlarini saqlashda xatolik yuz berdi: " + (error.message || ''));
+          return;
+        }
+
+        // Optimistically update selectedItem so the open modal immediately displays the new team
+        const updatedItem = {
+          ...selectedItem,
+          ...updatePayload,
+          team: matchedTeam
+            ? { id: matchedTeam.id, name: matchedTeam.name, logo_url: matchedTeam.logo_url, league: matchedTeam.league }
+            : (newTeamId ? { id: newTeamId, name: editForm.team_name || `Jamoa #${newTeamId}` } : null),
+        };
+        setSelectedItem(updatedItem);
+
+        // Optimistically update list state
+        setAccumulatedPlayers((prev) =>
+          prev.map((p) => (p.id === selectedItem.id ? updatedItem : p))
         );
 
-        // Update teams table
-        await dbClient
+        // Update all players queries in cache directly
+        queryClient.setQueriesData({ queryKey: ['players'] }, (old: any) => {
+          if (!old) return old;
+          if (Array.isArray(old)) {
+            return old.map((p: any) => (p.id === selectedItem.id ? updatedItem : p));
+          }
+          if (old.players && Array.isArray(old.players)) {
+            return {
+              ...old,
+              players: old.players.map((p: any) => (p.id === selectedItem.id ? updatedItem : p)),
+            };
+          }
+          return old;
+        });
+
+        // Invalidate React Query cache completely
+        await queryClient.invalidateQueries({ queryKey: ['players'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        refetchPlayers();
+        fetchTotalCounts();
+      } else {
+        const updatePayload = {
+          name: editForm.name || '',
+          league: editForm.league || '',
+          phone: editForm.phone || '',
+          city: editForm.city || '',
+        };
+
+        const { error } = await dbClient
           .from('teams')
-          .update({
-            name: editForm.name,
-            league: editForm.league,
-            phone: editForm.phone,
-            city: editForm.city,
-          })
+          .update(updatePayload)
           .eq('id', selectedItem.id);
 
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        if (error) {
+          console.error('Update team error:', error);
+          Alert.alert('Xatolik', "Jamoa ma'lumotlarini saqlashda xatolik yuz berdi: " + (error.message || ''));
+          return;
+        }
+
+        const updatedTeam = {
+          ...selectedItem,
+          ...updatePayload,
+        };
+        setSelectedItem(updatedTeam);
+
+        // Optimistically update teams list state
+        setAccumulatedTeams((prev) =>
+          prev.map((t) => (t.id === selectedItem.id ? updatedTeam : t))
+        );
+
+        await queryClient.invalidateQueries({ queryKey: ['teams'] });
+        await queryClient.invalidateQueries({ queryKey: ['paginatedTeams'] });
+        refetchTeams();
+        fetchTotalCounts();
       }
 
       setToastMsg("Ma'lumotlar muvaffaqiyatli saqlandi! ✨");
       setIsEditing(false);
       setTimeout(() => setToastMsg(null), 3000);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('handleSaveDetails catch:', e);
+      Alert.alert('Xatolik', "Ma'lumotlarni saqlashda kutilmagan xatolik yuz berdi: " + (e?.message || ''));
     } finally {
       setSaving(false);
     }
   };
 
+  // Reusable Overlay Select Picker (renders as absolute view overlay, NOT a native modal to avoid iOS double-modal drops)
+  const renderSelectPicker = () => {
+    if (!selectPickerConfig) return null;
+    return (
+      <View
+        style={[
+          StyleSheet.absoluteFill,
+          styles.pickerOverlay,
+          { zIndex: 999999, elevation: 999999 },
+        ]}
+      >
+        {/* Backdrop Tap to Dismiss */}
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => setSelectPickerConfig(null)}
+        />
+
+        <View style={[styles.pickerCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView pointerEvents="none" intensity={90} tint="dark" style={StyleSheet.absoluteFill} />}
+          <View style={[styles.pickerHeader, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.pickerTitle, { color: colors.textPrimary }]}>
+              {selectPickerConfig.title || 'Tanlang'}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setSelectPickerConfig(null)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="close" size={22} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={{ maxHeight: 340 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {selectPickerConfig.options && selectPickerConfig.options.length > 0 ? (
+              selectPickerConfig.options.map((opt: any, idx: number) => {
+                const isSelected = String(selectPickerConfig.selectedValue) === String(opt.value);
+                return (
+                  <TouchableOpacity
+                    key={`opt-${idx}-${opt.value}`}
+                    style={[
+                      styles.pickerOptionRow,
+                      { borderBottomColor: colors.border },
+                      isSelected && {
+                        backgroundColor: isDark ? 'rgba(255, 255, 255, 0.12)' : colors.bgCardElevated,
+                      },
+                    ]}
+                    onPress={() => {
+                      selectPickerConfig.onSelect(opt.value, opt.label);
+                      setSelectPickerConfig(null);
+                    }}
+                    activeOpacity={0.6}
+                    delayPressIn={0}
+                  >
+                    <Text
+                      style={[
+                        styles.pickerOptionText,
+                        { color: colors.textSecondary },
+                        isSelected && { color: colors.accentGreen, fontWeight: '900' },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    {isSelected && (
+                      <Ionicons name="checkmark-circle" size={18} color={colors.accentGreen} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={{ padding: 24, alignItems: 'center' }}>
+                <Text style={{ color: colors.textMuted, fontSize: 13 }}>{"Variantlar mavjud emas"}</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    );
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* Toast Notification Banner */}
       {toastMsg && (
         <View style={styles.toastBanner}>
@@ -983,35 +1362,15 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         </View>
       )}
 
-      {/* Registration Open/Close Switch Banner */}
-      <View style={styles.regSwitchBanner}>
-        <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={styles.regSwitchTitle}>
-            {isRegistrationOpen ? "Qabul Ochiq" : "Qabul Yopilgan"}
-          </Text>
-          <Text style={styles.regSwitchSub}>
-            {"Saytda yangi arizalar topshirish holati"}
-          </Text>
-        </View>
-        <Switch
-          value={isRegistrationOpen}
-          onValueChange={handleToggleRegistration}
-          trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
-          thumbColor={isRegistrationOpen ? '#FFFFFF' : '#94A3B8'}
-          disabled={togglingReg}
-        />
-      </View>
-
       {/* Global Search Input & Archive Icon Button */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <View style={[styles.searchContainer, { flex: 1, marginBottom: 0 }]}>
-          <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-          <Ionicons name="search" size={20} color="rgba(255,255,255,0.5)" />
+        <View style={[styles.searchContainer, { flex: 1, marginBottom: 0 }, Platform.OS === 'android' && { borderColor: colors.border, backgroundColor: colors.bgCard }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+          <Ionicons name="search" size={20} color={colors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
             placeholder={activeTab === 'players' ? "O'yinchini qidirish (ism, tel, pasport)..." : "Jamoani qidirish..."}
-            placeholderTextColor="rgba(255,255,255,0.4)"
+            placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoCapitalize="none"
@@ -1019,7 +1378,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.5)" />
+              <Ionicons name="close-circle" size={20} color={colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -1031,9 +1390,9 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               height: 48,
               paddingHorizontal: 14,
               borderRadius: 14,
-              backgroundColor: showArchiveModal ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.08)',
+              backgroundColor: showArchiveModal ? (isDark ? 'rgba(245, 158, 11, 0.25)' : '#FEF3C7') : (isDark ? 'rgba(255, 255, 255, 0.08)' : colors.bgCard),
               borderWidth: 1.2,
-              borderColor: showArchiveModal ? '#F59E0B' : 'rgba(255, 255, 255, 0.15)',
+              borderColor: showArchiveModal ? '#F59E0B' : colors.border,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1043,36 +1402,130 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             onPress={() => setShowArchiveModal(true)}
             activeOpacity={0.7}
           >
-            <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
             <Ionicons
               name="archive-outline"
               size={20}
-              color={showArchiveModal ? "#F59E0B" : "rgba(255,255,255,0.85)"}
+              color={showArchiveModal ? "#F59E0B" : (isDark ? "rgba(255,255,255,0.85)" : colors.textPrimary)}
             />
-            <Text style={{ color: showArchiveModal ? '#F59E0B' : 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '800' }}>
+            <Text style={{ color: showArchiveModal ? '#F59E0B' : (isDark ? 'rgba(255,255,255,0.85)' : colors.textPrimary), fontSize: 12, fontWeight: '800' }}>
               {"Arxiv"}
             </Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Segment Sub-Tabs (O'yinchilar vs Jamoalar) */}
-      <View style={styles.segmentContainer}>
-        <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+      {/* 2 Top Filter Selectors: Liga & Jamoa */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        {/* League Filter Trigger */}
         <TouchableOpacity
-          style={[styles.segmentBtn, activeTab === 'players' && styles.activeSegmentBtn]}
+          style={[
+            styles.topFilterBtn,
+            selectedLeagueFilter !== 'all' && styles.topFilterBtnActive,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: selectedLeagueFilter !== 'all' ? colors.accentGreen : colors.border },
+          ]}
+          onPress={() => {
+            const leagueOptions = [
+              { label: 'Barcha Ligalar', value: 'all' },
+              ...leagues.map((l: any) => ({ label: l.name, value: l.name })),
+            ];
+            setSelectPickerConfig({
+              title: 'Liganing nomi boyicha filter',
+              selectedValue: selectedLeagueFilter,
+              options: leagueOptions,
+              onSelect: (val) => {
+                setSelectedLeagueFilter(val);
+                if (selectedTeamFilter !== 'all') {
+                  setSelectedTeamFilter('all');
+                }
+              },
+            });
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="trophy-outline" size={15} color={selectedLeagueFilter !== 'all' ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF87') : colors.textMuted} />
+          <Text
+            style={[
+              styles.topFilterBtnText,
+              Platform.OS === 'android' && { color: selectedLeagueFilter !== 'all' ? colors.accentGreen : colors.textPrimary },
+            ]}
+            numberOfLines={1}
+          >
+            {selectedLeagueFilter === 'all' ? 'Barcha Ligalar' : selectedLeagueFilter}
+          </Text>
+          <Ionicons name="chevron-down" size={13} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        {/* Team Filter Trigger (Only on Players tab) */}
+        {activeTab === 'players' && (
+          <TouchableOpacity
+            style={[
+              styles.topFilterBtn,
+              selectedTeamFilter !== 'all' && styles.topFilterBtnActive,
+              Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: selectedTeamFilter !== 'all' ? colors.accentGreen : colors.border },
+            ]}
+            onPress={() => {
+              const filteredTeamsList = selectedLeagueFilter === 'all'
+                ? allTeamsList
+                : allTeamsList.filter((t: any) => {
+                    const l1 = (t.league || '').toLowerCase().trim();
+                    const l2 = selectedLeagueFilter.toLowerCase().trim();
+                    return l1.includes(l2) || l2.includes(l1);
+                  });
+
+              const teamOptions = [
+                { label: 'Barcha Jamoalar', value: 'all' },
+                ...filteredTeamsList.map((t: any) => ({
+                  label: t.league ? `${t.name} (${t.league})` : t.name,
+                  value: t.id,
+                })),
+              ];
+
+              setSelectPickerConfig({
+                title: 'Jamoaning nomi boyicha filter',
+                selectedValue: selectedTeamFilter,
+                options: teamOptions,
+                onSelect: (val) => setSelectedTeamFilter(val),
+              });
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="shield-outline" size={15} color={selectedTeamFilter !== 'all' ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF87') : colors.textMuted} />
+            <Text
+              style={[
+                styles.topFilterBtnText,
+                Platform.OS === 'android' && { color: selectedTeamFilter !== 'all' ? colors.accentGreen : colors.textPrimary },
+              ]}
+              numberOfLines={1}
+            >
+              {selectedTeamFilter === 'all'
+                ? 'Barcha Jamoalar'
+                : (allTeamsList.find((t: any) => String(t.id) === String(selectedTeamFilter))?.name || 'Jamoa')}
+            </Text>
+            <Ionicons name="chevron-down" size={13} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Segment Sub-Tabs (O'yinchilar vs Jamoalar) */}
+      <View style={[styles.segmentContainer, Platform.OS === 'android' && { borderColor: colors.border, backgroundColor: colors.bgCardElevated }]}>
+        {Platform.OS === 'ios' && <BlurView pointerEvents="none" intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+        <TouchableOpacity
+          style={[styles.segmentBtn, activeTab === 'players' && { backgroundColor: colors.accentGreen }]}
           onPress={() => setActiveTab('players')}
           activeOpacity={0.7}
+          delayPressIn={0}
         >
           <Ionicons
             name="person"
             size={16}
-            color={activeTab === 'players' ? '#000000' : 'rgba(255,255,255,0.6)'}
+            color={activeTab === 'players' ? '#FFFFFF' : colors.textMuted}
           />
           <Text
             style={[
               styles.segmentBtnText,
-              activeTab === 'players' && styles.activeSegmentBtnText,
+              { color: colors.textSecondary },
+              activeTab === 'players' && { color: '#FFFFFF', fontWeight: '900' },
             ]}
           >
             {`O'yinchilar`}
@@ -1080,19 +1533,21 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.segmentBtn, activeTab === 'teams' && styles.activeSegmentBtn]}
+          style={[styles.segmentBtn, activeTab === 'teams' && { backgroundColor: colors.accentGreen }]}
           onPress={() => setActiveTab('teams')}
           activeOpacity={0.7}
+          delayPressIn={0}
         >
           <Ionicons
             name="shield"
             size={16}
-            color={activeTab === 'teams' ? '#000000' : 'rgba(255,255,255,0.6)'}
+            color={activeTab === 'teams' ? '#FFFFFF' : colors.textMuted}
           />
           <Text
             style={[
               styles.segmentBtnText,
-              activeTab === 'teams' && styles.activeSegmentBtnText,
+              { color: colors.textSecondary },
+              activeTab === 'teams' && { color: '#FFFFFF', fontWeight: '900' },
             ]}
           >
             {`Jamoalar`}
@@ -1116,26 +1571,23 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           keyExtractor={(item, index) => (item && item.id ? `item-${item.id}-${index}` : `row-${index}`)}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          scrollEnabled={!isSwiping}
-          initialNumToRender={12}
-          maxToRenderPerBatch={12}
-          windowSize={5}
-          removeClippedSubviews={true}
-          updateCellsBatchingPeriod={50}
-          onEndReached={handleLoadMoreBtn}
-          onEndReachedThreshold={0.5}
+          scrollEnabled={true}
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
           onScrollBeginDrag={() => {
             if (openSwipeableId) {
               setOpenSwipeableId(null);
             }
           }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FFFFFF" />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />
           }
           ListEmptyComponent={
             <View style={styles.emptyCard}>
-              <Ionicons name="people-outline" size={40} color="rgba(255,255,255,0.2)" />
-              <Text style={styles.emptyText}>
+              <Ionicons name="people-outline" size={40} color={colors.textMuted} />
+              <Text style={[styles.emptyText, { color: colors.textMuted }]}>
                 {activeTab === 'players' ? "O'yinchilar yo'q" : "Jamoalar yo'q"}
               </Text>
             </View>
@@ -1144,22 +1596,32 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             ((activeTab === 'players' && hasMorePlayers) || (activeTab === 'teams' && hasMoreTeams)) ? (
               <View style={{ marginTop: 12, marginBottom: 20, alignItems: 'center' }}>
                 <TouchableOpacity
-                  style={styles.loadMoreButton}
+                  style={[
+                    styles.loadMoreButton,
+                    Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                  ]}
                   onPress={handleLoadMoreBtn}
                   disabled={loadingMore}
-                  activeOpacity={0.8}
+                  activeOpacity={0.6}
+                  delayPressIn={0}
+                  hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
                 >
                   {loadingMore ? (
-                    <ActivityIndicator size="small" color="#000000" />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.accentGreen : '#FFFFFF'} />
+                      <Text style={[styles.loadMoreBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                        {activeTab === 'players' ? "O'yinchilar yuklanmoqda..." : "Jamoalar yuklanmoqda..."}
+                      </Text>
+                    </View>
                   ) : (
-                    <>
-                      <Ionicons name="arrow-down-circle" size={18} color="#000000" />
-                      <Text style={styles.loadMoreBtnText}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="arrow-down-circle" size={18} color={Platform.OS === 'android' ? colors.accentGreen : '#FFFFFF'} />
+                      <Text style={[styles.loadMoreBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
                         {activeTab === 'players'
-                          ? "Yana 50 ta o'yinchini yuklash"
+                          ? "Yana 25 ta o'yinchini yuklash"
                           : "Yana 10 ta jamoani yuklash"}
                       </Text>
-                    </>
+                    </View>
                   )}
                 </TouchableOpacity>
               </View>
@@ -1190,13 +1652,13 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       {/* 5-SECOND COUNTDOWN DELETE CONFIRMATION MODAL */}
       <Modal visible={!!itemToDelete} transparent animationType="fade">
         <View style={styles.confirmOverlay}>
-          <View style={styles.confirmCard}>
+          <View style={[styles.confirmCard, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={styles.confirmHeaderIcon}>
               <Ionicons name="warning" size={32} color="#FF4D4D" />
             </View>
 
-            <Text style={styles.confirmTitle}>{"O'yinchini O'chirish"}</Text>
-            <Text style={styles.confirmMessage}>
+            <Text style={[styles.confirmTitle, { color: colors.textPrimary }]}>{"O'yinchini O'chirish"}</Text>
+            <Text style={[styles.confirmMessage, { color: colors.textSecondary }]}>
               {`Haqiqatan ham "${itemToDelete?.full_name || itemToDelete?.first_name || itemToDelete?.name || "O'yinchi"}" ma'lumotlarini bazadan o'chirmoqchimisiz?`}
             </Text>
 
@@ -1209,11 +1671,11 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
             <View style={styles.confirmActionsRow}>
               <TouchableOpacity
-                style={styles.cancelConfirmBtn}
+                style={[styles.cancelConfirmBtn, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 onPress={handleCancelDelete}
                 activeOpacity={0.7}
               >
-                <Text style={styles.cancelConfirmText}>{"Bekor qilish"}</Text>
+                <Text style={[styles.cancelConfirmText, { color: colors.textPrimary }]}>{"Bekor qilish"}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1234,26 +1696,30 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           </View>
         </View>
       </Modal>
-
-      {/* DETAIL & EDITABLE MODAL MATCHING ADMIN PANEL */}
-      <Modal visible={!!selectedItem} transparent animationType="slide">
+            {/* DETAIL & EDITABLE MODAL MATCHING ADMIN PANEL */}
+      <Modal
+        visible={!!selectedItem}
+        transparent
+        animationType={Platform.OS === 'android' ? 'fade' : 'slide'}
+        onRequestClose={() => setSelectedItem(null)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />}
             {/* Modal Header */}
-            <View style={styles.modalHeaderRow}>
+            <View style={[styles.modalHeaderRow, { borderBottomColor: colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons
                   name={selectedItem?.isPlayer ? "person" : "shield"}
                   size={20}
-                  color="#FFFFFF"
+                  color={colors.accentGreen}
                 />
-                <Text style={styles.modalTitle}>
+                <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
                   {selectedItem?.isPlayer ? "O'yinchini Tahrirlash" : "Jamoani Tahrirlash"}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setSelectedItem(null)}>
-                <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
+                <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -1268,7 +1734,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                       if (img) setFullImagePreview(img);
                     }}
                   >
-                    <Image
+                    <ExpoImage
                       source={{
                         uri:
                           selectedItem.avatar_url ||
@@ -1276,96 +1742,98 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                           selectedItem.logo_url ||
                           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop',
                       }}
-                      style={styles.detailAvatar}
+                      cachePolicy="memory-disk"
+                      contentFit="cover"
+                      style={[styles.detailAvatar, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                     />
                   </TouchableOpacity>
-                  <Text style={styles.detailNameHeader}>
+                  <Text style={[styles.detailNameHeader, { color: colors.textPrimary }]}>
                     {`${editForm.first_name} ${editForm.last_name}`.trim() || editForm.name || "Noma'lum"}
                   </Text>
                 </View>
 
                 {/* Input Fields Grid Box */}
-                <View style={styles.detailInputsBox}>
+                <View style={[styles.detailInputsBox, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
                   {selectedItem.isPlayer ? (
                     <>
                       {/* Separated First Name & Last Name */}
                       <View style={{ flexDirection: 'row', gap: 10 }}>
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                          <Text style={styles.inputLabel}>{"Ismi"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Ismi"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.first_name}
                             onChangeText={(val) => setEditForm({ ...editForm, first_name: val })}
                             placeholder="Ismi..."
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                           />
                         </View>
 
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                          <Text style={styles.inputLabel}>{"Familiyasi"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Familiyasi"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.last_name}
                             onChangeText={(val) => setEditForm({ ...editForm, last_name: val })}
                             placeholder="Familiyasi..."
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                           />
                         </View>
                       </View>
 
                       {/* Father Name (Otasining ismi) */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Otasining Ismi"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Otasining Ismi"}</Text>
                         <TextInput
-                          style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                           editable={isEditing}
                           value={editForm.father_name}
                           onChangeText={(val) => setEditForm({ ...editForm, father_name: val })}
                           placeholder="Otasining ismi..."
-                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          placeholderTextColor={colors.textMuted}
                         />
                       </View>
 
                       {/* Phone Input */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Telefon"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Telefon"}</Text>
                         <TextInput
-                          style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                           editable={isEditing}
                           value={editForm.phone}
                           onChangeText={(val) => setEditForm({ ...editForm, phone: val })}
                           placeholder="Telefon raqami..."
-                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          placeholderTextColor={colors.textMuted}
                           keyboardType="phone-pad"
                         />
                       </View>
 
-                      {/* Passport Series & Passport Number */}
+                      {/* Passport Series & Number */}
                       <View style={{ flexDirection: 'row', gap: 10 }}>
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                          <Text style={styles.inputLabel}>{"Pasport Seriya"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Seriya"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.passport_series}
                             onChangeText={(val) => setEditForm({ ...editForm, passport_series: val })}
                             placeholder="AA"
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                             maxLength={3}
                           />
                         </View>
 
                         <View style={[styles.inputGroup, { flex: 2 }]}>
-                          <Text style={styles.inputLabel}>{"Pasport Raqam"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Pasport Raqam"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.passport_number}
                             onChangeText={(val) => setEditForm({ ...editForm, passport_number: val })}
                             placeholder="1234567"
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                           />
                         </View>
@@ -1374,26 +1842,26 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                       {/* Birth Date & Player Jersey Number */}
                       <View style={{ flexDirection: 'row', gap: 10 }}>
                         <View style={[styles.inputGroup, { flex: 2 }]}>
-                          <Text style={styles.inputLabel}>{"Tug'ilgan Sana"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Tug'ilgan Sana"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.birth_date}
                             onChangeText={(val) => setEditForm({ ...editForm, birth_date: val })}
                             placeholder="masalan: 10.07.1995"
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                           />
                         </View>
 
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                          <Text style={styles.inputLabel}>{"Raqami (#)"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Raqami (#)"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.player_number}
                             onChangeText={(val) => setEditForm({ ...editForm, player_number: val })}
                             placeholder="10"
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                           />
                         </View>
@@ -1401,76 +1869,89 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
                       {/* Position (Ampula) Interactive Select Picker */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Pozitsiya (Ampula)"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Pozitsiya (Ampula)"}</Text>
                         <TouchableOpacity
-                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive]}
+                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
                           onPress={handleOpenPositionPicker}
                           disabled={!isEditing}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.selectBoxValue, !editForm.position && { color: 'rgba(255,255,255,0.3)' }]}>
+                          <Text style={[styles.selectBoxValue, { color: colors.textPrimary }, !editForm.position && { color: colors.textMuted }]}>
                             {editForm.position || "Pozitsiyani tanlang..."}
                           </Text>
-                          <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
+                          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
                         </TouchableOpacity>
                       </View>
 
                       {/* League Interactive Modal Select Picker */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Liga (Select Modal)"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Liga (Select Modal)"}</Text>
                         <TouchableOpacity
-                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive]}
+                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
                           onPress={handleOpenLeaguePicker}
                           disabled={!isEditing}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.selectBoxValue, !editForm.league && { color: 'rgba(255,255,255,0.3)' }]}>
+                          <Text style={[styles.selectBoxValue, { color: colors.textPrimary }, !editForm.league && { color: colors.textMuted }]}>
                             {editForm.league || "Ligani tanlang..."}
                           </Text>
-                          <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
+                          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
                         </TouchableOpacity>
                       </View>
 
                       {/* Team Interactive Modal Select Picker */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Jamoasi (Select Modal)"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Jamoasi (Select Modal)"}</Text>
                         <TouchableOpacity
-                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive]}
+                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
                           onPress={handleOpenTeamPicker}
                           disabled={!isEditing}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.selectBoxValue, !editForm.team_name && { color: 'rgba(255,255,255,0.3)' }]}>
+                          <Text style={[styles.selectBoxValue, { color: colors.textPrimary }, !editForm.team_name && { color: colors.textMuted }]}>
                             {editForm.team_name || "Jamoani tanlang..."}
                           </Text>
-                          <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
+                          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
                         </TouchableOpacity>
                       </View>
 
-                      {/* Citizenship, Height, Weight */}
+                      {/* Citizenship (Fuqaroligi / Millati) */}
+                      <View style={styles.inputGroup}>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Millati / Fuqaroligi"}</Text>
+                        <TextInput
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
+                          editable={isEditing}
+                          value={editForm.citizenship}
+                          onChangeText={(val) => setEditForm({ ...editForm, citizenship: val })}
+                          placeholder="O'zbekiston"
+                          placeholderTextColor={colors.textMuted}
+                        />
+                      </View>
+
+                      {/* Height and Weight */}
                       <View style={{ flexDirection: 'row', gap: 10 }}>
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                          <Text style={styles.inputLabel}>{"Bo'yi (SM)"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Bo'yi (SM)"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.height}
                             onChangeText={(val) => setEditForm({ ...editForm, height: val })}
                             placeholder="178"
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                           />
                         </View>
 
                         <View style={[styles.inputGroup, { flex: 1 }]}>
-                          <Text style={styles.inputLabel}>{"Vazni (KG)"}</Text>
+                          <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Vazni (KG)"}</Text>
                           <TextInput
-                            style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                            style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                             editable={isEditing}
                             value={editForm.weight}
                             onChangeText={(val) => setEditForm({ ...editForm, weight: val })}
                             placeholder="72"
-                            placeholderTextColor="rgba(255,255,255,0.3)"
+                            placeholderTextColor={colors.textMuted}
                             keyboardType="numeric"
                           />
                         </View>
@@ -1482,12 +1963,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                           {"Instagram Username"}
                         </Text>
                         <TextInput
-                          style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                           editable={isEditing}
                           value={editForm.instagram_username}
                           onChangeText={(val) => setEditForm({ ...editForm, instagram_username: val })}
                           placeholder="@username"
-                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          placeholderTextColor={colors.textMuted}
                         />
                       </View>
                     </>
@@ -1495,57 +1976,57 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                     <>
                       {/* Team Name Input */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Jamoa Nomi"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Jamoa Nomi"}</Text>
                         <TextInput
-                          style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                           editable={isEditing}
                           value={editForm.name}
                           onChangeText={(val) => setEditForm({ ...editForm, name: val })}
                           placeholder="Jamoa nomini kiriting..."
-                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          placeholderTextColor={colors.textMuted}
                         />
                       </View>
 
                       {/* Team League Interactive Select Modal */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Ligasi (Select Modal)"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Ligasi (Select Modal)"}</Text>
                         <TouchableOpacity
-                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive]}
+                          style={[styles.selectBoxTrigger, isEditing && styles.selectBoxTriggerActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
                           onPress={handleOpenLeaguePicker}
                           disabled={!isEditing}
                           activeOpacity={0.7}
                         >
-                          <Text style={[styles.selectBoxValue, !editForm.league && { color: 'rgba(255,255,255,0.3)' }]}>
+                          <Text style={[styles.selectBoxValue, { color: colors.textPrimary }, !editForm.league && { color: colors.textMuted }]}>
                             {editForm.league || "Ligani tanlang..."}
                           </Text>
-                          <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
+                          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
                         </TouchableOpacity>
                       </View>
 
                       {/* Captain / Contact Phone */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Bog'lanish Telefoni"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Bog'lanish Telefoni"}</Text>
                         <TextInput
-                          style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                           editable={isEditing}
                           value={editForm.phone}
                           onChangeText={(val) => setEditForm({ ...editForm, phone: val })}
                           placeholder="Telefon..."
-                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          placeholderTextColor={colors.textMuted}
                           keyboardType="phone-pad"
                         />
                       </View>
 
                       {/* City / Region Input */}
                       <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>{"Shahar / Hudud"}</Text>
+                        <Text style={[styles.inputLabel, { color: colors.textMuted }]}>{"Shahar / Hudud"}</Text>
                         <TextInput
-                          style={[styles.inputBox, isEditing && styles.inputBoxActive]}
+                          style={[styles.inputBox, isEditing && styles.inputBoxActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, color: colors.textPrimary }]}
                           editable={isEditing}
                           value={editForm.city}
                           onChangeText={(val) => setEditForm({ ...editForm, city: val })}
                           placeholder="Shahar yoki hududni kiriting..."
-                          placeholderTextColor="rgba(255,255,255,0.3)"
+                          placeholderTextColor={colors.textMuted}
                         />
                       </View>
                     </>
@@ -1556,35 +2037,35 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
             {/* Modal Bottom Action Bar (Pencil Switcher & Save Button) */}
             {!isReadOnlyUser && (
-              <View style={styles.modalFooterRow}>
+              <View style={[styles.modalFooterRow, { borderTopColor: colors.border }]}>
                 <TouchableOpacity
-                  style={[styles.pencilBtn, isEditing && styles.pencilBtnActive]}
+                  style={[styles.pencilBtn, isEditing && styles.pencilBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                   onPress={() => setIsEditing(!isEditing)}
                   activeOpacity={0.7}
                 >
                   <Ionicons
                     name={isEditing ? "create" : "create-outline"}
                     size={18}
-                    color="#FFFFFF"
+                    color={colors.accentGreen}
                   />
-                  <Text style={[styles.pencilBtnText, isEditing && styles.pencilBtnTextActive]}>
+                  <Text style={[styles.pencilBtnText, { color: colors.textPrimary }]}>
                     {isEditing ? "Tahrirlash rejimida" : "Tahrirlash"}
                   </Text>
                 </TouchableOpacity>
 
                 {isEditing && (
                   <TouchableOpacity
-                    style={styles.saveBtn}
+                    style={[styles.saveBtn, { backgroundColor: colors.accentGreen, borderColor: colors.accentGreen }]}
                     onPress={handleSaveDetails}
                     disabled={saving}
                     activeOpacity={0.8}
                   >
                     {saving ? (
-                      <ActivityIndicator size="small" color="#000000" />
+                      <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <>
-                        <Ionicons name="checkmark-circle" size={18} color="#000000" />
-                        <Text style={styles.saveBtnText}>{"Saqlash"}</Text>
+                        <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+                        <Text style={[styles.saveBtnText, { color: '#FFFFFF' }]}>{"Saqlash"}</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -1592,54 +2073,11 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               </View>
             )}
 
-            {/* INTERACTIVE OPEN-CLOSE MODAL SELECT PICKER (NESTED INSIDE MAIN MODAL FOR CLICKABILITY) */}
-            <Modal visible={!!selectPickerConfig} transparent animationType="fade">
-              <TouchableOpacity
-                style={styles.pickerOverlay}
-                activeOpacity={1}
-                onPress={() => setSelectPickerConfig(null)}
-              >
-                <View style={styles.pickerCard}>
-                  <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-                  <View style={styles.pickerHeader}>
-                    <Text style={styles.pickerTitle}>{selectPickerConfig?.title || "Tanlang"}</Text>
-                    <TouchableOpacity onPress={() => setSelectPickerConfig(null)}>
-                      <Ionicons name="close" size={22} color="rgba(255,255,255,0.6)" />
-                    </TouchableOpacity>
-                  </View>
-
-                  <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
-                    {selectPickerConfig?.options.map((opt, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.pickerOptionRow,
-                          selectPickerConfig.selectedValue === opt.value && styles.pickerOptionActive,
-                        ]}
-                        onPress={() => {
-                          selectPickerConfig.onSelect(opt.value, opt.label);
-                          setSelectPickerConfig(null);
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Text
-                          style={[
-                            styles.pickerOptionText,
-                            selectPickerConfig.selectedValue === opt.value && styles.pickerOptionTextActive,
-                          ]}
-                        >
-                          {opt.label}
-                        </Text>
-                        {selectPickerConfig.selectedValue === opt.value && (
-                          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              </TouchableOpacity>
-            </Modal>
+            {/* End of detail modal card */}
           </View>
+
+          {/* Select Picker Overlay inside Detail Modal */}
+          {renderSelectPicker()}
         </View>
       </Modal>
 
@@ -1685,42 +2123,42 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         transparent={false}
         onRequestClose={() => setShowArchiveModal(false)}
       >
-        <View style={styles.archiveModalContainer}>
+        <View style={[styles.archiveModalContainer, { backgroundColor: colors.bgPrimary }]}>
           {/* Header */}
           <View style={styles.archiveHeader}>
             <TouchableOpacity
-              style={styles.archiveCloseBtn}
+              style={[styles.archiveCloseBtn, { backgroundColor: colors.bgCardElevated }]}
               onPress={() => setShowArchiveModal(false)}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+              <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
-              <Text style={styles.archiveHeaderTitle}>{"📦 Arxivlangan Ma'lumotlar"}</Text>
-              <Text style={styles.archiveHeaderSub}>{"Arxivdagi o'yinchilar va jamoalar ro'yxati"}</Text>
+              <Text style={[styles.archiveHeaderTitle, { color: colors.textPrimary }]}>{"📦 Arxivlangan Ma'lumotlar"}</Text>
+              <Text style={[styles.archiveHeaderSub, { color: colors.textMuted }]}>{"Arxivdagi o'yinchilar va jamoalar ro'yxati"}</Text>
             </View>
           </View>
 
           {/* Sub-tabs: O'yinchilar vs Jamoalar */}
-          <View style={styles.archiveSegmentContainer}>
+          <View style={[styles.archiveSegmentContainer, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
             <TouchableOpacity
-              style={[styles.archiveSegmentBtn, archiveTab === 'players' && styles.activeArchiveSegmentBtn]}
+              style={[styles.archiveSegmentBtn, archiveTab === 'players' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setArchiveTab('players')}
               activeOpacity={0.7}
             >
-              <Ionicons name="person" size={15} color={archiveTab === 'players' ? '#000000' : 'rgba(255,255,255,0.7)'} />
-              <Text style={[styles.archiveSegmentText, archiveTab === 'players' && styles.activeArchiveSegmentText]}>
+              <Ionicons name="person" size={15} color={archiveTab === 'players' ? '#FFFFFF' : colors.textMuted} />
+              <Text style={[styles.archiveSegmentText, { color: colors.textSecondary }, archiveTab === 'players' && { color: '#FFFFFF', fontWeight: '900' }]}>
                 {`O'yinchilar (${archivedPlayers.length})`}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.archiveSegmentBtn, archiveTab === 'teams' && styles.activeArchiveSegmentBtn]}
+              style={[styles.archiveSegmentBtn, archiveTab === 'teams' && { backgroundColor: colors.accentGreen }]}
               onPress={() => setArchiveTab('teams')}
               activeOpacity={0.7}
             >
-              <Ionicons name="shield" size={15} color={archiveTab === 'teams' ? '#000000' : 'rgba(255,255,255,0.7)'} />
-              <Text style={[styles.archiveSegmentText, archiveTab === 'teams' && styles.activeArchiveSegmentText]}>
+              <Ionicons name="shield" size={15} color={archiveTab === 'teams' ? '#FFFFFF' : colors.textMuted} />
+              <Text style={[styles.archiveSegmentText, { color: colors.textSecondary }, archiveTab === 'teams' && { color: '#FFFFFF', fontWeight: '900' }]}>
                 {`Jamoalar (${archivedTeams.length})`}
               </Text>
             </TouchableOpacity>
@@ -1728,18 +2166,18 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
           {/* Archive Search and Filter Bar */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-            <View style={[styles.archiveSearchContainer, { flex: 1 }]}>
-              <Ionicons name="search" size={18} color="rgba(255,255,255,0.5)" />
+            <View style={[styles.archiveSearchContainer, { flex: 1, backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+              <Ionicons name="search" size={18} color={colors.textMuted} />
               <TextInput
-                style={styles.archiveSearchInput}
+                style={[styles.archiveSearchInput, { color: colors.textPrimary }]}
                 placeholder={archiveTab === 'players' ? "Arxivdagi o'yinchini qidirish..." : "Arxivdagi jamoani qidirish..."}
-                placeholderTextColor="rgba(255,255,255,0.4)"
+                placeholderTextColor={colors.textMuted}
                 value={archiveSearchQuery}
                 onChangeText={setArchiveSearchQuery}
               />
               {archiveSearchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => setArchiveSearchQuery('')}>
-                  <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+                  <Ionicons name="close-circle" size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1747,16 +2185,15 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             {/* Filter Button (Players tab only) */}
             {archiveTab === 'players' && (
               <TouchableOpacity
-                style={[styles.archiveFilterBtn, (archiveLeagueFilter !== 'all') && styles.archiveFilterBtnActive]}
+                style={[styles.archiveFilterBtn, { backgroundColor: colors.bgCard, borderColor: colors.border }, (archiveLeagueFilter !== 'all') && { borderColor: colors.accentYellow, backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7' }]}
                 onPress={() => {
-                  console.log('[FILTER] Opening filter modal');
                   setShowArchiveFilterModal(true);
                 }}
                 activeOpacity={0.7}
               >
-                <Ionicons name="filter" size={18} color={(archiveLeagueFilter !== 'all') ? '#F59E0B' : 'rgba(255,255,255,0.7)'} />
+                <Ionicons name="filter" size={18} color={(archiveLeagueFilter !== 'all') ? colors.accentYellow : colors.textMuted} />
                 {(archiveLeagueFilter !== 'all') && (
-                  <View style={styles.archiveFilterBadge} />
+                  <View style={[styles.archiveFilterBadge, { backgroundColor: colors.accentYellow }]} />
                 )}
               </TouchableOpacity>
             )}
@@ -1765,8 +2202,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           {/* Content List */}
           {loadingArchive ? (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator size="large" color="#F59E0B" />
-              <Text style={{ color: 'rgba(255,255,255,0.5)', marginTop: 10, fontSize: 13 }}>
+              <ActivityIndicator size="large" color={colors.accentGreen} />
+              <Text style={{ color: colors.textMuted, marginTop: 10, fontSize: 13 }}>
                 {"Arxiv ma'lumotlari yuklanmoqda..."}
               </Text>
             </View>
@@ -1783,37 +2220,37 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                 const archivedDate = item.created_at ? new Date(item.created_at).toLocaleDateString('uz-UZ', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 
                 return (
-                  <View style={styles.archiveCardRow}>
-                    <ExpoImage source={{ uri: avatar }} style={styles.archiveAvatar} />
+                  <View style={[styles.archiveCardRow, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                    <ExpoImage source={{ uri: avatar }} style={[styles.archiveAvatar, { backgroundColor: colors.bgCardElevated }]} />
                     <View style={{ flex: 1, gap: 4 }}>
-                      <Text style={styles.archiveItemTitle}>{name}</Text>
-                      <Text style={styles.archiveItemSub}>
-                        <Ionicons name="shield" size={12} color="rgba(255,255,255,0.5)" />
+                      <Text style={[styles.archiveItemTitle, { color: colors.textPrimary }]}>{name}</Text>
+                      <Text style={[styles.archiveItemSub, { color: colors.textMuted }]}>
+                        <Ionicons name="shield" size={12} color={colors.textMuted} />
                         {` ${teamName}`}
                         {league && ` • ${league}`}
                       </Text>
                       {archivedDate && (
-                        <Text style={[styles.archiveItemSub, { fontSize: 11, color: 'rgba(255,255,255,0.4)' }]}>
+                        <Text style={[styles.archiveItemSub, { fontSize: 11, color: colors.textMuted }]}>
                           <Ionicons name="time-outline" size={11} />
                           {` Arxivlangan: ${archivedDate}`}
                         </Text>
                       )}
                     </View>
                     <TouchableOpacity
-                      style={styles.restoreBtn}
+                      style={[styles.restoreBtn, { backgroundColor: isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5', borderColor: colors.accentGreen }]}
                       onPress={() => handleRestoreArchivedPlayer(item)}
                       activeOpacity={0.7}
                     >
-                      <Ionicons name="refresh-outline" size={15} color="#4ADE80" />
-                      <Text style={styles.restoreBtnText}>{"QAYTARISH"}</Text>
+                      <Ionicons name="refresh-outline" size={15} color={colors.accentGreen} />
+                      <Text style={[styles.restoreBtnText, { color: colors.accentGreen }]}>{"QAYTARISH"}</Text>
                     </TouchableOpacity>
                   </View>
                 );
               }}
               ListEmptyComponent={() => (
                 <View style={styles.archiveEmptyBox}>
-                  <Ionicons name="archive-outline" size={42} color="rgba(255,255,255,0.2)" />
-                  <Text style={styles.archiveEmptyText}>{"Arxivlangan o'yinchilar topilmadi"}</Text>
+                  <Ionicons name="archive-outline" size={42} color={colors.textMuted} />
+                  <Text style={[styles.archiveEmptyText, { color: colors.textMuted }]}>{"Arxivlangan o'yinchilar topilmadi"}</Text>
                 </View>
               )}
             />
@@ -1825,29 +2262,29 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               renderItem={({ item }) => {
                 const logo = item.logo_url || 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=100&auto=format&fit=crop';
                 return (
-                  <View style={styles.archiveCardRow}>
-                    <ExpoImage source={{ uri: logo }} style={styles.archiveAvatar} />
+                  <View style={[styles.archiveCardRow, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                    <ExpoImage source={{ uri: logo }} style={[styles.archiveAvatar, { backgroundColor: colors.bgCardElevated }]} />
                     <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={styles.archiveItemTitle}>{item.name}</Text>
-                      <Text style={styles.archiveItemSub}>
+                      <Text style={[styles.archiveItemTitle, { color: colors.textPrimary }]}>{item.name}</Text>
+                      <Text style={[styles.archiveItemSub, { color: colors.textMuted }]}>
                         {item.league ? `Liga: ${item.league}` : (item.city || "Shahari ko'rsatilmagan")}
                       </Text>
                     </View>
                     <TouchableOpacity
-                      style={styles.restoreBtn}
+                      style={[styles.restoreBtn, { backgroundColor: isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5', borderColor: colors.accentGreen }]}
                       onPress={() => handleRestoreArchivedTeam(item)}
                       activeOpacity={0.7}
                     >
-                      <Ionicons name="refresh-outline" size={15} color="#4ADE80" />
-                      <Text style={styles.restoreBtnText}>{"QAYTARISH"}</Text>
+                      <Ionicons name="refresh-outline" size={15} color={colors.accentGreen} />
+                      <Text style={[styles.restoreBtnText, { color: colors.accentGreen }]}>{"QAYTARISH"}</Text>
                     </TouchableOpacity>
                   </View>
                 );
               }}
               ListEmptyComponent={() => (
                 <View style={styles.archiveEmptyBox}>
-                  <Ionicons name="shield-outline" size={42} color="rgba(255,255,255,0.2)" />
-                  <Text style={styles.archiveEmptyText}>{"Arxivlangan jamoalar topilmadi"}</Text>
+                  <Ionicons name="shield-outline" size={42} color={colors.textMuted} />
+                  <Text style={[styles.archiveEmptyText, { color: colors.textMuted }]}>{"Arxivlangan jamoalar topilmadi"}</Text>
                 </View>
               )}
             />
@@ -1855,31 +2292,30 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
           {/* Archive Filter Modal - Inside Archive Modal */}
           <Modal visible={showArchiveFilterModal} transparent animationType="fade">
-            {console.log('[FILTER] Modal render - visible:', showArchiveFilterModal)}
             <TouchableOpacity
               style={styles.archiveFilterOverlay}
               activeOpacity={1}
               onPress={() => setShowArchiveFilterModal(false)}
             >
               <TouchableOpacity
-                style={styles.archiveFilterCard}
+                style={[styles.archiveFilterCard, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
                 activeOpacity={1}
                 onPress={(e) => e.stopPropagation()}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '900' }}>Filter</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '900' }}>Filter</Text>
                   <TouchableOpacity onPress={() => setShowArchiveFilterModal(false)}>
-                    <Ionicons name="close" size={24} color="rgba(255,255,255,0.7)" />
+                    <Ionicons name="close" size={24} color={colors.textMuted} />
                   </TouchableOpacity>
                 </View>
 
                 {/* Liga tanlash */}
-                <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700', marginBottom: 8 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '700', marginBottom: 8 }}>
                   LIGA
                 </Text>
                 <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
                   <TouchableOpacity
-                    style={[styles.archiveFilterOption, archiveLeagueFilter === 'all' && styles.archiveFilterOptionActive]}
+                    style={[styles.archiveFilterOption, archiveLeagueFilter === 'all' && { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : colors.bgCardElevated }]}
                     onPress={() => {
                       setArchiveLeagueFilter('all');
                       setShowArchiveFilterModal(false);
@@ -1888,9 +2324,9 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                     <Ionicons
                       name={archiveLeagueFilter === 'all' ? 'checkmark-circle' : 'ellipse-outline'}
                       size={20}
-                      color={archiveLeagueFilter === 'all' ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
+                      color={archiveLeagueFilter === 'all' ? colors.accentGreen : colors.textMuted}
                     />
-                    <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === 'all' && styles.archiveFilterOptionTextActive]}>
+                    <Text style={[styles.archiveFilterOptionText, { color: colors.textSecondary }, archiveLeagueFilter === 'all' && { color: colors.accentGreen, fontWeight: '800' }]}>
                       Barcha ligalar
                     </Text>
                   </TouchableOpacity>
@@ -1898,7 +2334,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                   {leagues.map((lg: any) => (
                     <TouchableOpacity
                       key={lg.name}
-                      style={[styles.archiveFilterOption, archiveLeagueFilter === lg.name && styles.archiveFilterOptionActive]}
+                      style={[styles.archiveFilterOption, archiveLeagueFilter === lg.name && { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : colors.bgCardElevated }]}
                       onPress={() => {
                         setArchiveLeagueFilter(lg.name);
                         setShowArchiveFilterModal(false);
@@ -1907,9 +2343,9 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                       <Ionicons
                         name={archiveLeagueFilter === lg.name ? 'checkmark-circle' : 'ellipse-outline'}
                         size={20}
-                        color={archiveLeagueFilter === lg.name ? '#F59E0B' : 'rgba(255,255,255,0.3)'}
+                        color={archiveLeagueFilter === lg.name ? colors.accentGreen : colors.textMuted}
                       />
-                      <Text style={[styles.archiveFilterOptionText, archiveLeagueFilter === lg.name && styles.archiveFilterOptionTextActive]}>
+                      <Text style={[styles.archiveFilterOptionText, { color: colors.textSecondary }, archiveLeagueFilter === lg.name && { color: colors.accentGreen, fontWeight: '800' }]}>
                         {lg.name}
                       </Text>
                     </TouchableOpacity>
@@ -1920,6 +2356,9 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           </Modal>
         </View>
       </Modal>
+
+      {/* Root Select Picker for Top Filters (Liga & Jamoa) */}
+      {renderSelectPicker()}
     </View>
   );
 };
@@ -1957,7 +2396,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'transparent',
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1980,7 +2419,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'transparent',
     borderRadius: 14,
     paddingHorizontal: 16,
     height: 48,
@@ -1999,7 +2438,7 @@ const styles = StyleSheet.create({
 
   segmentContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'transparent',
     borderRadius: 14,
     padding: 3,
     marginBottom: 10,
@@ -2099,7 +2538,7 @@ const styles = StyleSheet.create({
   },
 
   cardItem: {
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'transparent',
     borderRadius: 16,
     borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.18)',
@@ -2153,7 +2592,7 @@ const styles = StyleSheet.create({
   skeletonCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: 'transparent',
     borderRadius: 16,
     padding: 12,
     gap: 12,
@@ -2377,11 +2816,12 @@ const styles = StyleSheet.create({
 
   // Modal Select Picker Styles
   pickerOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
+    zIndex: 999999,
   },
   pickerCard: {
     width: '100%',
@@ -2670,5 +3110,28 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.4)',
     fontSize: 13,
     fontWeight: '600',
+  },
+  topFilterBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  topFilterBtnActive: {
+    borderColor: '#00FF87',
+    backgroundColor: 'rgba(0, 255, 135, 0.08)',
+  },
+  topFilterBtnText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

@@ -8,8 +8,11 @@ export const queryKeys = {
     orgId: any,
     search: string = '',
     page: number = 0,
-    pageSize: number = 15,
-    archived: boolean = false
+    pageSize: number = 25,
+    archived: boolean = false,
+    league: string = 'all',
+    teamId: string = 'all',
+    collabLeagueNames: string[] = []
   ) => [
     'players',
     Number(orgId) || 1,
@@ -17,13 +20,31 @@ export const queryKeys = {
     page,
     pageSize,
     archived,
+    league,
+    teamId,
+    (collabLeagueNames || []).sort().join(','),
   ] as const,
   
-  teams: (orgId: any, leagueId?: any) => 
-    ['teams', Number(orgId) || 1, leagueId ? String(leagueId) : 'all'] as const,
+  teams: (orgId: any, collabLeagueNames: string[] = []) => 
+    ['teams', Number(orgId) || 1, (collabLeagueNames || []).sort().join(',')] as const,
 
-  paginatedTeams: (orgId: any, search: string = '', page: number = 0, pageSize: number = 15) =>
-    ['paginatedTeams', Number(orgId) || 1, search.trim(), page, pageSize] as const,
+  paginatedTeams: (
+    orgId: any,
+    search: string = '',
+    page: number = 0,
+    pageSize: number = 10,
+    league: string = 'all',
+    collabLeagueNames: string[] = []
+  ) =>
+    [
+      'paginatedTeams',
+      Number(orgId) || 1,
+      search.trim(),
+      page,
+      pageSize,
+      league,
+      (collabLeagueNames || []).sort().join(','),
+    ] as const,
   
   applications: (
     orgId: any,
@@ -48,17 +69,17 @@ export const queryKeys = {
   teamRoster: (orgId: any, teamId: any) =>
     ['teamRoster', Number(orgId) || 1, String(teamId)] as const,
   
-  matches: (orgId: any, leagueName: string = 'all') => 
-    ['matches', Number(orgId) || 1, leagueName] as const,
+  matches: (orgId: any, leagueName: string = 'all', collabLeagueNames: string[] = []) => 
+    ['matches', Number(orgId) || 1, leagueName, (collabLeagueNames || []).sort().join(',')] as const,
   
-  finishedMatches: (orgId: any, leagueName: string = 'all', page: number = 0, pageSize: number = 15) => 
-    ['finishedMatches', Number(orgId) || 1, leagueName, page, pageSize] as const,
+  finishedMatches: (orgId: any, leagueName: string = 'all', page: number = 0, pageSize: number = 15, collabLeagueNames: string[] = []) => 
+    ['finishedMatches', Number(orgId) || 1, leagueName, page, pageSize, (collabLeagueNames || []).sort().join(',')] as const,
   
   transfers: (orgId: any, status: string = 'all', page: number = 0, pageSize: number = 15) => 
     ['transfers', Number(orgId) || 1, status, page, pageSize] as const,
   
-  leagues: (orgId: any) => 
-    ['leagues', Number(orgId) || 1] as const,
+  leagues: (orgId: any, collabLeagueIds: number[] = []) => 
+    ['leagues', Number(orgId) || 1, (collabLeagueIds || []).sort().join(',')] as const,
   
   news: (orgId: any) => 
     ['news', Number(orgId) || 1] as const,

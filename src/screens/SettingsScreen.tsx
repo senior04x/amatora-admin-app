@@ -1,39 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter, Alert, Image, ActivityIndicator, AppState } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../components/SafeBlurView';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
 import { useOrg } from '../context/OrgContext';
+import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { hasSecurePin, deleteSecurePin } from '../utils/securePin';
-import {
-  getYtTokens,
-  saveYtTokens,
-  fetchYtChannelInfo,
-  getValidAccessToken,
-  disconnectYouTube,
-  loadYtChannelForOrg,
-  YT_SCOPES,
-  YtChannelInfo,
-} from '../utils/youtubeService';
 import pkg from '../../package.json';
 
-// Required for expo-auth-session warm-up
-WebBrowser.maybeCompleteAuthSession();
-
 const APP_VERSION = `v${pkg.version}`;
-
-// Google OAuth Client IDs
-// Web Client ID (existing - used for web admin)
-const GOOGLE_WEB_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
-// iOS Client ID — Google Console > Credentials > Create OAuth Client ID > iOS > Bundle ID: com.amatora.adminapp
-const GOOGLE_IOS_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
-// Android Client ID — Google Console > Credentials > Create OAuth Client ID > Android
-const GOOGLE_ANDROID_CLIENT_ID = '869594621568-f43saav9qgm76srbi5jfhonb92q7ubsl.apps.googleusercontent.com';
 
 interface SettingsScreenProps {
   onGoBack?: () => void;
@@ -41,165 +19,10 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   const { currentOrg, orgId, userRole, showToast } = useOrg();
+  const { isDark, colors, themeMode, setThemeMode } = useTheme();
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [hasPin, setHasPin] = useState(false);
-
-  // YouTube state
-  const [ytChannelInfo, setYtChannelInfo] = useState<YtChannelInfo | null>(null);
-  const [ytLoading, setYtLoading] = useState(false);
-  const [ytConnecting, setYtConnecting] = useState(false);
-
-  // ─── Google Auth Request (handles iOS/Android redirect URIs automatically) ──
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
-    iosClientId: GOOGLE_IOS_CLIENT_ID,
-    webClientId: GOOGLE_WEB_CLIENT_ID,
-    scopes: YT_SCOPES,
-    shouldAutoExchangeCode: false,
-    extraParams: {
-      access_type: 'offline',
-      prompt: 'consent select_account',
-    },
-  });
-
-  // ─── Handle OAuth Response ─────────────────────────────────────────
-  useEffect(() => {
-    if (response?.type === 'success' && response.params?.code) {
-      handleCodeExchange(response.params.code);
-    } else if (response?.type === 'error') {
-      console.error('YouTube OAuth error:', response.error);
-      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
-      setYtConnecting(false);
-    } else if (response?.type === 'dismiss' || response?.type === 'cancel') {
-      setYtConnecting(false);
-    }
-  }, [response]);
-
-  const handleCodeExchange = async (code: string) => {
-    setYtConnecting(true);
-    try {
-      // iOS OAuth clients are "public" — use PKCE instead of client_secret
-      const tokenRequestBody: Record<string, string> = {
-        code,
-        client_id: GOOGLE_IOS_CLIENT_ID,
-        redirect_uri: request?.redirectUri || '',
-        grant_type: 'authorization_code',
-      };
-
-      // PKCE code verifier (required for iOS OAuth clients)
-      if (request?.codeVerifier) {
-        tokenRequestBody.code_verifier = request.codeVerifier;
-      }
-
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(tokenRequestBody).toString(),
-      });
-
-      const tokenData = await tokenResponse.json();
-
-      if (tokenData.access_token) {
-        // Fetch channel info
-        const channelInfo = await fetchYtChannelInfo(tokenData.access_token);
-
-        // Save tokens to AsyncStorage + Supabase DB
-        await saveYtTokens(orgId || 1, tokenData, channelInfo);
-
-        setYtChannelInfo(channelInfo);
-        showToast({
-          message: channelInfo
-            ? `YouTube ulandi: ${channelInfo.title}`
-            : 'YouTube muvaffaqiyatli ulandi!',
-          type: 'success',
-        });
-      } else {
-        console.error('YouTube token exchange failed:', tokenData);
-        Alert.alert('Xatolik', `YouTube token olishda xatolik: ${tokenData?.error || 'noma\'lum'}`);
-      }
-    } catch (err) {
-      console.error('Error exchanging YouTube code:', err);
-      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
-    } finally {
-      setYtConnecting(false);
-    }
-  };
-
-  // ─── Load YouTube channel on mount (Only for Super Admin) ───────────
-  useEffect(() => {
-    if (orgId && userRole !== 'user') {
-      loadYouTubeStatus();
-    }
-  }, [orgId, userRole]);
-
-  // ─── Reload when app comes to foreground (Only for Super Admin) ────
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'active' && orgId && userRole !== 'user') {
-        loadYouTubeStatus();
-      }
-    });
-    return () => subscription.remove();
-  }, [orgId, userRole]);
-
-  const loadYouTubeStatus = async () => {
-    setYtLoading(true);
-    try {
-      const channelInfo = await loadYtChannelForOrg(orgId || 1);
-      setYtChannelInfo(channelInfo);
-    } catch (e) {
-      console.error('Load YT status error:', e);
-      setYtChannelInfo(null);
-    } finally {
-      setYtLoading(false);
-    }
-  };
-
-  // ─── Connect YouTube ───────────────────────────────────────────────
-  const handleConnectYouTube = async () => {
-    if (!request) {
-      Alert.alert('Kutib turing', 'OAuth tayyorlanmoqda, bir necha soniya kutib qayta urinib ko\'ring.');
-      return;
-    }
-
-    setYtConnecting(true);
-    try {
-      await promptAsync();
-    } catch (err) {
-      console.error('YouTube connect error:', err);
-      setYtConnecting(false);
-      Alert.alert('Xatolik', 'YouTube ulanishda xatolik yuz berdi.');
-    }
-  };
-
-  // ─── Disconnect YouTube ────────────────────────────────────────────
-  const handleDisconnectYouTube = () => {
-    Alert.alert(
-      'YouTube uzish',
-      `"${ytChannelInfo?.title || 'YouTube'}" kanalini uzmoqchimisiz?`,
-      [
-        { text: 'Bekor qilish', style: 'cancel' },
-        {
-          text: 'Uzish',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await disconnectYouTube(orgId || 1);
-              setYtChannelInfo(null);
-              showToast({
-                message: 'YouTube kanal uzildi',
-                type: 'warning',
-              });
-            } catch (e) {
-              console.error('Disconnect error:', e);
-              Alert.alert('Xatolik', 'YouTube uzishda xatolik yuz berdi.');
-            }
-          },
-        },
-      ]
-    );
-  };
 
   useEffect(() => {
     loadSettings();
@@ -381,192 +204,238 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
+    <ScrollView
+      style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}
+      contentContainerStyle={{ paddingBottom: 100 }}
+    >
       {/* Header Row with Back Button */}
       <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.backBtn} activeOpacity={0.7} onPress={onNavigateBack}>
-          <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+        <TouchableOpacity
+          style={[styles.backBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+          activeOpacity={0.7}
+          onPress={onNavigateBack}
+        >
+          <Ionicons name="arrow-back" size={22} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Sozlamalar</Text>
+        <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Sozlamalar</Text>
         <View style={{ width: 40 }} />
       </View>
 
       {/* Security Section */}
-      <Text style={styles.sectionHeader}>Xavfsizlik & Kirish</Text>
+      <Text style={[styles.sectionHeader, Platform.OS === 'android' && { color: colors.textPrimary }]}>Xavfsizlik & Kirish</Text>
 
-      <View style={styles.settingItem}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+      <View style={[styles.settingItem, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
         <View style={styles.settingLeft}>
-          <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
-            <Ionicons name="finger-print" size={20} color="#FFFFFF" />
+          <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#E0F2FE' }]}>
+            <Ionicons name="finger-print" size={20} color={Platform.OS === 'android' ? colors.accentGreen : "#FFFFFF"} />
           </View>
           <View>
-            <Text style={styles.settingTitle}>Face ID / Barmoq Izi</Text>
-            <Text style={styles.settingSub}>Ilovaga kirishda biometriya so'rash</Text>
+            <Text style={[styles.settingTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Face ID / Barmoq Izi</Text>
+            <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Ilovaga kirishda biometriya so'rash</Text>
           </View>
         </View>
         <Switch
           value={biometricsEnabled}
           onValueChange={toggleBiometrics}
-          trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+          trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: colors.accentGreen }}
           thumbColor={biometricsEnabled ? '#FFFFFF' : '#94A3B8'}
         />
       </View>
 
-      <View style={styles.settingItem}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+      <View style={[styles.settingItem, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
         <View style={styles.settingLeft}>
-          <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
-            <Ionicons name="notifications" size={20} color="#FFFFFF" />
+          <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#FEF3C7' }]}>
+            <Ionicons name="notifications" size={20} color={Platform.OS === 'android' ? '#F59E0B' : "#FFFFFF"} />
           </View>
           <View>
-            <Text style={styles.settingTitle}>Bildirishnomalar</Text>
-            <Text style={styles.settingSub}>Tizim xabarlari va eslatmalar</Text>
+            <Text style={[styles.settingTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Bildirishnomalar</Text>
+            <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Tizim xabarlari va eslatmalar</Text>
           </View>
         </View>
         <Switch
           value={notificationsEnabled}
           onValueChange={toggleNotifications}
-          trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.35)' }}
+          trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: colors.accentGreen }}
           thumbColor={notificationsEnabled ? '#FFFFFF' : '#94A3B8'}
         />
       </View>
 
       {hasPin ? (
         <>
-          <TouchableOpacity style={styles.settingItem} activeOpacity={0.7} onPress={handleSetOrEditPin}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <TouchableOpacity
+            style={[styles.settingItem, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+            activeOpacity={0.7}
+            onPress={handleSetOrEditPin}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.settingLeft}>
-              <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
-                <Ionicons name="keypad" size={20} color="#FFFFFF" />
+              <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#E2E8F0' }]}>
+                <Ionicons name="keypad" size={20} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
               </View>
               <View>
-                <Text style={styles.settingTitle}>PIN kodni tahrirlash</Text>
-                <Text style={styles.settingSub}>Yangi PIN kod o'rnatish</Text>
+                <Text style={[styles.settingTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>PIN kodni tahrirlash</Text>
+                <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Yangi PIN kod o'rnatish</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+            <Ionicons name="chevron-forward" size={20} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.settingItem, { borderColor: 'rgba(239, 68, 68, 0.3)' }]} activeOpacity={0.7} onPress={handleResetPin}>
-            <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <TouchableOpacity
+            style={[
+              styles.settingItem,
+              { borderColor: 'rgba(239, 68, 68, 0.3)' },
+              Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.08)' : '#FEF2F2', borderColor: '#EF4444' }
+            ]}
+            activeOpacity={0.7}
+            onPress={handleResetPin}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.settingLeft}>
               <View style={[styles.settingIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
                 <Ionicons name="trash" size={20} color="#EF4444" />
               </View>
               <View>
                 <Text style={[styles.settingTitle, { color: '#EF4444' }]}>PIN kodni o'chirish</Text>
-                <Text style={styles.settingSub}>Kirish kodini olib tashlash</Text>
+                <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Kirish kodini olib tashlash</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+            <Ionicons name="chevron-forward" size={20} color="#EF4444" />
           </TouchableOpacity>
         </>
       ) : (
-        <TouchableOpacity style={styles.settingItem} activeOpacity={0.7} onPress={handleSetOrEditPin}>
-          <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
+        <TouchableOpacity
+          style={[styles.settingItem, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+          activeOpacity={0.7}
+          onPress={handleSetOrEditPin}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <View style={styles.settingLeft}>
-            <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 255, 255, 0.1)' }]}>
-              <Ionicons name="keypad" size={20} color="#FFFFFF" />
+            <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#E2E8F0' }]}>
+              <Ionicons name="keypad" size={20} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
             </View>
             <View>
-              <Text style={styles.settingTitle}>PIN kod o'rnatish</Text>
-              <Text style={styles.settingSub}>Xavfsizlik uchun kod o'rnating</Text>
+              <Text style={[styles.settingTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>PIN kod o'rnatish</Text>
+              <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Xavfsizlik uchun kod o'rnating</Text>
             </View>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
+          <Ionicons name="chevron-forward" size={20} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.4)"} />
         </TouchableOpacity>
       )}
 
-      {/* ─── YouTube Integration Section (Only for Super Admin) ─────── */}
-      {userRole !== 'user' && (
+      {/* ─── Theme / Appearance Section (Android Only) ─────── */}
+      {Platform.OS === 'android' && (
         <>
-          <Text style={styles.sectionHeader}>YouTube Integratsiya</Text>
-
-          {ytLoading ? (
-            <View style={styles.settingItem}>
-              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-              <View style={styles.settingLeft}>
-                <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-                  <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-                </View>
-                <View>
-                  <Text style={styles.settingTitle}>YouTube holati tekshirilmoqda...</Text>
-                  <Text style={styles.settingSub}>Iltimos kuting</Text>
-                </View>
+          <Text style={[styles.sectionHeader, { color: colors.textPrimary }]}>Tashqi Ko'rinish & Mavzu</Text>
+          <View style={[styles.themeBoxContainer, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            <View style={styles.themeHeaderRow}>
+              <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(250, 204, 21, 0.15)' : '#FEF3C7' }]}>
+                <Ionicons
+                  name={themeMode === 'system' ? "phone-portrait-outline" : isDark ? "moon" : "sunny"}
+                  size={20}
+                  color={isDark ? '#FACC15' : '#D97706'}
+                />
               </View>
-              <ActivityIndicator size="small" color="rgba(255, 255, 255, 0.5)" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.settingTitle, { color: colors.textPrimary }]}>Ilova Mavzusi</Text>
+                <Text style={[styles.settingSub, { color: colors.textMuted }]}>
+                  {themeMode === 'system'
+                    ? "Qurilma tizim sozlamasiga moslashgan (Avtomatik)"
+                    : themeMode === 'dark'
+                    ? "Tungi qorong'i rejim faol"
+                    : "Kunduzgi yorug' rejim faol"}
+                </Text>
+              </View>
             </View>
-          ) : ytChannelInfo ? (
-            /* ─── Connected State ─── */
-            <View style={[styles.settingItem, { borderColor: 'rgba(0, 255, 102, 0.3)' }]}>
-              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-              <View style={styles.settingLeft}>
-                {ytChannelInfo.thumbnail ? (
-                  <Image
-                    source={{ uri: ytChannelInfo.thumbnail }}
-                    style={styles.ytAvatar}
-                  />
-                ) : (
-                  <View style={[styles.settingIcon, { backgroundColor: 'rgba(0, 255, 102, 0.15)' }]}>
-                    <Ionicons name="checkmark-circle" size={20} color="#00FF66" />
-                  </View>
-                )}
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.settingTitle} numberOfLines={1}>{ytChannelInfo.title}</Text>
-                  <Text style={[styles.settingSub, { color: 'rgba(0, 255, 102, 0.7)' }]}>
-                    YouTube kanal ulangan ✓
-                  </Text>
-                </View>
-              </View>
+
+            {/* 3-Way Segment Selector: Avtomatik, Qorong'i, Kunduzgi */}
+            <View style={[styles.themeSegmentTrack, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#E2E8F0', borderColor: colors.border }]}>
+              {/* Option 1: System / Avtomatik */}
               <TouchableOpacity
-                style={styles.ytDisconnectBtn}
+                style={[
+                  styles.themeSegmentBtn,
+                  themeMode === 'system' && [styles.themeSegmentBtnActive, { backgroundColor: colors.bgCardElevated }],
+                ]}
+                onPress={() => setThemeMode('system')}
                 activeOpacity={0.7}
-                onPress={handleDisconnectYouTube}
               >
-                <Ionicons name="close-circle" size={16} color="#EF4444" />
-                <Text style={styles.ytDisconnectText}>Uzish</Text>
+                <Ionicons
+                  name="phone-portrait-outline"
+                  size={15}
+                  color={themeMode === 'system' ? colors.accentGreen : colors.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.themeSegmentText,
+                    { color: colors.textSecondary },
+                    themeMode === 'system' && [styles.themeSegmentTextActive, { color: colors.textPrimary }],
+                  ]}
+                >
+                  {"Avtomatik"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 2: Dark / Qorong'i */}
+              <TouchableOpacity
+                style={[
+                  styles.themeSegmentBtn,
+                  themeMode === 'dark' && [styles.themeSegmentBtnActive, { backgroundColor: colors.bgCardElevated }],
+                ]}
+                onPress={() => setThemeMode('dark')}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="moon"
+                  size={15}
+                  color={themeMode === 'dark' ? '#FACC15' : colors.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.themeSegmentText,
+                    { color: colors.textSecondary },
+                    themeMode === 'dark' && [styles.themeSegmentTextActive, { color: colors.textPrimary }],
+                  ]}
+                >
+                  {"Qorong'i"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Option 3: Light / Kunduzgi */}
+              <TouchableOpacity
+                style={[
+                  styles.themeSegmentBtn,
+                  themeMode === 'light' && [styles.themeSegmentBtnActive, { backgroundColor: colors.bgCardElevated }],
+                ]}
+                onPress={() => setThemeMode('light')}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="sunny"
+                  size={15}
+                  color={themeMode === 'light' ? '#F59E0B' : colors.textMuted}
+                />
+                <Text
+                  style={[
+                    styles.themeSegmentText,
+                    { color: colors.textSecondary },
+                    themeMode === 'light' && [styles.themeSegmentTextActive, { color: colors.textPrimary }],
+                  ]}
+                >
+                  {"Kunduzgi"}
+                </Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            /* ─── Not Connected State ─── */
-            <TouchableOpacity
-              style={styles.settingItem}
-              activeOpacity={0.7}
-              onPress={handleConnectYouTube}
-              disabled={ytConnecting}
-            >
-              <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />
-              <View style={styles.settingLeft}>
-                <View style={[styles.settingIcon, { backgroundColor: 'rgba(255, 0, 0, 0.15)' }]}>
-                  <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-                </View>
-                <View>
-                  <Text style={styles.settingTitle}>YouTube Kanal Ulash</Text>
-                  <Text style={styles.settingSub}>Translyatsiya boshqaruvi uchun</Text>
-                </View>
-              </View>
-              {ytConnecting ? (
-                <ActivityIndicator size="small" color="#FF0000" />
-              ) : (
-                <Ionicons name="chevron-forward" size={20} color="rgba(255, 255, 255, 0.4)" />
-              )}
-            </TouchableOpacity>
-          )}
-
-          <Text style={styles.ytInfoText}>
-            YouTube kanalini ulash orqali translyatsiya oblojkalarini avtomatik yangilash va jonli efirlarni boshqarish imkoniyatiga ega bo'lasiz.
-            {'\n\n'}Kanal ma'lumotlari serverda saqlanadi — ilovani qayta o'rnatganingizda ham uzilmaydi.
-          </Text>
+          </View>
         </>
       )}
 
       {/* App Info */}
-      <Text style={styles.sectionHeader}>Ilova haqida</Text>
-      <View style={styles.infoBox}>
-        <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-        <Text style={styles.infoText}>{"Ilova: AMATORA Admin"}</Text>
-        <Text style={styles.infoText}>{`Versiya: ${APP_VERSION}`}</Text>
+      <Text style={[styles.sectionHeader, Platform.OS === 'android' && { color: colors.textPrimary }]}>Ilova haqida</Text>
+      <View style={[styles.infoBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+        <Text style={[styles.infoText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ilova: AMATORA Admin"}</Text>
+        <Text style={[styles.infoText, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Versiya: ${APP_VERSION}`}</Text>
       </View>
     </ScrollView>
   );
@@ -667,35 +536,48 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  // ─── YouTube-specific styles ──────────────────────────────────────
-  ytAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: 'rgba(0, 255, 102, 0.4)',
+  // ─── Theme Selector styles ──────────────────────────────────────
+  themeBoxContainer: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1.2,
+    gap: 12,
+    marginBottom: 12,
   },
-  ytDisconnectBtn: {
+  themeHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
+    gap: 12,
   },
-  ytDisconnectText: {
-    color: '#EF4444',
-    fontSize: 11,
+  themeSegmentTrack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    padding: 3,
+    borderWidth: 1,
+    gap: 4,
+  },
+  themeSegmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  themeSegmentBtnActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  themeSegmentText: {
+    fontSize: 12,
     fontWeight: '700',
   },
-  ytInfoText: {
-    color: 'rgba(255, 255, 255, 0.35)',
-    fontSize: 11,
-    lineHeight: 16,
-    paddingHorizontal: 4,
-    marginBottom: 20,
+  themeSegmentTextActive: {
+    fontWeight: '900',
   },
 });
