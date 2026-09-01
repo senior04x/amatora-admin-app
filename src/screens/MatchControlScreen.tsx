@@ -210,6 +210,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const timerRef = useRef<any>(null);
   const timerStartedAtRef = useRef<string | null>(initialTimer.startedAt);
   const baseTimerSecondsRef = useRef<number>(initialTimer.baseSec);
+  // Operator o'yinni yakunlashni unutib, taymer pauza qilinmagan holda
+  // (is_timer_running=true) davomiy ishlab qolib ketishining oldini olish
+  // uchun — bitta marta avtomatik yakunlash ishga tushishini kafolatlaydi
+  const autoFinishTriggeredRef = useRef(false);
 
   // Status Change Custom Confirmation Modal State & Loading State
   const [isStatusChanging, setIsStatusChanging] = useState(false);
@@ -233,6 +237,14 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | number>('');
   const [selectedSubInPlayerId, setSelectedSubInPlayerId] = useState<string | number>('');
   const [eventMinute, setEventMinute] = useState<string>('1');
+  // Tahrirlanayotgan voqea id'si — null bo'lsa modal YANGI voqea qo'shish
+  // rejimida, aks holda MAVJUD voqeani (id o'zgarmasdan) YANGILASH rejimida
+  // ishlaydi. Buning kerakligi sababi: avval "tuzatish" faqat o'chirib qayta
+  // qo'shish orqali qilinar edi — bu esa event id'ni o'zgartirib, unga
+  // biriktirilgan replay_video_url'ni yo'qotib qo'yardi (agar tuzatish OBS
+  // orqali replay biriktirilgandan ancha keyin, masalan bir kundan keyin
+  // qilinsa — vaqtinchalik "orphan" xotira ham allaqachon tozalangan bo'lardi).
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [savingEvent, setSavingEvent] = useState(false);
 
   const dbClient = supabase;
@@ -762,14 +774,33 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     updateTimerDBAndState(newSec, nowIso, isTimerRunning);
   };
 
-  // Instant Optimistic Score Adjuster (+1 / -1) with Rollback
+  // Instant Optimistic Score Adjuster (+1 / -1) with Rollback.
+  // MUHIM: delta=+1 (gol qo'shilayotganda) endi shunchaki hisobni oshirish
+  // bilan CHEKLANMAYDI — shu bilan birga match_events jadvaliga "muallifsiz"
+  // (player_id: null) gol voqeasi HAM to'g'ridan-to'g'ri qo'shiladi (bu
+  // usul `record_match_event` RPC'ni ATAYLAB chetlab o'tadi, chunki o'sha
+  // RPC p_player_id albatta jamoaning tasdiqlangan a'zosi bo'lishini talab
+  // qiladi va NULL qabul qilmaydi — buni web admin ham xuddi shunday
+  // to'g'ridan-to'g'ri INSERT orqali chetlab o'tadi). Bu, raqamsiz kiyimda
+  // o'ynagan (shu sabab o'yinchilar ro'yxatidan tanlab bo'lmaydigan)
+  // futbolchining goli uchun ishlatilganda, ikkita muhim narsani beradi:
+  //   1) Match Detail sahifasida bu endi "JAMOA GOLI" sifatida ko'rinadi
+  //      (avval umuman event yaratilmagani uchun voqealar ro'yxatida
+  //      butunlay ko'rinmas edi).
+  //   2) OBS controller ham to'g'ridan-to'g'ri match_events jadvalini poll
+  //      qilgani uchun bu golni oddiy gol eventi kabi aniqlab, replay
+  //      videoni ANIQ shu event id'siga avtomatik biriktiradi — avval bu
+  //      mumkin emas edi, chunki hech qanday event/id yaratilmagan, video
+  //      esa jamoaning HECH NARSASIGA bog'lanmay "etim" bo'lib qolardi.
+  // delta<=0 (kamaytirish) holatida xatti-harakat O'ZGARISHSIZ qoladi —
+  // bu faqat qo'lda xato tuzatish uchun, hech qanday event
+  // yaratilmaydi/o'chirilmaydi (qaysi eventni o'chirish noaniq bo'lgani
+  // uchun).
   const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
     if (!match || isReadOnlyMode) return;
     const isHome = teamType === 'home';
     const oldScore = isHome ? match.home_score || 0 : match.away_score || 0;
     const newScore = Math.max(0, oldScore + delta);
-
-    const updatePayload = isHome ? { home_score: newScore } : { away_score: newScore };
 
     // 0ms Optimistic local update
     setMatch((prev: any) => ({
@@ -777,6 +808,60 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       [isHome ? 'home_score' : 'away_score']: newScore,
     }));
 
+    if (delta > 0) {
+      const teamId = isHome ? match?.home_team_id : match?.away_team_id;
+      const minVal = getCurrentMinute();
+      const optimisticId = 'team-goal-' + Date.now();
+      const optimisticEvent: any = {
+        id: optimisticId,
+        match_id: matchId,
+        team_id: teamId,
+        player_id: null,
+        event_type: 'goal',
+        type: 'goal',
+        minute: minVal,
+        replay_video_url: null,
+        created_at: new Date().toISOString(),
+        player: null,
+        team: isHome ? homeTeam : awayTeam,
+      };
+      setEvents((prev) => [...prev, optimisticEvent]);
+
+      try {
+        const { data: inserted, error: insertErr } = await supabase
+          .from('match_events')
+          .insert([{
+            match_id: matchId,
+            team_id: teamId,
+            player_id: null,
+            event_type: 'goal',
+            type: 'goal',
+            minute: minVal,
+          }])
+          .select('*')
+          .single();
+
+        if (insertErr) throw insertErr;
+
+        if (inserted?.id) {
+          setEvents((prev) => prev.map((e) => (e.id === optimisticId ? { ...optimisticEvent, id: inserted.id } : e)));
+        }
+
+        await supabase.from('matches').update({
+          [isHome ? 'home_score' : 'away_score']: newScore,
+          updated_at: new Date().toISOString(),
+        }).eq('id', matchId);
+      } catch (e) {
+        console.warn('adjustScore (jamoa goli) DB error:', e);
+        setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
+        setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
+        Alert.alert("Xatolik", "Jamoa golini saqlashda xatolik yuz berdi");
+      }
+      return;
+    }
+
+    // delta <= 0: faqat hisobni tuzatish (event yaratilmaydi/o'chirilmaydi)
+    const updatePayload = isHome ? { home_score: newScore } : { away_score: newScore };
     try {
       await supabase.from('matches').update(updatePayload).eq('id', matchId);
     } catch (e) {
@@ -926,14 +1011,70 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  // AVTOMATIK YAKUNLASH NAZORATCHISI (Auto-finish watchdog)
+  // Operator o'yinni yakunlashni unutib qo'yishi mumkin — agar taymer
+  // pauza qilinmagan holda (is_timer_running=true, timer_started_at
+  // real vaqt belgisi bo'yicha) ligaga belgilangan umumiy o'yin
+  // vaqtidan + 30 daqiqa "grace" muddatdan ko'proq davomiy ishlab
+  // ketsa, o'yin bazani behuda band qilib turmasligi uchun avtomatik
+  // "finished" holatiga o'tkaziladi. Haqiqiy (server) vaqt belgisiga
+  // asoslangani uchun ekran qayta ochilganda ham to'g'ri ishlaydi.
+  useEffect(() => {
+    if (!match || !matchId) return;
+    if (match.status === 'finished' || match.status === 'scheduled') {
+      autoFinishTriggeredRef.current = false;
+      return;
+    }
+    if (!match.is_timer_running || !match.timer_started_at) return;
+
+    const checkAutoFinish = () => {
+      if (autoFinishTriggeredRef.current) return;
+      if (!match.timer_started_at) return;
+      const startedMs = new Date(match.timer_started_at).getTime();
+      if (isNaN(startedMs)) return;
+      const runningForSec = (Date.now() - startedMs) / 1000;
+      const limitSec = (matchDurationMins + 30) * 60;
+      if (runningForSec >= limitSec) {
+        autoFinishTriggeredRef.current = true;
+        console.warn(`⏰ Auto-finish: match ${matchId} taymeri ${Math.round(runningForSec / 60)} daqiqadan beri pauzasiz ishlab turibdi (limit: ${matchDurationMins + 30} daq) — o'yin avtomatik yakunlanmoqda.`);
+        executeStatusChange('finished');
+      }
+    };
+
+    checkAutoFinish();
+    const watchdogInterval = setInterval(checkAutoFinish, 60000);
+    return () => clearInterval(watchdogInterval);
+  }, [matchId, match?.status, match?.is_timer_running, match?.timer_started_at, matchDurationMins]);
+
   // Open Event Modal prefilled
   const openEventModal = (type: string, teamId?: string | number, playerId?: string | number) => {
     if (isReadOnlyMode) return;
+    setEditingEventId(null);
     setEventType(type);
     setSelectedTeamId(teamId || match?.home_team_id || '');
     setSelectedPlayerId(playerId || '');
     setSelectedSubInPlayerId('');
     setEventMinute(getCurrentMinute().toString());
+    setShowEventModal(true);
+  };
+
+  // Mavjud voqeani TAHRIRLASH uchun modalni to'ldirib ochish.
+  // MUHIM: bu funksiya hech narsani o'chirmaydi/yaratmaydi — faqat modal
+  // maydonlarini shu voqeaning joriy qiymatlari bilan to'ldiradi.
+  // Haqiqiy saqlash `handleSaveEvent` ichidagi `editingEventId` shoxobchasi
+  // orqali TO'G'RIDAN-TO'G'RI UPDATE qiladi (voqea id'si o'zgarmaydi —
+  // shu sababli unga avval OBS orqali biriktirilgan `replay_video_url`
+  // ham saqlanib qoladi, hattoki tuzatish bir necha kundan keyin
+  // qilinsa ham).
+  const handleEditEvent = (event: any) => {
+    if (isReadOnlyMode) return;
+    setEditingEventId(String(event.id));
+    setEventType(event.event_type || event.type || 'goal');
+    setSelectedTeamId(event.team_id || match?.home_team_id || '');
+    setSelectedPlayerId(event.player_id || '');
+    setSelectedSubInPlayerId(event.sub_in_player_id || '');
+    setEventMinute(String(event.minute ?? getCurrentMinute()));
     setShowEventModal(true);
   };
 
@@ -946,13 +1087,123 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     setSavingEvent(true);
     const minVal = parseInt(eventMinute, 10) || getCurrentMinute();
-    const eventUuid = Crypto.randomUUID();
     const isGoal = eventType === 'goal';
     const isHome = selectedTeamId === match?.home_team_id;
 
     // Snapshot for rollback
     const prevEvents = [...events];
     const prevMatch = { ...match };
+
+    // ══════════════════════════════════════════════════════════════════
+    // TAHRIRLASH REJIMI: xato kiritilgan voqeani (masalan, noto'g'ri
+    // o'yinchi/jamoaga yozilgan gol) O'CHIRIB QAYTA QO'SHISH o'rniga,
+    // mavjud qatorni id'sini o'zgartirmasdan to'g'ridan-to'g'ri UPDATE
+    // qilamiz. Sabab: eski usulda (o'chirish + yangi RPC orqali qo'shish)
+    // voqea yangi id bilan yaratilar edi — agar tuzatish OBS orqali
+    // replay video biriktirilgandan KO'P VAQT o'tib (masalan bir kundan
+    // keyin, o'yin tugab, `ORPHAN_REPLAYS_BY_MATCH` xotiradagi 10
+    // daqiqalik "yangi orphan" oynasi allaqachon yopilgandan keyin)
+    // qilinsa, o'sha video hech qachon qayta bog'lanmas edi. Endi esa
+    // `match_events.id` umuman o'zgarmagani uchun unga oldin
+    // biriktirilgan `replay_video_url` avtomatik saqlanib qoladi.
+    if (editingEventId) {
+      const originalEvent = events.find((e) => String(e.id) === String(editingEventId));
+      const wasGoal = originalEvent ? (originalEvent.event_type === 'goal' || originalEvent.type === 'goal') : false;
+      const wasHome = originalEvent ? String(originalEvent.team_id) === String(match?.home_team_id) : false;
+
+      // Hisobni qayta hisoblash: avvalgi qiymatning golga qo'shgan hissasini
+      // olib tashlab, yangi qiymatning hissasini qo'shamiz (masalan, jamoa
+      // o'zgartirilgan bo'lsa, gol boshqa jamoaga o'tkaziladi).
+      let newHomeScore = match?.home_score || 0;
+      let newAwayScore = match?.away_score || 0;
+      if (wasGoal) {
+        newHomeScore = Math.max(0, newHomeScore - (wasHome ? 1 : 0));
+        newAwayScore = Math.max(0, newAwayScore - (wasHome ? 0 : 1));
+      }
+      if (isGoal) {
+        newHomeScore = newHomeScore + (isHome ? 1 : 0);
+        newAwayScore = newAwayScore + (isHome ? 0 : 1);
+      }
+
+      const updatedFields: any = {
+        team_id: selectedTeamId,
+        player_id: selectedPlayerId,
+        event_type: eventType,
+        minute: minVal,
+        sub_in_player_id: eventType === 'substitution' && selectedSubInPlayerId ? selectedSubInPlayerId : null,
+      };
+
+      // 1. Instant 0ms Optimistic UI
+      setEvents((prev) => prev.map((e) => (
+        String(e.id) === String(editingEventId)
+          ? {
+              ...e,
+              ...updatedFields,
+              player: currentModalPlayers.find((p) => p.id === selectedPlayerId) || e.player,
+              team: selectedTeamId === match?.home_team_id ? homeTeam : awayTeam,
+            }
+          : e
+      )));
+      if (wasGoal || isGoal) {
+        setMatch((prev: any) => ({
+          ...prev,
+          home_score: newHomeScore,
+          away_score: newAwayScore,
+        }));
+      }
+
+      setShowEventModal(false);
+      setEditingEventId(null);
+      showToast("Voqea yangilandi ✏️");
+
+      // 2. Reliable UPDATE — id o'zgarmaydi, shuning uchun replay_video_url saqlanadi
+      try {
+        const { error: updErr } = await supabase
+          .from('match_events')
+          .update(updatedFields)
+          .eq('id', editingEventId);
+
+        if (updErr) throw new Error(updErr.message || "Voqeani yangilashda xatolik");
+
+        if (wasGoal || isGoal) {
+          await supabase.from('matches').update({
+            home_score: newHomeScore,
+            away_score: newAwayScore,
+            updated_at: new Date().toISOString(),
+          }).eq('id', matchId);
+        }
+
+        const cached = MATCH_CONTROL_CACHE.get(String(matchId));
+        if (cached) {
+          MATCH_CONTROL_CACHE.set(String(matchId), {
+            ...cached,
+            events: (cached.events || []).map((e: any) => (
+              String(e.id) === String(editingEventId) ? { ...e, ...updatedFields } : e
+            )),
+            match: {
+              ...cached.match,
+              home_score: newHomeScore,
+              away_score: newAwayScore,
+            }
+          });
+        }
+
+        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      } catch (err: any) {
+        // Rollback UI
+        setEvents(prevEvents);
+        setMatch(prevMatch);
+        Alert.alert("Xatolik", err.message || "Voqeani yangilashda xatolik yuz berdi");
+      } finally {
+        setSavingEvent(false);
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // YANGI VOQEA QO'SHISH REJIMI (oldingi mantiq, o'zgarishsiz)
+    const eventUuid = Crypto.randomUUID();
 
     // Check if there is an existing orphan replay video from a recently deleted mistake goal
     const orphanReplay = ORPHAN_REPLAYS_BY_MATCH.get(String(matchId));
@@ -1446,7 +1697,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                       <Ionicons name={isTimerRunning ? "pause" : "play"} size={13} color={isTimerRunning ? "#EF4444" : (Platform.OS === 'android' ? colors.accentGreen : "#22C55E")} />
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.pillIconBtn} onPress={resetTimerManual}>
+                    {/* HAVFLI: Taymerni reset qilish tugmasi tasodifiy bosilib,
+                        jonli o'yin vaqtini o'chirib qo'yishi mumkin — shuning
+                        uchun o'chirilmasdan (kod strukturasi buzilmasligi
+                        uchun) faqat yashirilgan (hidden) holatga keltirildi. */}
+                    <TouchableOpacity style={[styles.pillIconBtn, { display: 'none' }]} onPress={resetTimerManual}>
                       {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                       <Ionicons name="refresh" size={13} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.8)"} />
                     </TouchableOpacity>
@@ -1970,7 +2225,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               const evConfig = EVENT_TYPES.find((t) => t.id === ev.event_type) || EVENT_TYPES[0];
               const playerName = ev.player
                 ? `${ev.player.first_name || ''} ${ev.player.last_name || ''}`
-                : "O'yinchi";
+                : (ev.player_id ? "O'yinchi" : "Jamoa goli (o'yinchisiz)");
               const isHome = ev.team_id === match?.home_team_id;
 
               return (
@@ -1999,10 +2254,16 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                   </View>
 
                   {!isReadOnlyMode && (
-                    <TouchableOpacity style={styles.eventDeleteBtn} onPress={() => handleDeleteEvent(ev)}>
-                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                      <Ionicons name="trash-outline" size={15} color="#EF4444" />
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      <TouchableOpacity style={styles.eventDeleteBtn} onPress={() => handleEditEvent(ev)}>
+                        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="pencil-outline" size={15} color="#3B82F6" />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.eventDeleteBtn} onPress={() => handleDeleteEvent(ev)}>
+                        {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
               );
@@ -2181,9 +2442,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
-                {eventType === 'substitution' ? "O'yinchi Almashtirish 🔄" : "Hodisa Qayd Etish"}
+                {editingEventId
+                  ? "Hodisani Tahrirlash ✏️"
+                  : eventType === 'substitution' ? "O'yinchi Almashtirish 🔄" : "Hodisa Qayd Etish"}
               </Text>
-              <TouchableOpacity onPress={() => setShowEventModal(false)}>
+              <TouchableOpacity onPress={() => { setShowEventModal(false); setEditingEventId(null); }}>
                 <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
@@ -2355,7 +2618,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               {savingEvent ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={[styles.modalSubmitBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"Hodisani Saqlash"}</Text>
+                <Text style={[styles.modalSubmitBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{editingEventId ? "O'zgarishni Saqlash" : "Hodisani Saqlash"}</Text>
               )}
             </TouchableOpacity>
           </View>
