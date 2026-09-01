@@ -21,6 +21,7 @@ import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 // Helper functions for parsing instagram & metadata from comments
 const getInstaUser = (val: any) => {
@@ -539,6 +540,7 @@ const UpdateCardItem: React.FC<{
 export const ProfileUpdatesScreen: React.FC = () => {
   const { orgId } = useOrg();
   const { isDark, colors } = useTheme();
+  const scrollDockProps = useScrollDockHandler();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>('players');
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -907,6 +909,7 @@ export const ProfileUpdatesScreen: React.FC = () => {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
+        {...scrollDockProps}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

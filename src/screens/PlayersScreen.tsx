@@ -27,6 +27,7 @@ import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { usePlayersData, useTeamsPaginatedData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 interface Props {
   onNavigate?: (screen: string) => void;
@@ -319,6 +320,7 @@ const SwipeablePlayerCard = ({
 export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }) => {
   const { orgId, userRole, collabLeagueNames, collabLeagueIds } = useOrg();
   const { isDark, colors } = useTheme();
+  const scrollDockProps = useScrollDockHandler();
   const isReadOnlyUser = userRole === 'user';
   const [fullImagePreview, setFullImagePreview] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialSegmentTab || 'players');
@@ -1572,6 +1574,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           scrollEnabled={true}
+          {...scrollDockProps}
           initialNumToRender={15}
           maxToRenderPerBatch={15}
           windowSize={7}

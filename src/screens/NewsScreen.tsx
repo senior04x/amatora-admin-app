@@ -21,6 +21,7 @@ import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 const { width } = Dimensions.get('window');
 
@@ -110,6 +111,7 @@ const getRelativeTime = (dateString?: string | number | Date): string => {
 export const NewsScreen: React.FC = () => {
   const { orgId, currentOrg } = useOrg();
   const { isDark, colors } = useTheme();
+  const scrollDockProps = useScrollDockHandler();
   const [newsList, setNewsList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -391,6 +393,7 @@ export const NewsScreen: React.FC = () => {
       style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}
       contentContainerStyle={{ paddingBottom: Platform.OS === 'android' ? 120 : 100 }}
       showsVerticalScrollIndicator={false}
+      {...scrollDockProps}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
     >
       {/* HEADER SECTION */}

@@ -25,6 +25,7 @@ import { SwipeRow } from '../components/SwipeRow';
 import { MatchControlScreen } from './MatchControlScreen';
 import { useFinishedMatchesData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 interface Match {
   id: string | number;
@@ -99,6 +100,7 @@ export const FinishedMatchesScreen: React.FC<{
   const { orgId, collabLeagueNames } = useOrg();
   const { colors, isDark } = useTheme();
   const queryClient = useQueryClient();
+  const scrollDockProps = useScrollDockHandler();
 
   // Filters: Liga, Tur
   const [selectedLeague, setSelectedLeague] = useState<string>('all');
@@ -605,6 +607,7 @@ export const FinishedMatchesScreen: React.FC<{
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          {...scrollDockProps}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.4}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}

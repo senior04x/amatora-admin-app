@@ -23,6 +23,7 @@ import { supabase } from '../supabaseClient';
 import { adminNotificationService } from '../utils/adminNotificationService';
 import { useTransfersData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -359,6 +360,7 @@ export const TransfersScreen: React.FC = () => {
   const { orgId, currentOrg, transferWindowOpen, setTransferWindowOpen } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
+  const scrollDockProps = useScrollDockHandler();
 
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [page] = useState<number>(0);
@@ -825,6 +827,7 @@ export const TransfersScreen: React.FC = () => {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
+        {...scrollDockProps}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

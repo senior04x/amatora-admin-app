@@ -15,6 +15,7 @@ import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 interface TeamStanding {
   id: string | number;
@@ -41,6 +42,7 @@ interface RawLeagueCache {
 export const StandingsScreen: React.FC = () => {
   const { orgId, collabLeagueNames, collabLeagueIds } = useOrg();
   const { isDark, colors } = useTheme();
+  const scrollDockProps = useScrollDockHandler();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [leagues, setLeagues] = useState<any[]>([]);
@@ -519,6 +521,7 @@ export const StandingsScreen: React.FC = () => {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          {...scrollDockProps}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
         >
           {/* Table Header Row */}

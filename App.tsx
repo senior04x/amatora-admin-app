@@ -165,6 +165,26 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const [isEditingDashboardOrder, setIsEditingDashboardOrder] = useState(false);
   const saveDashboardOrderRef = useRef<(() => void) | null>(null);
 
+  // iOS Floating Navbar Shrink/Expand on Scroll Animation
+  const navDockAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+
+    const sub = DeviceEventEmitter.addListener('nav_dock_scroll', (direction: 'up' | 'down') => {
+      Animated.spring(navDockAnim, {
+        toValue: direction === 'down' ? 0 : 1,
+        useNativeDriver: true,
+        bounciness: direction === 'down' ? 0 : 3,
+        speed: 18,
+      }).start();
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, []);
+
   // Preload Ionicons font explicitly so icons never appear as question marks
   const [iconsLoaded, setIconsLoaded] = useState(false);
 
@@ -364,9 +384,29 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       </View>
 
       {/* Tactile Navigation Dock */}
-      <View
+      <Animated.View
         style={[
           styles.navDockWrapper,
+          Platform.OS === 'ios' && {
+            transform: [
+              {
+                translateY: navDockAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [18, 0],
+                }),
+              },
+              {
+                scale: navDockAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.86, 1],
+                }),
+              },
+            ],
+            opacity: navDockAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.75, 1],
+            }),
+          },
           Platform.OS === 'android' && {
             bottom: 0,
             left: 0,
@@ -503,7 +543,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             <View style={[styles.activeDot, activeTab === 'account' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -720,14 +760,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: Platform.OS === 'android' ? 62 : 66,
     backgroundColor: Platform.OS === 'android' ? '#0F172A' : 'transparent',
-    borderRadius: Platform.OS === 'android' ? 0 : 22,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    borderWidth: 0,
+    borderRadius: Platform.OS === 'android' ? 0 : 24,
+    borderWidth: Platform.OS === 'android' ? 0 : 1,
     borderTopWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(255, 255, 255, 0.14)',
     paddingHorizontal: 0,
     paddingVertical: 0,
     paddingBottom: Platform.OS === 'android' ? 6 : 0,
@@ -735,8 +771,8 @@ const styles = StyleSheet.create({
     marginBottom: 0,
     overflow: 'hidden',
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: Platform.OS === 'android' ? 0 : 0.6,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: Platform.OS === 'android' ? 0 : 0.5,
     shadowRadius: 18,
     elevation: Platform.OS === 'android' ? 0 : 18,
   },
@@ -764,16 +800,9 @@ const styles = StyleSheet.create({
   activeNavOrgAvatar: {
     borderColor: '#FFFFFF',
     borderWidth: 1.5,
-    shadowColor: '#FFFFFF',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 5,
   },
   glowingIcon: {
-    shadowColor: '#FFFFFF',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 6,
+    opacity: 1,
   },
   activeDot: {
     width: 10,

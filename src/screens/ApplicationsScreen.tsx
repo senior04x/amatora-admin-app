@@ -24,6 +24,7 @@ import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
 import { useApplicationsData, useApplicationsCountsData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 interface Props {
   initialTab?: 'players' | 'teams';
@@ -177,6 +178,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const { orgId, collabLeagueNames, isRegistrationOpen, toggleRegistrationStatus, userRole } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
+  const scrollDockProps = useScrollDockHandler();
   const [activeTab, setActiveTab] = useState<'players' | 'teams'>(initialTab);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -1324,6 +1326,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           keyExtractor={(item, index) => (item && item.id ? `app-${item.id}-${index}` : `app-row-${index}`)}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          {...scrollDockProps}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={5}

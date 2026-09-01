@@ -997,121 +997,232 @@ export const ExportScreen: React.FC = () => {
       <View style={[
         styles.headerCard,
         Platform.OS === 'android' && { backgroundColor: colors.bgPrimary, borderBottomColor: colors.border },
-        (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }
       ]}>
         {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
-        <View style={[styles.dropdownsRow, (showLeagueDropdown || showRoundDropdown) && { zIndex: 9999, elevation: 20 }]}>
-          {/* League Dropdown */}
-          <View style={[styles.dropdownWrapper, showLeagueDropdown && { zIndex: 10000, elevation: 25 }]}>
+        <View style={styles.dropdownsRow}>
+          {/* League Dropdown Trigger */}
+          <View style={styles.dropdownWrapper}>
             <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Liga:"}</Text>
             <TouchableOpacity
               style={[styles.dropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
               onPress={() => {
-                setShowLeagueDropdown(!showLeagueDropdown);
+                setShowLeagueDropdown(true);
                 setShowRoundDropdown(false);
               }}
               activeOpacity={0.8}
             >
-              <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-                {selectedLeague?.name || "Ligalarni yuklash..."}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 4 }}>
+                <Ionicons name="trophy" size={15} color="#F59E0B" />
+                <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
+                  {selectedLeague?.name || "Ligalarni yuklash..."}
+                </Text>
+              </View>
               <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
             </TouchableOpacity>
+          </View>
 
-            {showLeagueDropdown && (
-              <View style={[
-                styles.dropdownMenu,
-                Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }
-              ]}>
-                {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
-                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
-                  {leagues.map((lg) => (
+          {/* Round Dropdown Trigger */}
+          <View style={styles.dropdownWrapper}>
+            <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tur (Round):"}</Text>
+            <TouchableOpacity
+              style={[styles.dropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+              onPress={() => {
+                setShowRoundDropdown(true);
+                setShowLeagueDropdown(false);
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 4 }}>
+                <Ionicons name="layers" size={15} color="#38BDF8" />
+                <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
+                  {selectedRound === 'all' ? 'Barchasi' : `${selectedRound}-Tur`}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {/* League Selection Modal Picker */}
+      <Modal
+        visible={showLeagueDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLeagueDropdown(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.filterModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowLeagueDropdown(false)}
+          />
+          <View style={[
+            styles.filterModalContent,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }
+          ]}>
+            {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            
+            <View style={[styles.filterModalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="trophy" size={20} color="#F59E0B" />
+                <Text style={[styles.filterModalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Ligani tanlang"}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowLeagueDropdown(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.filterModalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.7)"} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={true} nestedScrollEnabled>
+              {leagues.length === 0 ? (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)', fontSize: 13 }}>
+                    {"Ligalar topilmadi"}
+                  </Text>
+                </View>
+              ) : (
+                leagues.map((lg) => {
+                  const isSelected = selectedLeague?.id === lg.id;
+                  return (
                     <TouchableOpacity
                       key={lg.id}
                       style={[
-                        styles.dropdownItem,
-                        Platform.OS === 'android' && { borderBottomColor: colors.border },
-                        selectedLeague?.id === lg.id && styles.dropdownItemActive,
-                        Platform.OS === 'android' && selectedLeague?.id === lg.id && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5' },
+                        styles.filterModalItem,
+                        Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                        isSelected && styles.filterModalItemActive,
+                        Platform.OS === 'android' && isSelected && {
+                          backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5',
+                          borderColor: colors.accentGreen,
+                        },
                       ]}
                       onPress={() => {
                         setSelectedLeague(lg);
                         setShowLeagueDropdown(false);
                       }}
+                      activeOpacity={0.7}
                     >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          Platform.OS === 'android' && { color: colors.textSecondary },
-                          selectedLeague?.id === lg.id && styles.dropdownItemTextActive,
-                          Platform.OS === 'android' && selectedLeague?.id === lg.id && { color: colors.accentGreen },
-                        ]}
-                      >
-                        {lg.name}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                        {lg.logo_url ? (
+                          <Image source={{ uri: lg.logo_url }} style={{ width: 26, height: 26, borderRadius: 13, resizeMode: 'cover' }} />
+                        ) : (
+                          <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(245, 158, 11, 0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
+                          </View>
+                        )}
+                        <Text
+                          style={[
+                            styles.filterModalItemText,
+                            Platform.OS === 'android' && { color: colors.textPrimary },
+                            isSelected && styles.filterModalItemTextActive,
+                            Platform.OS === 'android' && isSelected && { color: colors.accentGreen },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {lg.name}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <Ionicons name="checkmark-circle" size={20} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                      )}
                     </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-
-          {/* Round Dropdown */}
-          <View style={[styles.dropdownWrapper, showRoundDropdown && { zIndex: 10000, elevation: 25 }]}>
-            <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tur (Round):"}</Text>
-            <TouchableOpacity
-              style={[styles.dropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-              onPress={() => {
-                setShowRoundDropdown(!showRoundDropdown);
-                setShowLeagueDropdown(false);
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
-                {selectedRound === 'all' ? 'Barchasi' : `${selectedRound}-Tur`}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
-            </TouchableOpacity>
-
-            {showRoundDropdown && (
-              <View style={[
-                styles.dropdownMenu,
-                Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }
-              ]}>
-                {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
-                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled showsVerticalScrollIndicator={true}>
-                  {availableRounds.map((r) => (
-                    <TouchableOpacity
-                      key={r}
-                      style={[
-                        styles.dropdownItem,
-                        Platform.OS === 'android' && { borderBottomColor: colors.border },
-                        selectedRound === r && styles.dropdownItemActive,
-                        Platform.OS === 'android' && selectedRound === r && { backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5' },
-                      ]}
-                      onPress={() => {
-                        setSelectedRound(r);
-                        setShowRoundDropdown(false);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          Platform.OS === 'android' && { color: colors.textSecondary },
-                          selectedRound === r && styles.dropdownItemTextActive,
-                          Platform.OS === 'android' && selectedRound === r && { color: colors.accentGreen },
-                        ]}
-                      >
-                        {r === 'all' ? 'Barcha turlar' : `${r}-Tur`}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
+                  );
+                })
+              )}
+            </ScrollView>
           </View>
         </View>
-      </View>
+      </Modal>
+
+      {/* Round Selection Modal Picker */}
+      <Modal
+        visible={showRoundDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowRoundDropdown(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.filterModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowRoundDropdown(false)}
+          />
+          <View style={[
+            styles.filterModalContent,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }
+          ]}>
+            {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            
+            <View style={[styles.filterModalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="layers" size={20} color="#38BDF8" />
+                <Text style={[styles.filterModalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Turni tanlang"}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowRoundDropdown(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.filterModalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.7)"} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={true} nestedScrollEnabled>
+              {availableRounds.map((r) => {
+                const isSelected = selectedRound === r;
+                const roundTitle = r === 'all' ? 'Barcha turlar' : `${r}-Tur`;
+                return (
+                  <TouchableOpacity
+                    key={r}
+                    style={[
+                      styles.filterModalItem,
+                      Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                      isSelected && styles.filterModalItemActive,
+                      Platform.OS === 'android' && isSelected && {
+                        backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5',
+                        borderColor: colors.accentGreen,
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedRound(r);
+                      setShowRoundDropdown(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                      <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: isSelected ? 'rgba(0, 255, 102, 0.2)' : 'rgba(56, 189, 248, 0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons
+                          name={r === 'all' ? "grid-outline" : "flag-outline"}
+                          size={14}
+                          color={isSelected ? (Platform.OS === 'android' ? colors.accentGreen : "#00FF66") : "#38BDF8"}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.filterModalItemText,
+                          Platform.OS === 'android' && { color: colors.textPrimary },
+                          isSelected && styles.filterModalItemTextActive,
+                          Platform.OS === 'android' && isSelected && { color: colors.accentGreen },
+                        ]}
+                      >
+                        {roundTitle}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Ionicons name="checkmark-circle" size={20} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {loading ? (
         <ExportSkeleton />
@@ -1276,41 +1387,86 @@ export const ExportScreen: React.FC = () => {
                                 resultScoreFontSize = 23;
                               }
 
+                              const getDynamicResultTeamFontSize = (name: string, baseSize: number) => {
+                                const len = String(name || '').trim().length;
+                                if (len > 15) return Math.round(baseSize * 0.62 * 10) / 10;
+                                if (len > 12) return Math.round(baseSize * 0.74 * 10) / 10;
+                                if (len > 9) return Math.round(baseSize * 0.84 * 10) / 10;
+                                if (len > 7) return Math.round(baseSize * 0.92 * 10) / 10;
+                                return baseSize;
+                              };
+
                               return listToRender.length === 0 ? (
                                 <Text style={{ textAlign: 'center', color: 'rgba(255, 255, 255, 0.6)', fontSize: 13.5, fontWeight: '600', paddingVertical: 16, textTransform: 'uppercase' }}>{"NATIJALAR KIRITILMAGAN"}</Text>
                               ) : (
-                                listToRender.slice(0, 8).map((m: any, idx: number) => (
-                                  <View key={m.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: resultRowPadding, paddingHorizontal: 6, borderBottomWidth: idx < Math.min(8, listToRender.length) - 1 ? 1 : 0, borderBottomColor: 'rgba(255, 255, 255, 0.1)' }}>
-                                    {/* Home Team */}
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                                      {m.home_team_logo ? (
-                                        <Image source={{ uri: m.home_team_logo }} style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, resizeMode: 'cover' }} />
-                                      ) : (
-                                        <View style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
-                                          <Text style={{ color: '#fff', fontSize: resultLogoSize * 0.45, fontWeight: '900' }}>{(m.home_team || '?')[0]}</Text>
-                                        </View>
-                                      )}
-                                      <Text style={{ color: '#ffffff', fontSize: resultFontSize, fontWeight: '800', textTransform: 'uppercase', flexShrink: 1, lineHeight: Math.round(resultFontSize * 1.15) }}>{m.home_team}</Text>
-                                    </View>
+                                listToRender.slice(0, 8).map((m: any, idx: number) => {
+                                  const homeName = m.home_team || 'Jamoa 1';
+                                  const awayName = m.away_team || 'Jamoa 2';
+                                  const homeFontSize = getDynamicResultTeamFontSize(homeName, resultFontSize);
+                                  const awayFontSize = getDynamicResultTeamFontSize(awayName, resultFontSize);
 
-                                    {/* Score */}
-                                    <Text style={{ color: '#ffffff', fontSize: resultScoreFontSize, fontWeight: '900', paddingHorizontal: 6 }}>
-                                      {m.home_score !== undefined && m.home_score !== null ? `${m.home_score}-${m.away_score}` : 'VS'}
-                                    </Text>
+                                  return (
+                                    <View key={m.id || idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: resultRowPadding, paddingHorizontal: 6, borderBottomWidth: idx < Math.min(8, listToRender.length) - 1 ? 1 : 0, borderBottomColor: 'rgba(255, 255, 255, 0.1)' }}>
+                                      {/* Home Team */}
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                        {m.home_team_logo ? (
+                                          <Image source={{ uri: m.home_team_logo }} style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, resizeMode: 'cover' }} />
+                                        ) : (
+                                          <View style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Text style={{ color: '#fff', fontSize: resultLogoSize * 0.45, fontWeight: '900' }}>{(homeName || '?')[0]}</Text>
+                                          </View>
+                                        )}
+                                        <Text
+                                          style={{
+                                            color: '#ffffff',
+                                            fontSize: homeFontSize,
+                                            fontWeight: '800',
+                                            textTransform: 'uppercase',
+                                            flexShrink: 1,
+                                            lineHeight: Math.round(homeFontSize * 1.15),
+                                          }}
+                                          numberOfLines={1}
+                                          adjustsFontSizeToFit={true}
+                                          minimumFontScale={0.65}
+                                        >
+                                          {homeName}
+                                        </Text>
+                                      </View>
 
-                                    {/* Away Team */}
-                                    <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flex: 1 }}>
-                                      {m.away_team_logo ? (
-                                        <Image source={{ uri: m.away_team_logo }} style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, resizeMode: 'cover' }} />
-                                      ) : (
-                                        <View style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
-                                          <Text style={{ color: '#fff', fontSize: resultLogoSize * 0.45, fontWeight: '900' }}>{(m.away_team || '?')[0]}</Text>
-                                        </View>
-                                      )}
-                                      <Text style={{ color: '#ffffff', fontSize: resultFontSize, fontWeight: '800', textTransform: 'uppercase', flexShrink: 1, textAlign: 'right', lineHeight: Math.round(resultFontSize * 1.15) }}>{m.away_team}</Text>
+                                      {/* Score */}
+                                      <Text style={{ color: '#ffffff', fontSize: resultScoreFontSize, fontWeight: '900', paddingHorizontal: 6 }}>
+                                        {m.home_score !== undefined && m.home_score !== null ? `${m.home_score}-${m.away_score}` : 'VS'}
+                                      </Text>
+
+                                      {/* Away Team */}
+                                      <View style={{ flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flex: 1 }}>
+                                        {m.away_team_logo ? (
+                                          <Image source={{ uri: m.away_team_logo }} style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, resizeMode: 'cover' }} />
+                                        ) : (
+                                          <View style={{ width: resultLogoSize, height: resultLogoSize, borderRadius: resultLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Text style={{ color: '#fff', fontSize: resultLogoSize * 0.45, fontWeight: '900' }}>{(awayName || '?')[0]}</Text>
+                                          </View>
+                                        )}
+                                        <Text
+                                          style={{
+                                            color: '#ffffff',
+                                            fontSize: awayFontSize,
+                                            fontWeight: '800',
+                                            textTransform: 'uppercase',
+                                            flexShrink: 1,
+                                            textAlign: 'right',
+                                            lineHeight: Math.round(awayFontSize * 1.15),
+                                          }}
+                                          numberOfLines={1}
+                                          adjustsFontSizeToFit={true}
+                                          minimumFontScale={0.65}
+                                        >
+                                          {awayName}
+                                        </Text>
+                                      </View>
                                     </View>
-                                  </View>
-                                ))
+                                  );
+                                })
                               );
                             })()}
                           </View>
@@ -2343,19 +2499,15 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1.2,
     borderBottomColor: 'rgba(255, 255, 255, 0.15)',
-    zIndex: 999,
-    elevation: 15,
-    overflow: 'hidden',
+    zIndex: 10,
+    elevation: 4,
   },
   dropdownsRow: {
     flexDirection: 'row',
     gap: 12,
-    zIndex: 999,
   },
   dropdownWrapper: {
     flex: 1,
-    position: 'relative',
-    zIndex: 999,
   },
   dropdownLabel: {
     color: '#94A3B8',
@@ -2370,7 +2522,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -2380,39 +2532,73 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flex: 1,
   },
-  dropdownMenu: {
-    position: 'absolute',
-    top: 68,
-    left: 0,
-    right: 0,
-    backgroundColor: 'transparent',
+  filterModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    zIndex: 99999,
+  },
+  filterModalContent: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '65%',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: 20,
     borderWidth: 1.2,
     borderColor: 'rgba(255, 255, 255, 0.22)',
-    borderRadius: 12,
-    zIndex: 10000,
-    elevation: 30,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
+    padding: 18,
     overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 25,
   },
-  dropdownItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 14,
+    marginBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.12)',
   },
-  dropdownItemActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  dropdownItemText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  dropdownItemTextActive: {
+  filterModalTitle: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  filterModalCloseBtn: {
+    padding: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  filterModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    marginBottom: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  filterModalItemActive: {
+    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+    borderColor: 'rgba(0, 255, 102, 0.45)',
+  },
+  filterModalItemText: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  filterModalItemTextActive: {
+    color: '#00FF66',
     fontWeight: '800',
   },
   scrollContent: {

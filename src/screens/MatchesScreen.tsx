@@ -27,6 +27,7 @@ import { MatchControlScreen } from './MatchControlScreen';
 import { adminNotificationService } from '../utils/adminNotificationService';
 import { useMatchesData, useTeamsData, useLeaguesData, useLeagueRoundsData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 interface Match {
   id: string | number;
@@ -90,6 +91,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   const { orgId, userRole, collabLeagueNames, collabLeagueIds } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
+  const scrollDockProps = useScrollDockHandler();
 
   const isCoHostLeague = (leagueName?: string) => {
     if (!leagueName || leagueName === 'all') return false;
@@ -716,6 +718,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ paddingBottom: 130, gap: 14 }}
           showsVerticalScrollIndicator={false}
+          {...scrollDockProps}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
           }

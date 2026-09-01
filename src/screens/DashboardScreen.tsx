@@ -11,6 +11,7 @@ import { MatchControlScreen } from './MatchControlScreen';
 import { triggerHapticMedium, triggerHapticSuccess } from '../utils/haptics';
 import { useDashboardCountsData, useMatchesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
+import { useScrollDockHandler } from '../utils/scrollDock';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -404,6 +405,7 @@ export const DashboardScreen: React.FC<Props> = ({
   const { orgId, userRole, loading: orgLoading } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
+  const scrollDockProps = useScrollDockHandler();
 
   // 1. React Query Hooks for Dashboard Counts & Matches (0ms cache hit)
   const {
@@ -858,6 +860,7 @@ export const DashboardScreen: React.FC<Props> = ({
         showsVerticalScrollIndicator={false}
         scrollEnabled={!isEditingOrder}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
+        {...scrollDockProps}
       >
       {/* Main Stats Cards (Kutilayotgan Arizalar, Qabul Qilingan O'yinchilar, Jami Ligalar, Qabul Qilingan Jamoalar) */}
       <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"Umumiy Statistika"}</Text>
@@ -1022,11 +1025,26 @@ export const DashboardScreen: React.FC<Props> = ({
                   key={item.id || idx}
                   style={[
                     styles.matchCard,
-                    { backgroundColor: colors.bgCard, borderColor: colors.border },
+                    { borderColor: colors.border },
                     isCentral && styles.centralMatchCard,
                     isLive && { borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 1.5 },
                   ]}
                 >
+                  <BlurView
+                    intensity={Platform.OS === 'android' ? 70 : 60}
+                    tint={isDark ? 'dark' : 'light'}
+                    experimentalBlurMethod="dimezisBlurView"
+                    style={StyleSheet.absoluteFill}
+                  />
+                  {Platform.OS === 'android' && (
+                    <View
+                      style={[
+                        StyleSheet.absoluteFill,
+                        { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.65)' : 'rgba(255, 255, 255, 0.7)' },
+                      ]}
+                    />
+                  )}
+
                   {/* Central Match Header Badge */}
                   {isCentral && (
                     <View style={styles.centralHeaderBadge}>
@@ -1228,13 +1246,14 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },  // Matches List Styles
   matchCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: 'transparent',
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
     gap: 12,
     marginBottom: 12,
+    overflow: 'hidden',
   },
   centralMatchCard: {
     borderColor: 'rgba(255, 149, 0, 0.4)',

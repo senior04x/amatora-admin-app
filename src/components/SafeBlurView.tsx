@@ -13,43 +13,16 @@ export const SafeBlurView: React.FC<SafeBlurViewProps> = ({
   style,
   androidBackgroundColor,
   children,
-  experimentalBlurMethod,
+  experimentalBlurMethod = 'dimezisBlurView',
   pointerEvents,
   ...rest
 }) => {
   const { isDark, colors } = useTheme();
   const resolvedPointerEvents = pointerEvents || (!children ? 'none' : 'auto');
 
-  if (Platform.OS === 'android') {
-    let defaultBg = isDark ? colors.bgCard : colors.bgCard;
-    if (tint === 'light' && isDark) {
-      defaultBg = '#334155';
-    } else if (tint === 'dark' && !isDark) {
-      defaultBg = '#FFFFFF';
-    }
-
-    return (
-      <View
-        pointerEvents={resolvedPointerEvents}
-        style={[
-          style,
-          {
-            backgroundColor: androidBackgroundColor || defaultBg,
-          },
-          !isDark && {
-            borderColor: colors.border,
-          },
-        ]}
-        {...rest}
-      >
-        {children}
-      </View>
-    );
-  }
-
   if (resolvedPointerEvents === 'none') {
     return (
-      <View pointerEvents="none" style={style}>
+      <View pointerEvents="none" style={[style, styles.overflowHidden]}>
         <ExpoBlurView
           intensity={intensity}
           tint={tint}
@@ -74,6 +47,12 @@ export const SafeBlurView: React.FC<SafeBlurViewProps> = ({
     </ExpoBlurView>
   );
 };
+
+const styles = StyleSheet.create({
+  overflowHidden: {
+    overflow: 'hidden',
+  },
+});
 
 // Also export as BlurView so screens can import { BlurView } from '../components/SafeBlurView'
 export const BlurView = SafeBlurView;
