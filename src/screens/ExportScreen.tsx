@@ -326,7 +326,7 @@ export const ExportScreen: React.FC = () => {
     if (selectedLeague) {
       fetchLeagueData(selectedLeague);
     }
-  }, [selectedLeague]);
+  }, [selectedLeague, orgId, collabLeagueNames]);
 
   const fetchLeagues = async () => {
     setLoading(true);
@@ -343,16 +343,22 @@ export const ExportScreen: React.FC = () => {
       const { data: leaguesData } = await query;
 
       if (leaguesData && leaguesData.length > 0) {
-        const { data: bgSponsors } = await dbClient
+        const { data: systemSponsors } = await dbClient
           .from('sponsors')
           .select('name, logo_url')
-          .like('name', 'LEAGUE_BG_%');
+          .or('name.like.LEAGUE_BG_%,name.like.LEAGUE_SHOW_SPONSORS_%');
 
         const bgMap: any = {};
-        if (bgSponsors) {
-          bgSponsors.forEach((s: any) => {
-            const lId = s.name.replace('LEAGUE_BG_', '');
-            bgMap[lId] = s.logo_url;
+        const showSponsorsMap: Record<string, boolean> = {};
+        if (systemSponsors) {
+          systemSponsors.forEach((s: any) => {
+            if (s.name.startsWith('LEAGUE_BG_')) {
+              const lId = s.name.replace('LEAGUE_BG_', '');
+              bgMap[lId] = s.logo_url;
+            } else if (s.name.startsWith('LEAGUE_SHOW_SPONSORS_')) {
+              const lId = s.name.replace('LEAGUE_SHOW_SPONSORS_', '');
+              showSponsorsMap[lId] = s.logo_url === 'true';
+            }
           });
         }
 
@@ -368,9 +374,19 @@ export const ExportScreen: React.FC = () => {
             activeBg = l.bg_image || l.export_bg_url || null;
           }
 
+          let showSponsorsVal: boolean = true;
+          if (l.id !== undefined && l.id !== null && showSponsorsMap[`${l.id}`] !== undefined) {
+            showSponsorsVal = showSponsorsMap[`${l.id}`];
+          } else if (l.name && showSponsorsMap[l.name] !== undefined) {
+            showSponsorsVal = showSponsorsMap[l.name];
+          } else if (l.show_sponsors !== undefined && l.show_sponsors !== null) {
+            showSponsorsVal = l.show_sponsors !== false;
+          }
+
           return {
             ...l,
             bg_image: activeBg,
+            show_sponsors: showSponsorsVal,
           };
         });
 
@@ -469,8 +485,7 @@ export const ExportScreen: React.FC = () => {
         (() => {
           let spQuery = dbClient
             .from('sponsors')
-            .select('id, name, logo_url, is_main, organization_id')
-            .not('logo_url', 'is', null)
+            .select('*')
             .order('created_at', { ascending: false });
           if (orgId) {
             spQuery = spQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
@@ -517,6 +532,8 @@ export const ExportScreen: React.FC = () => {
       // 1. Process Sponsors and Overrides Map
       const allSp = sponsorsRes?.data || [];
       const overridesMap: Record<string, any> = {};
+      const settingsMap: Record<string, boolean> = {};
+
       allSp.forEach((s: any) => {
         if (s.name && s.name.startsWith('STANDINGS_OVERRIDE_')) {
           const tId = s.name.replace('STANDINGS_OVERRIDE_', '');
@@ -524,41 +541,38 @@ export const ExportScreen: React.FC = () => {
             overridesMap[tId] = JSON.parse(s.logo_url);
           } catch (e) {}
         }
+        if (s.name && s.name.startsWith('LEAGUE_SHOW_SPONSORS_')) {
+          const key = s.name.replace('LEAGUE_SHOW_SPONSORS_', '');
+          settingsMap[key] = s.logo_url === 'true';
+        }
       });
 
+      // Filter real sponsors using the same logic as SponsorsScreen.tsx and Standings.jsx
+      const realSponsors = allSp.filter(isRealSponsor);
+
+      // Check whether secondary sponsors strip is enabled for this league
       let showSponsorsForThisLeague = true;
-      if (typeof leagueObj === 'object' && leagueObj?.show_sponsors === false) {
-        showSponsorsForThisLeague = false;
-      }
-      if (allSp.length > 0 && leagueId) {
-        const leagueSettingKey = `LEAGUE_SHOW_SPONSORS_${leagueId}`;
-        const leagueSettingKeyByName = leagueName ? `LEAGUE_SHOW_SPONSORS_${leagueName}` : '';
-        const systemSetting = allSp.find(
-          (s: any) => s.name === leagueSettingKey || (leagueSettingKeyByName && s.name === leagueSettingKeyByName)
-        );
-        if (systemSetting) {
-          showSponsorsForThisLeague = systemSetting.logo_url === 'true';
-        }
+      if (leagueId !== undefined && leagueId !== null && settingsMap[`${leagueId}`] !== undefined) {
+        showSponsorsForThisLeague = settingsMap[`${leagueId}`];
+      } else if (leagueName && settingsMap[leagueName] !== undefined) {
+        showSponsorsForThisLeague = settingsMap[leagueName];
+      } else if (typeof leagueObj === 'object' && leagueObj?.show_sponsors !== undefined && leagueObj?.show_sponsors !== null) {
+        showSponsorsForThisLeague = leagueObj.show_sponsors !== false;
       }
 
-      if (allSp.length > 0) {
-        const realSponsors = allSp.filter(isRealSponsor);
-        if (showSponsorsForThisLeague && realSponsors.length > 0) {
-          const main = realSponsors.find((s: any) => s.is_main === true);
-          const secondaries = realSponsors.filter((s: any) => s.id !== main?.id && s.is_selected !== false);
-
-          if (main?.logo_url) {
-            setMainSponsorLogo(main.logo_url);
-          } else if (realSponsors[0]?.logo_url) {
-            setMainSponsorLogo(realSponsors[0].logo_url);
-          }
-          setSecondarySponsors(secondaries.filter((s: any) => !!s.logo_url));
-        } else {
-          setMainSponsorLogo(null);
-          setSecondarySponsors([]);
-        }
+      // 1. BOSH HOMIY (Main Sponsor) is ALWAYS visible in the top-right corner across all leagues!
+      const main = realSponsors.find((s: any) => s.is_main === true) || (realSponsors.length > 0 ? realSponsors[0] : null);
+      if (main?.logo_url) {
+        setMainSponsorLogo(main.logo_url);
       } else {
         setMainSponsorLogo(null);
+      }
+
+      // 2. SECONDARY SPONSORS (Bottom strip) - displayed ONLY when enabled for this league
+      if (showSponsorsForThisLeague && realSponsors.length > 0) {
+        const secondaries = realSponsors.filter((s: any) => s.id !== main?.id && s.is_selected !== false);
+        setSecondarySponsors(secondaries.filter((s: any) => !!s.logo_url));
+      } else {
         setSecondarySponsors([]);
       }
 
