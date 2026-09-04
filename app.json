@@ -35,7 +35,14 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Eksport qilingan o'yin jadvallari va rasmlarni galereyaga saqlash uchun ruxsat kerak.",
+          "savePhotosPermission": "Eksport qilingan o'yin jadvallari va rasmlarni galereyaga saqlash uchun ruxsat kerak."
+        }
+      ]
     ]
   }
 }

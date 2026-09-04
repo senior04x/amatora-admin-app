@@ -18,6 +18,7 @@ import { BlurView } from '../components/SafeBlurView';
 import ViewShot from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
+import * as MediaLibrary from 'expo-media-library';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
@@ -317,6 +318,11 @@ export const ExportScreen: React.FC = () => {
   const cardsRef = useRef<any>(null);
   const scorersRef = useRef<any>(null);
   const bracketRef = useRef<any>(null);
+
+  // Match Schedule Day & Part pagination states (max 8 matches per 1x1 image)
+  const [selectedScheduleDayIdx, setSelectedScheduleDayIdx] = useState<number>(0);
+  const [selectedSchedulePartIdx, setSelectedSchedulePartIdx] = useState<number>(0);
+  const [exportingDayNumber, setExportingDayNumber] = useState<number | null>(null);
 
   useEffect(() => {
     fetchLeagues();
@@ -1275,7 +1281,7 @@ export const ExportScreen: React.FC = () => {
     }
   };
 
-  // Capture & Download PNG Image
+  // Capture & Save PNG Image directly to device photo gallery (or share fallback)
   const handleExportPNG = async (ref: any, sectionName: string) => {
     setDownloadingSection(sectionName);
     try {
@@ -1284,21 +1290,109 @@ export const ExportScreen: React.FC = () => {
         return;
       }
       const uri = await ref.current.capture();
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'image/png',
-          dialogTitle: `${selectedLeague?.name || 'AMATORA'} - ${sectionName} PNG`,
-          UTI: 'public.png',
-        });
+      let savedToGallery = false;
+      try {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status === 'granted') {
+          await MediaLibrary.createAssetAsync(uri);
+          savedToGallery = true;
+        }
+      } catch (permErr) {
+        console.warn('MediaLibrary gallery save error:', permErr);
+      }
+
+      if (savedToGallery) {
+        Alert.alert("Muvaffaqiyatli! 📸", "Rasm to'g'ridan-to'g'ri telefon galereyasiga saqlandi!");
       } else {
-        Alert.alert("Muvaffaqiyatli", `Rasm yaratildi: ${uri}`);
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(uri, {
+            mimeType: 'image/png',
+            dialogTitle: `${selectedLeague?.name || 'AMATORA'} - ${sectionName} PNG`,
+            UTI: 'public.png',
+          });
+        } else {
+          Alert.alert("Muvaffaqiyatli", `Rasm yaratildi: ${uri}`);
+        }
       }
     } catch (e: any) {
       console.error(e);
       Alert.alert("Xatolik", "Rasmni eksport qilishda xatolik yuz berdi");
     } finally {
       setDownloadingSection(null);
+    }
+  };
+
+  // Kunlar bo'yicha eksport: Agar kunda 8 tadan ko'p o'yin bo'lsa (masalan 14 ta), bitta tugma bilan 2 ta rasmni galereyaga saqlaydi
+  const handleExportDaySchedule = async (dayGroup: any) => {
+    if (exportingDayNumber !== null) return;
+    setExportingDayNumber(dayGroup.dayNumber);
+
+    try {
+      let canSaveToGallery = false;
+      try {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        canSaveToGallery = status === 'granted';
+      } catch (permErr) {
+        console.warn('MediaLibrary permission check error:', permErr);
+      }
+
+      const totalChunks = dayGroup.chunks.length;
+      let savedCount = 0;
+
+      // Make sure this day is active
+      const dayIndex = scheduleDayGroups.findIndex((g: any) => g.dayNumber === dayGroup.dayNumber);
+      if (dayIndex >= 0) {
+        setSelectedScheduleDayIdx(dayIndex);
+      }
+
+      for (let cIdx = 0; cIdx < totalChunks; cIdx++) {
+        setSelectedSchedulePartIdx(cIdx);
+        // Wait for re-render and native layout
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        if (!scheduleRef || !scheduleRef.current) {
+          throw new Error("Rasm yaratish obyekti topilmadi.");
+        }
+
+        const uri = await scheduleRef.current.capture();
+
+        if (canSaveToGallery) {
+          await MediaLibrary.createAssetAsync(uri);
+          savedCount++;
+        } else {
+          const isAvailable = await Sharing.isAvailableAsync();
+          if (isAvailable) {
+            await Sharing.shareAsync(uri, {
+              mimeType: 'image/png',
+              dialogTitle: `${selectedLeague?.name || 'AMATORA'} - ${dayGroup.dayNumber}-kun (${cIdx + 1}-qism)`,
+              UTI: 'public.png',
+            });
+            savedCount++;
+          }
+        }
+
+        if (cIdx < totalChunks - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      if (canSaveToGallery) {
+        Alert.alert(
+          "Muvaffaqiyatli! 📸",
+          `${dayGroup.dayNumber}-kun (${dayGroup.formattedDate}) uchun ${savedCount} ta rasm to'g'ridan-to'g'ri telefoningiz galereyasiga saqlandi!`
+        );
+      } else {
+        Alert.alert(
+          "Muvaffaqiyatli",
+          `${dayGroup.dayNumber}-kun uchun ${savedCount} ta rasm tayyorlandi.`
+        );
+      }
+    } catch (e: any) {
+      console.error('Error exporting day schedule:', e);
+      Alert.alert("Xatolik", "O'yin jadvalini eksport qilishda xatolik yuz berdi: " + (e.message || ''));
+    } finally {
+      setExportingDayNumber(null);
     }
   };
 
@@ -1462,6 +1556,65 @@ export const ExportScreen: React.FC = () => {
     ? matches.filter(matchInSelectedRound)
     : matches;
   const activeMatchCount = currentRoundMatches.length > 0 ? currentRoundMatches.length : matches.length;
+
+  // Match Schedule Day & Part Groups (Splits matches by day; max 8 matches per 1x1 image chunk)
+  const scheduleDayGroups = React.useMemo(() => {
+    let listToRender: any[] = [];
+    if (selectedRound && selectedRound !== 'all') {
+      listToRender = matches.filter(matchInSelectedRound);
+    } else {
+      const scheduledList = matches.filter((m: any) =>
+        m.status === 'scheduled' ||
+        m.status === 'first_half' ||
+        m.status === 'second_half' ||
+        m.status === 'half_time' ||
+        (m.home_score === null && m.away_score === null && m.status !== 'finished')
+      );
+      if (scheduledList.length > 0) {
+        const rounds = scheduledList.map((m: any) => Number(m.round || 1)).filter(r => !isNaN(r));
+        const activeRoundNumber = rounds.length > 0 ? Math.min(...rounds) : 1;
+        listToRender = matches.filter((m: any) => Number(m.round || 1) === activeRoundNumber);
+      } else {
+        const rounds = matches.map((m: any) => Number(m.round || 1)).filter(r => !isNaN(r));
+        const activeRoundNumber = rounds.length > 0 ? Math.max(...rounds) : 1;
+        listToRender = matches.filter((m: any) => Number(m.round || 1) === activeRoundNumber);
+      }
+    }
+    if (listToRender.length === 0) listToRender = matches;
+
+    const sorted = [...listToRender].sort(compareMatches);
+
+    const map = new Map<string, any[]>();
+    sorted.forEach((m: any) => {
+      const d = m.match_date ? String(m.match_date).trim() : (m.date ? String(m.date).trim() : 'Belgilanmagan');
+      if (!map.has(d)) map.set(d, []);
+      map.get(d)!.push(m);
+    });
+
+    const groups: any[] = [];
+    let dayIdx = 1;
+    map.forEach((matchesList, rawDate) => {
+      const formattedDate = rawDate !== 'Belgilanmagan'
+        ? rawDate.split('-').reverse().join('.')
+        : 'Belgilanmagan';
+
+      const chunks: any[][] = [];
+      const CHUNK_SIZE = 8;
+      for (let i = 0; i < matchesList.length; i += CHUNK_SIZE) {
+        chunks.push(matchesList.slice(i, i + CHUNK_SIZE));
+      }
+
+      groups.push({
+        dayNumber: dayIdx++,
+        date: rawDate,
+        formattedDate,
+        matches: matchesList,
+        chunks,
+      });
+    });
+
+    return groups;
+  }, [matches, selectedRound]);
 
   // Playoff Bracket Data (1/4 -> 1/2 -> Final)
   const bracketData = React.useMemo(() => buildPlayoffBracket(matches, teams), [matches, teams]);
@@ -2348,28 +2501,150 @@ export const ExportScreen: React.FC = () => {
               ? getStageDisplayTitle(currentScheduleRound, null)
               : `${currentScheduleRound}-TUR`;
 
+            const safeDayIdx = Math.min(selectedScheduleDayIdx, Math.max(0, scheduleDayGroups.length - 1));
+            const activeDayGroup = scheduleDayGroups[safeDayIdx] || null;
+            const safePartIdx = activeDayGroup ? Math.min(selectedSchedulePartIdx, Math.max(0, activeDayGroup.chunks.length - 1)) : 0;
+            const activeChunkMatches = activeDayGroup ? (activeDayGroup.chunks[safePartIdx] || []) : [];
+
             return (
               <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
                 <View style={styles.sectionHeaderRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{`2. O'yin Jadvali (${currentScheduleRoundLabel})`}</Text>
-                    <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Match Fixtures PNG (1080x1080)"}</Text>
+                    <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                      {activeDayGroup 
+                        ? `1:1 Format (${activeDayGroup.dayNumber}-kun: ${activeDayGroup.formattedDate}${activeDayGroup.chunks.length > 1 ? ` • ${safePartIdx + 1}-qism` : ''})`
+                        : "1:1 Formatdagi Match Fixtures PNG (1080x1080)"}
+                    </Text>
                   </View>
-              <TouchableOpacity
-                style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
-                onPress={() => handleExportPNG(scheduleRef, 'Oyin_Jadvali')}
-                disabled={downloadingSection === 'Oyin_Jadvali'}
-              >
-                {downloadingSection === 'Oyin_Jadvali' ? (
-                  <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.textPrimary : "#000000"} />
-                ) : (
-                  <>
-                    <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
-                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG (1x1)"}</Text>
-                  </>
+                  <TouchableOpacity
+                    style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+                    onPress={() => handleExportPNG(scheduleRef, 'Oyin_Jadvali')}
+                    disabled={downloadingSection === 'Oyin_Jadvali'}
+                  >
+                    {downloadingSection === 'Oyin_Jadvali' ? (
+                      <ActivityIndicator size="small" color={Platform.OS === 'android' ? colors.textPrimary : "#000000"} />
+                    ) : (
+                      <>
+                        <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
+                        <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Joriy Rasmni Yuklash"}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {/* Kunlar bo'yicha yuklab olish tugmalari (40 ta jamoa / 20 ta o'yin sig'ishi uchun kunlarga bo'lingan) */}
+                {scheduleDayGroups.length > 0 && (
+                  <View style={{ marginVertical: 14, gap: 10 }}>
+                    <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }, { fontWeight: '700', textTransform: 'uppercase', fontSize: 12, letterSpacing: 0.8 }]}>
+                      {"📅 Kunlar bo'yicha yuklab olish (Galereyaga saqlash):"}
+                    </Text>
+                    
+                    {scheduleDayGroups.map((dayGroup: any, idx: number) => {
+                      const isSelected = safeDayIdx === idx;
+                      const isBusy = exportingDayNumber === dayGroup.dayNumber;
+
+                      return (
+                        <View
+                          key={dayGroup.date}
+                          style={{
+                            backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : (Platform.OS === 'android' ? colors.bgCardElevated : 'rgba(255, 255, 255, 0.05)'),
+                            borderRadius: 14,
+                            borderWidth: 1.5,
+                            borderColor: isSelected ? '#38BDF8' : 'rgba(255, 255, 255, 0.15)',
+                            padding: 12,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                          }}
+                        >
+                          <TouchableOpacity
+                            style={{ flex: 1 }}
+                            onPress={() => {
+                              setSelectedScheduleDayIdx(idx);
+                              setSelectedSchedulePartIdx(0);
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={{ color: isSelected ? '#38BDF8' : '#ffffff', fontSize: 15, fontWeight: '900' }}>
+                                {`📅 ${dayGroup.dayNumber}-kun (${dayGroup.formattedDate})`}
+                              </Text>
+                              {isSelected && (
+                                <View style={{ backgroundColor: 'rgba(56, 189, 248, 0.25)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                  <Text style={{ color: '#38BDF8', fontSize: 10, fontWeight: '800' }}>{"TANLANGAN"}</Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={{ color: 'rgba(255, 255, 255, 0.65)', fontSize: 12, marginTop: 3 }}>
+                              {`${dayGroup.matches.length} ta o'yin ${dayGroup.chunks.length > 1 ? `• ${dayGroup.chunks.length} ta rasm (8 tadan)` : '• 1 ta rasm'}`}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={{
+                              backgroundColor: isBusy ? 'rgba(0, 255, 102, 0.5)' : '#00FF66',
+                              paddingVertical: 9,
+                              paddingHorizontal: 14,
+                              borderRadius: 10,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                            onPress={() => handleExportDaySchedule(dayGroup)}
+                            disabled={isBusy || exportingDayNumber !== null}
+                            activeOpacity={0.8}
+                          >
+                            {isBusy ? (
+                              <ActivityIndicator size="small" color="#000" />
+                            ) : (
+                              <Ionicons name="download" size={16} color="#000" />
+                            )}
+                            <Text style={{ color: '#000', fontWeight: '900', fontSize: 13 }}>
+                              {isBusy ? "Saqlanmoqda..." : (dayGroup.chunks.length > 1 ? `${dayGroup.chunks.length} ta rasm yuklash` : "Yuklab olish")}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
+
+                    {/* Agar tanlangan kunda 8 tadan ko'p o'yin bo'lsa (2 ta qism), qismlar orasida o'tish tugmalari */}
+                    {activeDayGroup && activeDayGroup.chunks.length > 1 && (
+                      <View style={{ marginTop: 6 }}>
+                        <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '700', marginBottom: 6 }}>
+                          {`Ko'rish uchun qismni tanlang (${activeDayGroup.dayNumber}-kun):`}
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          {activeDayGroup.chunks.map((chunk: any[], cIdx: number) => {
+                            const isPartActive = safePartIdx === cIdx;
+                            return (
+                              <TouchableOpacity
+                                key={cIdx}
+                                style={{
+                                  flex: 1,
+                                  paddingVertical: 8,
+                                  paddingHorizontal: 12,
+                                  borderRadius: 10,
+                                  backgroundColor: isPartActive ? '#38BDF8' : 'rgba(255, 255, 255, 0.08)',
+                                  borderWidth: 1,
+                                  borderColor: isPartActive ? '#38BDF8' : 'rgba(255, 255, 255, 0.15)',
+                                  alignItems: 'center',
+                                }}
+                                onPress={() => setSelectedSchedulePartIdx(cIdx)}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={{ color: isPartActive ? '#050c1f' : '#ffffff', fontWeight: '900', fontSize: 13 }}>
+                                  {`${cIdx + 1}-Qism (${chunk.length} ta o'yin)`}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    )}
+                  </View>
                 )}
-              </TouchableOpacity>
-            </View>
 
             <ScaledCanvasPreview refObj={scheduleRef} width={1080} height={1080}>
               <ImageBackground
@@ -2398,11 +2673,18 @@ export const ExportScreen: React.FC = () => {
                     </View>
                     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                       {selectedLeague?.logo_url ? (
-                        <Image source={{ uri: selectedLeague.logo_url }} style={{ maxHeight: 125, maxWidth: 460, width: 380, height: 125, resizeMode: 'contain' }} />
+                        <Image source={{ uri: selectedLeague.logo_url }} style={{ maxHeight: 110, maxWidth: 460, width: 380, height: 110, resizeMode: 'contain' }} />
                       ) : (
-                        <Text style={{ color: '#ffffff', fontSize: 42, fontWeight: '900', textTransform: 'uppercase', textAlign: 'center' }}>
+                        <Text style={{ color: '#ffffff', fontSize: 38, fontWeight: '900', textTransform: 'uppercase', textAlign: 'center' }}>
                           {selectedLeague?.name || 'AMATORA LEAGUE'}
                         </Text>
+                      )}
+                      {activeDayGroup && (
+                        <View style={{ marginTop: 6, backgroundColor: 'rgba(56, 189, 248, 0.2)', borderWidth: 1, borderColor: '#38BDF8', paddingVertical: 4, paddingHorizontal: 14, borderRadius: 12 }}>
+                          <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                            {`${activeDayGroup.dayNumber}-KUN (${activeDayGroup.formattedDate})${activeDayGroup.chunks.length > 1 ? ` • ${safePartIdx + 1}-QISM` : ''}`}
+                          </Text>
+                        </View>
                       )}
                     </View>
                     <View style={{ width: 280, minWidth: 280, alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -2414,72 +2696,32 @@ export const ExportScreen: React.FC = () => {
                     </View>
                   </View>
 
-
-
-                  {/* Matches List (1-to-1 matching Schedule.jsx and Schedule.css) */}
+                  {/* Matches List (Max 8 matches per 1x1 image chunk for crystal clear readability) */}
                   <View style={{ flex: 1, paddingHorizontal: 45, justifyContent: 'center' }}>
                     {(() => {
-                      let activeRoundNumber = 1;
-                      let listToRender: any[] = [];
-                      let hasScheduledMatches = false;
+                      const matchesToRender = activeChunkMatches.length > 0
+                        ? activeChunkMatches
+                        : matches.slice(0, 8);
 
-                      if (selectedRound && selectedRound !== 'all') {
-                        activeRoundNumber = Number(selectedRound) || 0;
-                        listToRender = matches.filter(matchInSelectedRound);
-                        hasScheduledMatches = listToRender.some((m: any) =>
-                          m.status === 'scheduled' ||
-                          m.status === 'first_half' ||
-                          m.status === 'second_half' ||
-                          m.status === 'half_time' ||
-                          (m.home_score === null && m.away_score === null && m.status !== 'finished')
-                        );
-                      } else {
-                        // Automatically find the upcoming round with scheduled matches
-                        const scheduledList = matches.filter((m: any) =>
-                          m.status === 'scheduled' ||
-                          m.status === 'first_half' ||
-                          m.status === 'second_half' ||
-                          m.status === 'half_time' ||
-                          (m.home_score === null && m.away_score === null && m.status !== 'finished')
-                        );
-
-                        if (scheduledList.length > 0) {
-                          const rounds = scheduledList.map((m: any) => Number(m.round || 1)).filter(r => !isNaN(r));
-                          activeRoundNumber = rounds.length > 0 ? Math.min(...rounds) : 1;
-                          listToRender = matches.filter((m: any) => Number(m.round || 1) === activeRoundNumber);
-                          hasScheduledMatches = true;
-                        } else {
-                          // Fallback to the latest round when no scheduled matches remain in the league
-                          const rounds = matches.map((m: any) => Number(m.round || 1)).filter(r => !isNaN(r));
-                          activeRoundNumber = rounds.length > 0 ? Math.max(...rounds) : 1;
-                          listToRender = matches.filter((m: any) => Number(m.round || 1) === activeRoundNumber);
-                          hasScheduledMatches = false;
-                        }
-                      }
-
-                      if (listToRender.length === 0) {
-                        listToRender = matches;
-                      }
-
-                      const currentRoundMatches = listToRender.filter((m: any) => !m.is_postponed);
-                      const postponedMatches = listToRender.filter((m: any) => m.is_postponed);
+                      const currentRoundMatches = matchesToRender.filter((m: any) => !m.is_postponed);
+                      const postponedMatches = matchesToRender.filter((m: any) => m.is_postponed);
                       const totalCount = currentRoundMatches.length + postponedMatches.length;
 
-                      let rowPaddingVertical = 9;
+                      let rowPaddingVertical = 8.5;
                       let rowPaddingHorizontal = 18;
-                      let teamFontSize = 30;
-                      let teamLogoSize = 65;
-                      let timeBoxFontSize = 40;
-                      let timeDateFontSize = 14;
-                      let matchGap = 14;
+                      let teamFontSize = 28;
+                      let teamLogoSize = 62;
+                      let timeBoxFontSize = 38;
+                      let timeDateFontSize = 13;
+                      let matchGap = 12;
 
                       if (totalCount > 6) {
                         rowPaddingVertical = 6.5;
                         rowPaddingHorizontal = 14;
-                        teamFontSize = 26.5;
-                        teamLogoSize = 58;
-                        timeBoxFontSize = 36;
-                        timeDateFontSize = 13;
+                        teamFontSize = 26;
+                        teamLogoSize = 56;
+                        timeBoxFontSize = 34;
+                        timeDateFontSize = 12;
                         matchGap = 10;
                       }
 
@@ -2488,8 +2730,7 @@ export const ExportScreen: React.FC = () => {
                         const formattedDate = m.match_date ? m.match_date.split('-').reverse().join('.') : (m.date ? m.date.split('-').reverse().join('.') : '');
                         const formattedTime = (m.match_time || m.time || '18:00').substring(0, 5);
 
-                        // If scheduled matches exist, show time. If no scheduled matches in league, fallback to score.
-                        const centerValue = (hasScheduledMatches || !isMatchFinished)
+                        const centerValue = !isMatchFinished
                           ? formattedTime
                           : `${m.home_score || 0} - ${m.away_score || 0}`;
 
@@ -2550,21 +2791,21 @@ export const ExportScreen: React.FC = () => {
                               </View>
                             )}
                             
-                            {/* Small Round Badge in Right Corner with low opacity */}
+                            {/* Small Round Badge in Right Corner */}
                             <View style={{ position: 'absolute', right: 18, top: 4, opacity: 0.45 }}>
                               <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 }}>
-                                {m.stage && m.stage !== 'group' ? getStageDisplayTitle(m.stage, m.round) : `${activeRoundNumber}-TUR`}
+                                {m.stage && m.stage !== 'group' ? getStageDisplayTitle(m.stage, m.round) : (m.round ? `${m.round}-TUR` : currentScheduleRoundLabel)}
                               </Text>
                             </View>
                           </View>
                         );
                       };
 
-                      return listToRender.length === 0 ? (
+                      return matchesToRender.length === 0 ? (
                         <Text style={{ textAlign: 'center', color: 'rgba(255, 255, 255, 0.6)', fontSize: 22, fontWeight: '700' }}>{"O'YINLAR MAVJUD EMAS"}</Text>
                       ) : (
                         <View style={{ gap: matchGap }}>
-                          {currentRoundMatches.slice(0, 8).map((m: any, idx: number) => renderMatchRow(m, false))}
+                          {currentRoundMatches.map((m: any, idx: number) => renderMatchRow(m, false))}
 
                           {postponedMatches.length > 0 && (
                             <View style={{ marginTop: 10, gap: matchGap, width: '100%', alignItems: 'center' }}>
