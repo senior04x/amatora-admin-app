@@ -536,6 +536,132 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     } catch (e) {}
   };
 
+  // Direct Upload Logo for Tournament Card
+  const [uploadingLogoTournId, setUploadingLogoTournId] = useState<number | string | null>(null);
+  const [uploadingBgTournId, setUploadingBgTournId] = useState<number | string | null>(null);
+
+  const handleDirectUploadLogo = (tourn: any) => {
+    if (isReadOnlyUser) return;
+    requestAnimationFrame(async () => {
+      try {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: 'images',
+          quality: 0.8,
+          allowsEditing: false,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          const uri = result.assets[0].uri;
+          setUploadingLogoTournId(tourn.id);
+          setTournaments((prev: any[]) =>
+            prev.map((t: any) => (t.id === tourn.id ? { ...t, logo_url: uri } : t))
+          );
+          if (showToast) showToast({ message: `"${tourn.name}" logosi yangilanmoqda...`, type: 'info', duration: 2000 });
+
+          const cleanUri = uri.split('?')[0];
+          const rawExt = cleanUri.split('.').pop()?.toLowerCase() || 'png';
+          const fileExt = (rawExt === 'heic' || rawExt === 'heif') ? 'png' : rawExt;
+          const fileName = `tourn_logo_${tourn.id}_${Date.now()}.${fileExt}`;
+          const filePath = `tournaments/${fileName}`;
+          const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
+
+          const publicUrl = await uploadFileToSupabase('player-photos', filePath, uri, mimeType);
+          if (publicUrl) {
+            await supabase.from('tournaments').update({ logo_url: publicUrl }).eq('id', tourn.id);
+            if (showToast) showToast({ message: `"${tourn.name}" logosi saqlandi ✓`, type: 'success', duration: 2500 });
+          }
+        }
+      } catch (e) {
+        console.error('handleDirectUploadLogo error:', e);
+      } finally {
+        setUploadingLogoTournId(null);
+      }
+    });
+  };
+
+  // Direct Upload Background Image for Tournament Card
+  const handleDirectUploadBg = (tourn: any) => {
+    if (isReadOnlyUser) return;
+    requestAnimationFrame(async () => {
+      try {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: 'images',
+          quality: 0.8,
+          allowsEditing: false,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          const uri = result.assets[0].uri;
+          setUploadingBgTournId(tourn.id);
+          setTournaments((prev: any[]) =>
+            prev.map((t: any) => (t.id === tourn.id ? { ...t, export_bg_url: uri } : t))
+          );
+          if (showToast) showToast({ message: `"${tourn.name}" fon rasmi yangilanmoqda...`, type: 'info', duration: 2000 });
+
+          const cleanUri = uri.split('?')[0];
+          const rawExt = cleanUri.split('.').pop()?.toLowerCase() || 'jpg';
+          const fileExt = (rawExt === 'heic' || rawExt === 'heif') ? 'jpg' : rawExt;
+          const fileName = `tourn_bg_${tourn.id}_${Date.now()}.${fileExt}`;
+          const filePath = `tournaments/${fileName}`;
+          const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
+
+          const publicUrl = await uploadFileToSupabase('player-photos', filePath, uri, mimeType);
+          if (publicUrl) {
+            await supabase.from('tournaments').update({ export_bg_url: publicUrl }).eq('id', tourn.id);
+            if (showToast) showToast({ message: `"${tourn.name}" fon rasmi saqlandi ✓`, type: 'success', duration: 2500 });
+          }
+        }
+      } catch (e) {
+        console.error('handleDirectUploadBg error:', e);
+      } finally {
+        setUploadingBgTournId(null);
+      }
+    });
+  };
+
+  // Delete Background Image from Tournament Card
+  const handleDeleteBgImage = (tourn: any) => {
+    if (isReadOnlyUser) return;
+    Alert.alert("Orqa fonni o'chirish", "Orqa fon rasmini o'chirishni xohlaysizmi?", [
+      { text: "Yo'q", style: 'cancel' },
+      {
+        text: 'Ha',
+        style: 'destructive',
+        onPress: async () => {
+          setTournaments((prev: any[]) =>
+            prev.map((t: any) => (t.id === tourn.id ? { ...t, export_bg_url: null } : t))
+          );
+          await supabase.from('tournaments').update({ export_bg_url: null }).eq('id', tourn.id);
+          if (showToast) showToast({ message: "Orqa fon o'chirildi", type: 'info', duration: 2000 });
+        },
+      },
+    ]);
+  };
+
+  // Toggle Tournament Status (Faol / Nofaol)
+  const handleToggleStatus = async (tourn: any) => {
+    if (isReadOnlyUser) return;
+    const isCurrentlyActive = tourn.status !== 'archived' && tourn.status !== 'completed';
+    const nextStatus = isCurrentlyActive ? 'archived' : 'active';
+
+    setTournaments((prev: any[]) =>
+      prev.map((t: any) => (t.id === tourn.id ? { ...t, status: nextStatus } : t))
+    );
+
+    try {
+      await supabase.from('tournaments').update({ status: nextStatus }).eq('id', tourn.id);
+      if (showToast) {
+        showToast({
+          message: nextStatus === 'active' ? `"${tourn.name}" faollashtirildi ✓` : `"${tourn.name}" arxivlandi`,
+          type: nextStatus === 'active' ? 'success' : 'info',
+        });
+      }
+    } catch (e) {
+      console.error('Toggle status error:', e);
+      fetchTournamentsData();
+    }
+  };
+
   // Helper to count attached leagues and teams for a tournament
   const getTournStats = (tId: number) => {
     const linked = tournamentLeagues.filter((tl: any) => Number(tl.tournament_id) === Number(tId));
@@ -549,106 +675,144 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
 
   const renderTournamentCard = ({ item }: { item: any }) => {
     const stats = getTournStats(item.id);
+    const duration = item.match_duration || 90;
+    const halfTime = Math.round(duration / 2);
     const isCollab = item.isCollab;
-    const isArchived = item.status === 'archived';
+    const isActive = item.status !== 'archived' && item.status !== 'completed';
 
     return (
-      <View style={[s.cardWrapper, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+      <View style={[s.card, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
         <ImageBackground
           source={item.export_bg_url ? { uri: item.export_bg_url } : undefined}
-          style={s.cardBackground}
-          imageStyle={{ borderRadius: 16, opacity: 0.35 }}
+          style={s.cardFullBg}
+          imageStyle={s.cardFullBgImage}
+          resizeMode="cover"
         >
-          <View style={s.cardOverlay}>
-            {/* Top Bar: Status & Badges */}
+          <View style={s.cardDarkOverlay}>
+            {/* Top Row: Upload BG & Status Switcher */}
             <View style={s.cardTopRow}>
-              <View style={s.statusBadgeRow}>
-                <View style={[s.statusBadge, isArchived ? s.statusArchived : s.statusActive]}>
-                  <Text style={s.statusText}>{isArchived ? 'ARXIV' : 'FAOL'}</Text>
+              {!isReadOnlyUser && !isCollab ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleDirectUploadBg(item)} activeOpacity={0.8}>
+                    <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
+                    <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
+                  </TouchableOpacity>
+                  {item.export_bg_url ? (
+                    <TouchableOpacity style={s.deleteBgCorner} onPress={() => handleDeleteBgImage(item)} activeOpacity={0.8}>
+                      <Ionicons name="trash-outline" size={13} color="#FF5252" />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
-                {isCollab && (
-                  <View style={s.collabBadge}>
-                    <Ionicons name="people" size={12} color="#00FF66" />
-                    <Text style={s.collabBadgeText}>Hamkorlik</Text>
-                  </View>
-                )}
-              </View>
+              ) : isCollab ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(236,72,153,0.25)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(236,72,153,0.4)' }}>
+                  <Ionicons name="link-outline" size={12} color="#EC4899" />
+                  <Text style={{ color: '#EC4899', fontSize: 10, fontWeight: '800', marginLeft: 4 }}>{"HAMKOR TURNIR"}</Text>
+                </View>
+              ) : <View />}
 
-              {!isReadOnlyUser && !isCollab && (
+              {/* Status Switcher Button */}
+              <TouchableOpacity
+                style={[
+                  s.statusSwitcherBtn,
+                  isActive ? s.statusSwitcherActive : s.statusSwitcherInactive
+                ]}
+                onPress={() => handleToggleStatus(item)}
+                activeOpacity={0.7}
+                disabled={isReadOnlyUser || isCollab}
+              >
+                <View style={[
+                  s.statusIndicatorDot,
+                  isActive ? s.statusDotActive : s.statusDotInactive
+                ]} />
+                <Text style={[
+                  s.statusSwitcherText,
+                  isActive ? s.statusTextActive : s.statusTextInactive
+                ]}>
+                  {isActive ? "FAOL" : "NOFAOL"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Center Content: Floating Logo, Title, Badges */}
+            <View style={s.cardCenterContent}>
+              {uploadingLogoTournId === item.id ? (
+                <View style={s.freeLogoWrap}>
+                  <ActivityIndicator size="small" color="#EC4899" />
+                  <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, marginTop: 4, fontWeight: '700' }}>{"Yuklanmoqda..."}</Text>
+                </View>
+              ) : item.logo_url ? (
                 <TouchableOpacity
-                  onPress={() => handleDeleteTournament(item)}
-                  style={s.cardDeleteBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  disabled={isReadOnlyUser || isCollab}
+                  onPress={() => !isReadOnlyUser && !isCollab && handleDirectUploadLogo(item)}
+                  activeOpacity={isReadOnlyUser || isCollab ? 1 : 0.8}
+                  style={s.freeLogoWrap}
                 >
-                  <Ionicons name="trash-outline" size={16} color="#FF5252" />
+                  <Image source={{ uri: item.logo_url }} style={s.freeLogoImg} resizeMode="contain" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  disabled={isReadOnlyUser || isCollab}
+                  onPress={() => !isReadOnlyUser && !isCollab && handleDirectUploadLogo(item)}
+                  activeOpacity={isReadOnlyUser || isCollab ? 1 : 0.8}
+                  style={s.freeLogoWrap}
+                >
+                  <Ionicons name="ribbon-outline" size={44} color="#EC4899" />
                 </TouchableOpacity>
               )}
-            </View>
 
-            {/* Center Info: Logo & Name */}
-            <View style={s.cardCenter}>
-              {item.logo_url ? (
-                <Image source={{ uri: item.logo_url }} style={s.tournLogo} resizeMode="contain" />
-              ) : (
-                <View style={s.tournLogoPlaceholder}>
-                  <Ionicons name="ribbon-outline" size={32} color="#EC4899" />
+              <Text style={s.cardTitle} numberOfLines={2}>{item.name}</Text>
+
+              <View style={s.badgesRow}>
+                {item.start_date ? (
+                  <View style={s.badgeSeason}>
+                    <Text style={s.badgeIcon}>{"📅"}</Text>
+                    <Text style={s.badgeSeasonText}>{item.start_date}</Text>
+                  </View>
+                ) : null}
+                <View style={s.badgeDuration}>
+                  <Text style={s.badgeIcon}>{"⏱"}</Text>
+                  <Text style={s.badgeDurationText}>{`${duration} daq (${halfTime}x2)`}</Text>
                 </View>
-              )}
-              <Text style={s.tournTitle} numberOfLines={2}>{item.name}</Text>
-              {item.description ? (
-                <Text style={s.tournDesc} numberOfLines={2}>{item.description}</Text>
-              ) : null}
-            </View>
-
-            {/* Stats Row */}
-            <View style={s.statsRow}>
-              <View style={s.statPill}>
-                <Ionicons name="time-outline" size={13} color="#FBBF24" />
-                <Text style={s.statText}>{`${item.match_duration || 90} daq`}</Text>
-              </View>
-              <View style={s.statPill}>
-                <Ionicons name="trophy-outline" size={13} color="#38BDF8" />
-                <Text style={s.statText}>{`${stats.leaguesCount} ta liga`}</Text>
-              </View>
-              <View style={s.statPill}>
-                <Ionicons name="shield-outline" size={13} color="#34D399" />
-                <Text style={s.statText}>{`${stats.teamsCount} ta jamoa`}</Text>
+                <View style={s.badgeTournLeagues}>
+                  <Ionicons name="layers-outline" size={11} color="#38BDF8" />
+                  <Text style={s.badgeTournLeaguesText}>{`${stats.leaguesCount} ta liga`}</Text>
+                </View>
+                <View style={s.badgeTournTeams}>
+                  <Ionicons name="shield-outline" size={11} color="#34D399" />
+                  <Text style={s.badgeTournTeamsText}>{`${stats.teamsCount} ta jamoa`}</Text>
+                </View>
               </View>
             </View>
 
-            {/* Bottom Actions */}
-            {!isReadOnlyUser && (
-              <View style={s.cardBottomActions}>
-                {!isCollab && (
-                  <TouchableOpacity
-                    style={s.actionBtn}
-                    onPress={() => handleOpenLeaguesModal(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="list-outline" size={15} color="#38BDF8" />
-                    <Text style={[s.actionBtnText, { color: '#38BDF8' }]}>Ligalar</Text>
-                  </TouchableOpacity>
-                )}
-                {!isCollab && (
-                  <TouchableOpacity
-                    style={s.actionBtn}
-                    onPress={() => handleOpenCollabModal(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="people-outline" size={15} color="#A78BFA" />
-                    <Text style={[s.actionBtnText, { color: '#A78BFA' }]}>Hamkorlik</Text>
-                  </TouchableOpacity>
-                )}
-                {!isCollab && (
-                  <TouchableOpacity
-                    style={s.actionBtn}
-                    onPress={() => handleOpenEditModal(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="create-outline" size={15} color="#00FF66" />
-                    <Text style={[s.actionBtnText, { color: '#00FF66' }]}>Tahrirlash</Text>
-                  </TouchableOpacity>
-                )}
+            {/* Bottom Action Tabs: Ligalar, Tahrirlash, O'chirish */}
+            {!isReadOnlyUser && !isCollab && (
+              <View style={s.actionTabs}>
+                <TouchableOpacity
+                  style={[s.actionTab, s.actionTabLeagues]}
+                  onPress={() => handleOpenLeaguesModal(item)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="layers-outline" size={15} color="#38BDF8" />
+                  <Text style={[s.actionTabText, { color: '#38BDF8' }]}>{`Ligalar (${stats.leaguesCount})`}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={s.actionTab}
+                  onPress={() => handleOpenEditModal(item)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="create-outline" size={16} color="rgba(255,255,255,0.85)" />
+                  <Text style={s.actionTabText}>{"Tahrirlash"}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.actionTab, s.actionTabDelete]}
+                  onPress={() => handleDeleteTournament(item)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#FF5252" />
+                  <Text style={[s.actionTabText, { color: '#FF5252' }]}>{"O'chirish"}</Text>
+                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -1067,138 +1231,230 @@ const s = StyleSheet.create({
     padding: 16,
     paddingBottom: 100,
   },
-  cardWrapper: {
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 16,
+  /* Tournament Card (1:1 with LeaguesScreen card) */
+  card: {
+    minHeight: 255,
+    borderRadius: 18,
     overflow: 'hidden',
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    marginBottom: 16,
   },
-  cardBackground: {
+  cardFullBg: {
     width: '100%',
+    height: '100%',
   },
-  cardOverlay: {
-    padding: 16,
-    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+  cardFullBgImage: {
+    borderRadius: 18,
+  },
+  cardDarkOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.48)',
+    padding: 12,
+    justifyContent: 'space-between',
   },
   cardTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  statusBadgeRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  statusActive: {
-    backgroundColor: 'rgba(0,255,102,0.15)',
-  },
-  statusArchived: {
-    backgroundColor: 'rgba(148,163,184,0.2)',
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#00FF66',
-    letterSpacing: 0.5,
-  },
-  collabBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,255,102,0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    gap: 4,
-  },
-  collabBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#00FF66',
-  },
-  cardDeleteBtn: {
-    padding: 4,
-  },
-  cardCenter: {
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  tournLogo: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    marginBottom: 10,
-  },
-  tournLogoPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(236,72,153,0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  tournTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    textAlign: 'center',
     marginBottom: 4,
   },
-  tournDesc: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.6)',
-    textAlign: 'center',
-  },
-  statsRow: {
-    flexDirection: 'row',
+  deleteBgCorner: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginBottom: 14,
   },
-  statPill: {
+  uploadBgBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    gap: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderStyle: 'dashed',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 8,
-    gap: 5,
+    borderRadius: 20,
   },
-  statText: {
-    fontSize: 11,
+  uploadBgBtnText: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 9,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.85)',
   },
-  cardBottomActions: {
+  statusSwitcherBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    paddingTop: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+  },
+  statusSwitcherActive: {
+    borderColor: 'rgba(0, 255, 102, 0.5)',
+    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+  },
+  statusSwitcherInactive: {
+    borderColor: 'rgba(255, 68, 68, 0.5)',
+    backgroundColor: 'rgba(255, 68, 68, 0.15)',
+  },
+  statusIndicatorDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  statusDotActive: {
+    backgroundColor: '#00FF66',
+  },
+  statusDotInactive: {
+    backgroundColor: '#FF4444',
+  },
+  statusSwitcherText: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  statusTextActive: {
+    color: '#00FF66',
+  },
+  statusTextInactive: {
+    color: '#FF4444',
+  },
+  cardCenterContent: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  freeLogoWrap: {
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+    width: '90%',
+    height: 90,
+  },
+  freeLogoImg: {
+    width: '100%',
+    height: '100%',
+  },
+  cardTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    marginBottom: 4,
+  },
+  badgeSeason: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeSeasonText: {
+    color: '#FCA5A5',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  badgeDuration: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0, 255, 102, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeDurationText: {
+    color: '#00FF66',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  badgeIcon: {
+    fontSize: 9,
+  },
+  badgeTournLeagues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeTournLeaguesText: {
+    color: '#38BDF8',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  badgeTournTeams: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.3)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeTournTeamsText: {
+    color: '#34D399',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  actionTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    marginTop: 8,
     gap: 8,
   },
-  actionBtn: {
+  actionTab: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 8,
-    borderRadius: 8,
-    gap: 5,
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
-  actionBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
+  actionTabLeagues: {
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    borderColor: 'rgba(56, 189, 248, 0.3)',
+  },
+  actionTabDelete: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  actionTabText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
   emptyState: {
     flex: 1,
