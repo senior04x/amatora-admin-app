@@ -16,6 +16,12 @@ import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { useScrollDockHandler } from '../utils/scrollDock';
+import {
+  getActiveOrgTournaments,
+  getTournamentLeagues,
+  getTournamentTeams,
+  getStageDisplayTitle,
+} from '../utils/tournamentUtils';
 
 interface TeamStanding {
   id: string | number;
@@ -45,25 +51,52 @@ export const StandingsScreen: React.FC = () => {
   const scrollDockProps = useScrollDockHandler();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [competitionType, setCompetitionType] = useState<'league' | 'tournament'>('league');
   const [leagues, setLeagues] = useState<any[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<string>('');
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [selectedTournament, setSelectedTournament] = useState<any | null>(null);
   const [selectedRound, setSelectedRound] = useState<string>('Barchasi');
   const [availableRounds, setAvailableRounds] = useState<string[]>(['Barchasi']);
   const [standings, setStandings] = useState<TeamStanding[]>([]);
   const [showLeagueFilter, setShowLeagueFilter] = useState(false);
+  const [showTournFilter, setShowTournFilter] = useState(false);
 
   // Single-league in-memory cache to prevent re-fetching and memory bloat on weak devices
   const leagueCacheRef = useRef<RawLeagueCache | null>(null);
 
   useEffect(() => {
     fetchLeagues();
+    fetchTournaments();
   }, [orgId, collabLeagueIds]);
 
   useEffect(() => {
-    if (selectedLeague) {
-      calculateStandings(selectedLeague, selectedRound);
+    if (competitionType === 'league') {
+      if (selectedLeague) {
+        calculateStandings(selectedLeague, selectedRound);
+      }
+    } else {
+      if (selectedTournament) {
+        calculateTournamentStandings(selectedTournament, selectedRound);
+      } else {
+        setStandings([]);
+        setLoading(false);
+      }
     }
-  }, [selectedLeague, orgId, collabLeagueNames]);
+  }, [competitionType, selectedLeague, selectedTournament, orgId, collabLeagueNames]);
+
+  const fetchTournaments = async () => {
+    if (!orgId) return;
+    try {
+      const tourns = await getActiveOrgTournaments(orgId);
+      setTournaments(tourns);
+      if (tourns.length > 0 && !selectedTournament) {
+        setSelectedTournament(tourns[0]);
+      }
+    } catch (e) {
+      console.error('Error fetching tournaments in StandingsScreen:', e);
+    }
+  };
 
   const fetchLeagues = async () => {
     setLoading(true);
@@ -97,6 +130,7 @@ export const StandingsScreen: React.FC = () => {
     setRefreshing(true);
     leagueCacheRef.current = null;
     fetchLeagues();
+    fetchTournaments();
   };
 
   /**
@@ -248,16 +282,95 @@ export const StandingsScreen: React.FC = () => {
    */
   const handleRoundSelect = (rnd: string) => {
     setSelectedRound(rnd);
-    if (leagueCacheRef.current && leagueCacheRef.current.leagueName === selectedLeague) {
-      const computed = computeStandingsInMemory(
-        leagueCacheRef.current.leagueTeams,
-        leagueCacheRef.current.allLeagueMatches,
-        leagueCacheRef.current.overridesMap,
-        rnd
-      );
-      setStandings(computed);
+    if (competitionType === 'tournament') {
+      if (selectedTournament) {
+        calculateTournamentStandings(selectedTournament, rnd);
+      }
     } else {
-      calculateStandings(selectedLeague, rnd);
+      if (leagueCacheRef.current && leagueCacheRef.current.leagueName === selectedLeague) {
+        const computed = computeStandingsInMemory(
+          leagueCacheRef.current.leagueTeams,
+          leagueCacheRef.current.allLeagueMatches,
+          leagueCacheRef.current.overridesMap,
+          rnd
+        );
+        setStandings(computed);
+      } else {
+        calculateStandings(selectedLeague, rnd);
+      }
+    }
+  };
+
+  const calculateTournamentStandings = async (tourn: any, roundFilter: string) => {
+    if (!tourn) return;
+    setLoading(true);
+    try {
+      const dbClient = supabase;
+      // 1. Fetch attached leagues
+      const tournLeagues = await getTournamentLeagues(tourn.id);
+
+      // 2. Fetch all approved teams
+      let teamsQuery = dbClient
+        .from('teams')
+        .select('*')
+        .in('status', ['approved', 'tasdiqlangan']);
+      if (orgId) {
+        teamsQuery = teamsQuery.or(`organization_id.eq.${orgId}`);
+      }
+      const { data: teamsData } = await teamsQuery;
+
+      // 3. Match tournament teams by leagues
+      const matchedTeams = getTournamentTeams(tournLeagues, teamsData || []);
+
+      // 4. Fetch tournament matches
+      const { data: matchesData } = await dbClient
+        .from('matches')
+        .select(`
+          *,
+          home_team:home_team_id (id, name, logo_url),
+          away_team:away_team_id (id, name, logo_url)
+        `)
+        .eq('tournament_id', tourn.id);
+
+      const allTournMatches = matchesData || [];
+
+      // Extract unique rounds / stages
+      const roundSet = new Set<string>();
+      allTournMatches.forEach((m: any) => {
+        const title = getStageDisplayTitle(m.stage, m.round);
+        if (title) {
+          roundSet.add(title);
+        }
+      });
+
+      const defaultRounds = ['Barchasi', ...Array.from(roundSet)];
+      setAvailableRounds(defaultRounds);
+
+      // Overrides
+      const { data: sponsorData } = await dbClient.from('sponsors').select('*');
+      const overridesMap: Record<string, any> = {};
+      (sponsorData || []).forEach((s: any) => {
+        if (s.name && s.name.startsWith('STANDINGS_OVERRIDE_')) {
+          const teamId = s.name.replace('STANDINGS_OVERRIDE_', '');
+          try {
+            overridesMap[teamId] = JSON.parse(s.logo_url);
+          } catch (e) {}
+        }
+      });
+
+      // Filter matches by roundFilter if not 'Barchasi'
+      const filteredMatches = allTournMatches.filter((m: any) => {
+        if (roundFilter === 'Barchasi') return true;
+        const title = getStageDisplayTitle(m.stage, m.round);
+        return title.toLowerCase() === roundFilter.toLowerCase();
+      });
+
+      const list = computeStandingsInMemory(matchedTeams, filteredMatches, overridesMap, 'Barchasi');
+      setStandings(list);
+    } catch (err) {
+      console.error('Error calculating tournament standings:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -314,8 +427,9 @@ export const StandingsScreen: React.FC = () => {
 
       const { data: matchesData } = await matchesQuery;
 
-      // Filter finished matches belonging to this league
+      // Filter finished matches belonging to this league (strictly exclude tournament matches)
       const allLeagueMatches = (matchesData || []).filter((m: any) => {
+        if (m.tournament_id) return false;
         const matchLeague = String(m.league || '').trim().toLowerCase();
         return matchLeague === leagueName.trim().toLowerCase() || !m.league;
       });
@@ -387,28 +501,92 @@ export const StandingsScreen: React.FC = () => {
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>{"Turnir Jadvali"}</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>{"Guruh va pley-off bosqichlari statistikasi"}</Text>
+          <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>
+            {competitionType === 'league' ? "Liga guruh va o'yinlar statistikasi" : "Turnir kubogi statistikasi"}
+          </Text>
         </View>
 
-        {/* League Selector Pill */}
-        {leagues.length > 0 && (
-          <TouchableOpacity
-            style={[styles.leagueSelectorPill, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-            activeOpacity={0.8}
-            onPress={() => setShowLeagueFilter(!showLeagueFilter)}
-          >
-            <Ionicons name="trophy-outline" size={14} color={colors.accentGreen} style={{ marginRight: 6 }} />
-            <Text style={[styles.leagueSelectorText, { color: colors.textPrimary }]} numberOfLines={1}>
-              {selectedLeague || 'Ligani tanlang'}
-            </Text>
-            <Ionicons
-              name={showLeagueFilter ? 'chevron-up' : 'chevron-down'}
-              size={14}
-              color={colors.textMuted}
-              style={{ marginLeft: 4 }}
-            />
-          </TouchableOpacity>
+        {/* Top-Right Selector Pill */}
+        {competitionType === 'league' ? (
+          leagues.length > 0 && (
+            <TouchableOpacity
+              style={[styles.leagueSelectorPill, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+              activeOpacity={0.8}
+              onPress={() => {
+                setShowTournFilter(false);
+                setShowLeagueFilter(!showLeagueFilter);
+              }}
+            >
+              <Ionicons name="trophy-outline" size={14} color={colors.accentGreen} style={{ marginRight: 6 }} />
+              <Text style={[styles.leagueSelectorText, { color: colors.textPrimary }]} numberOfLines={1}>
+                {selectedLeague || 'Ligani tanlang'}
+              </Text>
+              <Ionicons
+                name={showLeagueFilter ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={colors.textMuted}
+                style={{ marginLeft: 4 }}
+              />
+            </TouchableOpacity>
+          )
+        ) : (
+          tournaments.length > 0 && (
+            <TouchableOpacity
+              style={[styles.leagueSelectorPill, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+              activeOpacity={0.8}
+              onPress={() => {
+                setShowLeagueFilter(false);
+                setShowTournFilter(!showTournFilter);
+              }}
+            >
+              <Ionicons name="ribbon-outline" size={14} color="#EC4899" style={{ marginRight: 6 }} />
+              <Text style={[styles.leagueSelectorText, { color: colors.textPrimary }]} numberOfLines={1}>
+                {selectedTournament?.name || 'Turnirni tanlang'}
+              </Text>
+              <Ionicons
+                name={showTournFilter ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={colors.textMuted}
+                style={{ marginLeft: 4 }}
+              />
+            </TouchableOpacity>
+          )
         )}
+      </View>
+
+      {/* Competition Mode Segmented Tabs */}
+      <View style={[styles.segmentContainer, { backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : colors.bgCardElevated, borderColor: colors.border }]}>
+        <TouchableOpacity
+          style={[styles.segmentTab, competitionType === 'league' && [styles.segmentTabActive, { backgroundColor: colors.accentGreen }]]}
+          onPress={() => {
+            setCompetitionType('league');
+            setSelectedRound('Barchasi');
+            setShowLeagueFilter(false);
+            setShowTournFilter(false);
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="trophy-outline" size={14} color={competitionType === 'league' ? '#000000' : colors.textMuted} />
+          <Text style={[styles.segmentTabText, competitionType === 'league' ? { color: '#000000', fontWeight: '900' } : { color: colors.textMuted }]}>
+            Liga
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.segmentTab, competitionType === 'tournament' && [styles.segmentTabActive, { backgroundColor: '#EC4899' }]]}
+          onPress={() => {
+            setCompetitionType('tournament');
+            setSelectedRound('Barchasi');
+            setShowLeagueFilter(false);
+            setShowTournFilter(false);
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="ribbon-outline" size={14} color={competitionType === 'tournament' ? '#FFFFFF' : colors.textMuted} />
+          <Text style={[styles.segmentTabText, competitionType === 'tournament' ? { color: '#FFFFFF', fontWeight: '900' } : { color: colors.textMuted }]}>
+            Turnir
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* League Filter Modal Dropdown */}
@@ -437,6 +615,39 @@ export const StandingsScreen: React.FC = () => {
                 ]}
               >
                 {lg.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Tournament Filter Modal Dropdown */}
+      {showTournFilter && (
+        <View style={[styles.leagueFilterMenu, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' ? (
+            <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+          ) : (
+            <View style={[styles.androidMenuBackdrop, { backgroundColor: colors.bgCard }]} />
+          )}
+          {tournaments.map((t) => (
+            <TouchableOpacity
+              key={t.id}
+              style={[styles.leagueMenuItem, { borderBottomColor: colors.border }]}
+              activeOpacity={0.8}
+              onPress={() => {
+                setSelectedTournament(t);
+                setShowTournFilter(false);
+                calculateTournamentStandings(t, 'Barchasi');
+              }}
+            >
+              <Text
+                style={[
+                  styles.leagueMenuText,
+                  { color: colors.textSecondary },
+                  selectedTournament?.id === t.id && { color: '#EC4899', fontWeight: '900' },
+                ]}
+              >
+                {t.name}
               </Text>
             </TouchableOpacity>
           ))}
@@ -652,6 +863,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     flexShrink: 1,
+  },
+  segmentContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+  },
+  segmentTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 9,
+    gap: 6,
+  },
+  segmentTabActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  segmentTabText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   leagueFilterMenu: {
     position: 'absolute',

@@ -26,11 +26,14 @@ import { MatchControlScreen } from './MatchControlScreen';
 import { useFinishedMatchesData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
+import { getStageDisplayTitle } from '../utils/tournamentUtils';
 
 interface Match {
   id: string | number;
   organization_id?: number;
   league?: string;
+  tournament_id?: number | string | null;
+  stage?: string | null;
   round?: string | number;
   home_team_id?: string | number;
   away_team_id?: string | number;
@@ -661,7 +664,11 @@ export const FinishedMatchesScreen: React.FC<{
                   <View style={styles.cardTopRow}>
                     <View style={[styles.leagueTag, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F3F4F6' }]}>
                       <Text style={[styles.leagueTagText, { color: colors.accentGreen }]}>{item.league || 'LIGA'}</Text>
-                      {item.round && <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>{` • ${item.round}`}</Text>}
+                      {(item.stage && item.stage !== 'group') ? (
+                        <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>{` • ${getStageDisplayTitle(item.stage)}`}</Text>
+                      ) : item.round ? (
+                        <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>{` • ${item.round}`}</Text>
+                      ) : null}
                     </View>
 
                     <View style={[styles.finishedBadge, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.12)' : '#ECFDF5', borderColor: isDark ? 'rgba(16, 185, 129, 0.25)' : '#A7F3D0' }]}>

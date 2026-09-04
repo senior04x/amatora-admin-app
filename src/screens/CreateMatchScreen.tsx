@@ -21,6 +21,13 @@ import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { adminNotificationService } from '../utils/adminNotificationService';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  getActiveOrgTournaments,
+  getTournamentLeagues,
+  getTournamentTeams,
+  STAGES,
+  STAGE_LABELS,
+} from '../utils/tournamentUtils';
 
 interface Props {
   onBack?: () => void;
@@ -32,6 +39,14 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+
+  // Competition Mode ('league' vs 'tournament')
+  const [competitionType, setCompetitionType] = useState<'league' | 'tournament'>('league');
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [selectedTournamentId, setSelectedTournamentId] = useState<string | number>('');
+  const [tournamentLeagues, setTournamentLeagues] = useState<any[]>([]);
+  const [selectedStage, setSelectedStage] = useState<string>('group');
+  const [showTournamentPicker, setShowTournamentPicker] = useState(false);
 
   // DB Data
   const [leagues, setLeagues] = useState<any[]>([]);
@@ -82,6 +97,16 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
     fetchLeaguesAndTeams();
   }, [orgId]);
 
+  useEffect(() => {
+    if (selectedTournamentId) {
+      getTournamentLeagues(selectedTournamentId).then((tleagues) => {
+        setTournamentLeagues(tleagues);
+      });
+    } else {
+      setTournamentLeagues([]);
+    }
+  }, [selectedTournamentId]);
+
   const fetchLeaguesAndTeams = async () => {
     try {
       let leaguesQuery = supabase.from('leagues').select('*').order('name');
@@ -92,7 +117,11 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         teamsQuery = teamsQuery.eq('organization_id', orgId);
       }
 
-      const [leaguesRes, teamsRes] = await Promise.all([leaguesQuery, teamsQuery]);
+      const [leaguesRes, teamsRes, tournsRes] = await Promise.all([
+        leaguesQuery,
+        teamsQuery,
+        getActiveOrgTournaments(orgId || 1),
+      ]);
 
       if (leaguesRes.data) {
         setLeagues(leaguesRes.data);
@@ -103,15 +132,21 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       if (teamsRes.data) {
         setTeams(teamsRes.data);
       }
+      if (tournsRes && tournsRes.length > 0) {
+        setTournaments(tournsRes);
+        setSelectedTournamentId(tournsRes[0].id);
+      }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Filter teams by chosen league (excluding archived teams)
-  const filteredTeams = teams.filter(
-    (t) => !t.is_archived && (!selectedLeague || !t.league || t.league.split(',').map((s: string) => s.trim()).includes(selectedLeague))
-  );
+  // Filter teams by chosen league or tournament (excluding archived teams)
+  const filteredTeams = competitionType === 'tournament'
+    ? getTournamentTeams(tournamentLeagues, teams.filter((t) => !t.is_archived))
+    : teams.filter(
+        (t) => !t.is_archived && (!selectedLeague || !t.league || t.league.split(',').map((s: string) => s.trim()).includes(selectedLeague))
+      );
 
   const homeTeam = teams.find((t) => t.id === homeTeamId);
   const awayTeam = teams.find((t) => t.id === awayTeamId);
@@ -183,8 +218,12 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
   };
 
   const handleSaveMatch = async () => {
-    if (!selectedLeague) {
-      Alert.alert("Xatolik", "Iltimos, Liganu tanlang!");
+    if (competitionType === 'league' && !selectedLeague) {
+      Alert.alert("Xatolik", "Iltimos, Ligani tanlang!");
+      return;
+    }
+    if (competitionType === 'tournament' && !selectedTournamentId) {
+      Alert.alert("Xatolik", "Iltimos, Turnirni tanlang!");
       return;
     }
     if (!homeTeamId || !awayTeamId) {
@@ -233,17 +272,20 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       }
 
       const parsedRound = parseInt(matchRound, 10) || 1;
+      const selectedTournObj = tournaments.find((t) => t.id === selectedTournamentId);
 
       // Clean DB Payload with valid schema columns
       const basePayload: any = {
         organization_id: activeOrgId,
-        league: selectedLeague,
+        tournament_id: competitionType === 'tournament' ? selectedTournamentId : null,
+        stage: competitionType === 'tournament' ? selectedStage : 'group',
+        league: competitionType === 'tournament' ? (selectedTournObj?.name || 'Turnir') : selectedLeague,
         home_team_id: homeTeamId,
         away_team_id: awayTeamId,
         match_date: matchDate,
         match_time: matchTime,
         location: stadiumName?.trim() || selectedField,
-        round: parsedRound,
+        round: (competitionType === 'tournament' && selectedStage !== 'group') ? 1 : parsedRound,
         youtube_link: enableYtLink ? (youtubeLink.trim() || null) : null,
         status: 'scheduled',
         importance: importance || 'oddiy',
@@ -297,19 +339,106 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* 1. Liga Tanlash */}
+        {/* Musobaqa turi (Liga vs Turnir) */}
         <View style={styles.inputGroup}>
-          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"1. Liga / Musobaqa *"}</Text>
-          <TouchableOpacity
-            style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-            onPress={() => setShowLeaguePicker(true)}
-          >
-            <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
-              {selectedLeague || "Liganu tanlang"}
-            </Text>
-            <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
-          </TouchableOpacity>
+          <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Musobaqa turi *"}</Text>
+          <View style={styles.segmentRow}>
+            <TouchableOpacity
+              style={[styles.segmentOption, competitionType === 'league' && styles.segmentOptionActive]}
+              onPress={() => {
+                setCompetitionType('league');
+                setHomeTeamId('');
+                setAwayTeamId('');
+              }}
+            >
+              <Ionicons name="trophy-outline" size={15} color={competitionType === 'league' ? '#000' : colors.textMuted} />
+              <Text style={[styles.segmentOptionText, competitionType === 'league' && styles.segmentOptionTextActive]}>
+                Liga o'yini
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.segmentOption, competitionType === 'tournament' && styles.segmentOptionTournActive]}
+              onPress={() => {
+                setCompetitionType('tournament');
+                setHomeTeamId('');
+                setAwayTeamId('');
+              }}
+            >
+              <Ionicons name="ribbon-outline" size={15} color={competitionType === 'tournament' ? '#FFF' : colors.textMuted} />
+              <Text style={[styles.segmentOptionText, competitionType === 'tournament' && styles.segmentOptionTournTextActive]}>
+                Turnir o'yini
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* 1. Liga yoki Turnir Tanlash */}
+        {competitionType === 'league' ? (
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"1. Liga *"}</Text>
+            <TouchableOpacity
+              style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+              onPress={() => setShowLeaguePicker(true)}
+            >
+              <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                {selectedLeague || "Ligani tanlang"}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"1. Turnir *"}</Text>
+            <TouchableOpacity
+              style={[styles.selectBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+              onPress={() => setShowTournamentPicker(true)}
+            >
+              <Text style={[styles.selectBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                {tournaments.find((t) => t.id === selectedTournamentId)?.name || "Turnirni tanlang"}
+              </Text>
+              <Ionicons name="chevron-down" size={18} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.5)"} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Turnir Bosqichi (Agar turnir tanlangan bo'lsa) */}
+        {competitionType === 'tournament' && (
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"Turnir Bosqichi *"}</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {STAGES.map((stg) => {
+                const isActive = selectedStage === stg.value;
+                return (
+                  <TouchableOpacity
+                    key={stg.value}
+                    style={[
+                      styles.roundChip,
+                      isActive && { backgroundColor: '#EC4899', borderColor: '#EC4899' },
+                      Platform.OS === 'android' && !isActive && {
+                        backgroundColor: colors.bgCard,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    onPress={() => setSelectedStage(stg.value)}
+                  >
+                    <Text
+                      style={[
+                        styles.roundChipText,
+                        isActive && { color: '#FFFFFF', fontWeight: '900' },
+                        Platform.OS === 'android' && !isActive && {
+                          color: colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {stg.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* 2. Mezbon Jamoa */}
         <View style={styles.inputGroup}>
@@ -399,100 +528,102 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
           </TouchableOpacity>
         </View>
 
-        {/* 5. Tur / Bosqich */}
-        <View style={styles.inputGroup}>
-          <View style={styles.labelRow}>
-            <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"5. Tur / Bosqich *"}</Text>
-            <TouchableOpacity onPress={() => setShowSecretStages(!showSecretStages)}>
-              <Text style={{ color: Platform.OS === 'android' ? colors.accentGreen : '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
-                {showSecretStages ? "Yashirish ▲" : "Bosqichlar (Final/Pley-off) ▼"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Quick Round Number Buttons */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map((num) => (
-              <TouchableOpacity
-                key={num}
-                style={[
-                  styles.roundChip,
-                  matchRound === num && styles.roundChipActive,
-                  Platform.OS === 'android' && {
-                    backgroundColor: matchRound === num ? colors.accentGreen : colors.bgCard,
-                    borderColor: matchRound === num ? colors.accentGreen : colors.border,
-                  },
-                ]}
-                onPress={() => setMatchRound(num)}
-              >
-                <Text
-                  style={[
-                    styles.roundChipText,
-                    matchRound === num && styles.roundChipTextActive,
-                    Platform.OS === 'android' && {
-                      color: matchRound === num ? '#FFFFFF' : colors.textSecondary,
-                      fontWeight: matchRound === num ? '900' : '700',
-                    },
-                  ]}
-                >
-                  {num}-tur
+        {/* 5. Tur / Bosqich (Faqat liga yoki turnir guruh bosqichida) */}
+        {(competitionType === 'league' || selectedStage === 'group') && (
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={[styles.label, Platform.OS === 'android' && { color: colors.textSecondary }]}>{"5. Tur / Bosqich *"}</Text>
+              <TouchableOpacity onPress={() => setShowSecretStages(!showSecretStages)}>
+                <Text style={{ color: Platform.OS === 'android' ? colors.accentGreen : '#FFFFFF', fontSize: 11, fontWeight: '700' }}>
+                  {showSecretStages ? "Yashirish ▲" : "Bosqichlar (Final/Pley-off) ▼"}
                 </Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            </View>
 
-          {/* Secret Collapsible Stages */}
-          {showSecretStages && (
-            <View style={[styles.secretStagesContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-              <Text style={[styles.secretStagesTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Nokaut & Play-Off Bosqichlari:"}</Text>
-              <View style={styles.secretStagesGrid}>
-                {['1/16 Final', '1/8 Final', 'Chorak Final', 'Yarim Final', '3-O\'rin uchun', 'FINAL'].map((st) => (
-                  <TouchableOpacity
-                    key={st}
+            {/* Quick Round Number Buttons */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'].map((num) => (
+                <TouchableOpacity
+                  key={num}
+                  style={[
+                    styles.roundChip,
+                    matchRound === num && styles.roundChipActive,
+                    Platform.OS === 'android' && {
+                      backgroundColor: matchRound === num ? colors.accentGreen : colors.bgCard,
+                      borderColor: matchRound === num ? colors.accentGreen : colors.border,
+                    },
+                  ]}
+                  onPress={() => setMatchRound(num)}
+                >
+                  <Text
                     style={[
-                      styles.secretStageChip,
-                      matchRound === st && styles.secretStageChipActive,
+                      styles.roundChipText,
+                      matchRound === num && styles.roundChipTextActive,
                       Platform.OS === 'android' && {
-                        backgroundColor: matchRound === st ? colors.accentGreen : colors.bgCardElevated,
-                        borderColor: matchRound === st ? colors.accentGreen : colors.border,
-                        borderWidth: 1,
+                        color: matchRound === num ? '#FFFFFF' : colors.textSecondary,
+                        fontWeight: matchRound === num ? '900' : '700',
                       },
                     ]}
-                    onPress={() => setMatchRound(st)}
                   >
-                    <Text
+                    {num}-tur
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {/* Secret Collapsible Stages */}
+            {showSecretStages && (
+              <View style={[styles.secretStagesContainer, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                <Text style={[styles.secretStagesTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Nokaut & Play-Off Bosqichlari:"}</Text>
+                <View style={styles.secretStagesGrid}>
+                  {['1/16 Final', '1/8 Final', 'Chorak Final', 'Yarim Final', '3-O\'rin uchun', 'FINAL'].map((st) => (
+                    <TouchableOpacity
+                      key={st}
                       style={[
-                        styles.secretStageText,
-                        matchRound === st && styles.secretStageTextActive,
+                        styles.secretStageChip,
+                        matchRound === st && styles.secretStageChipActive,
                         Platform.OS === 'android' && {
-                          color: matchRound === st ? '#FFFFFF' : colors.textPrimary,
-                          fontWeight: matchRound === st ? '900' : '700',
+                          backgroundColor: matchRound === st ? colors.accentGreen : colors.bgCardElevated,
+                          borderColor: matchRound === st ? colors.accentGreen : colors.border,
+                          borderWidth: 1,
                         },
                       ]}
+                      onPress={() => setMatchRound(st)}
                     >
-                      {st}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.secretStageText,
+                          matchRound === st && styles.secretStageTextActive,
+                          Platform.OS === 'android' && {
+                            color: matchRound === st ? '#FFFFFF' : colors.textPrimary,
+                            fontWeight: matchRound === st ? '900' : '700',
+                          },
+                        ]}
+                      >
+                        {st}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
-            </View>
-          )}
+            )}
 
-          <TextInput
-            style={[
-              styles.input,
-              Platform.OS === 'android' && {
-                backgroundColor: colors.bgCard,
-                borderColor: colors.border,
-                color: colors.textPrimary,
-              },
-            ]}
-            placeholder="Kiritilgan tur: masalan 1-tur yoki Final"
-            placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
-            value={matchRound}
-            onChangeText={setMatchRound}
-          />
-        </View>
+            <TextInput
+              style={[
+                styles.input,
+                Platform.OS === 'android' && {
+                  backgroundColor: colors.bgCard,
+                  borderColor: colors.border,
+                  color: colors.textPrimary,
+                },
+              ]}
+              placeholder="Kiritilgan tur: masalan 1-tur yoki Final"
+              placeholderTextColor={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.35)"}
+              value={matchRound}
+              onChangeText={setMatchRound}
+            />
+          </View>
+        )}
 
         {/* 6. Date & Time Selection Modals */}
         <View style={styles.rowTwoCols}>
@@ -803,6 +934,37 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         </View>
       </Modal>
 
+      {/* Tournament Selector Modal */}
+      <Modal visible={showTournamentPicker} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+            {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+            <View style={[styles.modalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border, borderBottomWidth: 1, paddingBottom: 12 }]}>
+              <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Turnirni Tanlang 🏆</Text>
+              <TouchableOpacity onPress={() => setShowTournamentPicker(false)}>
+                <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255, 255, 255, 0.6)"} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {tournaments.map((t) => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.pickerItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
+                  onPress={() => {
+                    setSelectedTournamentId(t.id);
+                    setHomeTeamId('');
+                    setAwayTeamId('');
+                    setShowTournamentPicker(false);
+                  }}
+                >
+                  <Text style={[styles.pickerItemText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{t.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Home Team Picker Modal */}
       <Modal visible={showHomePicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -924,6 +1086,43 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 130,
     gap: 18,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  segmentOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  segmentOptionActive: {
+    backgroundColor: '#00FF66',
+    borderColor: '#00FF66',
+  },
+  segmentOptionTournActive: {
+    backgroundColor: '#EC4899',
+    borderColor: '#EC4899',
+  },
+  segmentOptionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  segmentOptionTextActive: {
+    color: '#000000',
+    fontWeight: '900',
+  },
+  segmentOptionTournTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '900',
   },
   inputGroup: {
     gap: 6,

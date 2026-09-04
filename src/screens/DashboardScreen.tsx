@@ -494,6 +494,14 @@ export const DashboardScreen: React.FC<Props> = ({
       adminOnly: false,
     },
     {
+      id: 'turnirlar',
+      title: 'Turnirlar',
+      icon: 'ribbon-outline',
+      color: '#EC4899',
+      action: () => onNavigate && onNavigate('tournaments' as any),
+      adminOnly: false,
+    },
+    {
       id: 'transferlar',
       title: 'Transferlar',
       icon: 'swap-horizontal-outline',

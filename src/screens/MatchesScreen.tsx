@@ -28,11 +28,14 @@ import { adminNotificationService } from '../utils/adminNotificationService';
 import { useMatchesData, useTeamsData, useLeaguesData, useLeagueRoundsData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
+import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
 
 interface Match {
   id: string | number;
   organization_id?: number;
   league?: string;
+  tournament_id?: number | string | null;
+  stage?: string | null;
   round?: string | number;
   home_team_id?: string | number;
   away_team_id?: string | number;
@@ -808,7 +811,13 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                   <View style={styles.cardTopRow}>
                     <View style={styles.leagueTag}>
                       <Text style={[styles.leagueTagText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{item.league || 'LIGA'}</Text>
-                      {item.round && <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>{` • ${item.round}`}</Text>}
+                      {item.stage && item.stage !== 'group' ? (
+                        <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                          {` • ${getStageDisplayTitle(item.stage, item.round)}`}
+                        </Text>
+                      ) : (
+                        item.round ? <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>{` • ${item.round}`}</Text> : null
+                      )}
                     </View>
 
                     <View style={[styles.fieldTag, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}>

@@ -21,6 +21,7 @@ import * as Print from 'expo-print';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
+import { getStageDisplayTitle } from '../utils/tournamentUtils';
 
 // Helper component for scaling 1080x1080 canvas graphics for device previews
 const ScaledCanvasPreview = ({
@@ -1228,7 +1229,10 @@ export const ExportScreen: React.FC = () => {
             <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={true} nestedScrollEnabled>
               {availableRounds.map((r) => {
                 const isSelected = selectedRound === r;
-                const roundTitle = r === 'all' ? 'Barcha turlar' : `${r}-Tur`;
+                const stageMatch = matches.find((m: any) => String(m.round) === String(r) && m.stage && m.stage !== 'group');
+                const roundTitle = r === 'all'
+                  ? 'Barcha turlar'
+                  : (stageMatch ? getStageDisplayTitle(stageMatch.stage, stageMatch.round) : `${r}-Tur`);
                 return (
                   <TouchableOpacity
                     key={r}
@@ -1413,7 +1417,11 @@ export const ExportScreen: React.FC = () => {
                         {/* Card 1: NATIJALAR */}
                         <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.3)', overflow: 'hidden' }}>
                           <Text style={{ textAlign: 'center', paddingVertical: 9, paddingHorizontal: 12, fontSize: 16, fontWeight: '900', color: '#ffffff', textTransform: 'uppercase', backgroundColor: 'rgba(255, 255, 255, 0.14)', borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.25)', letterSpacing: 0.5 }}>
-                            {selectedRound === 'all' ? "NATIJALAR" : `${selectedRound}-TUR NATIJALARI`}
+                            {(() => {
+                              const stageMatch = matches.find((m: any) => selectedRound !== 'all' && String(m.round) === String(selectedRound) && m.stage && m.stage !== 'group');
+                              if (stageMatch) return `${getStageDisplayTitle(stageMatch.stage, stageMatch.round)} NATIJALARI`;
+                              return selectedRound === 'all' ? "NATIJALAR" : `${selectedRound}-TUR NATIJALARI`;
+                            })()}
                           </Text>
                           <View style={{ justifyContent: 'flex-start', paddingTop: 2, paddingBottom: 4, paddingHorizontal: 8 }}>
                             {(() => {
@@ -1843,7 +1851,7 @@ export const ExportScreen: React.FC = () => {
                             {/* Small Round Badge in Right Corner with low opacity */}
                             <View style={{ position: 'absolute', right: 18, top: 4, opacity: 0.45 }}>
                               <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 }}>
-                                {`${activeRoundNumber}-TUR`}
+                                {m.stage && m.stage !== 'group' ? getStageDisplayTitle(m.stage, m.round) : `${activeRoundNumber}-TUR`}
                               </Text>
                             </View>
                           </View>
