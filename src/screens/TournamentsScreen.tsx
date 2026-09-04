@@ -16,6 +16,7 @@ import {
   Dimensions,
   Animated,
   Platform,
+  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -124,6 +125,116 @@ const uploadFileToSupabase = async (
   }
 };
 
+// Telegram-Style Swipeable Tournament Card (1:1 with LeaguesScreen's SwipeableLeagueCard)
+const SwipeableTournamentCard = ({
+  item,
+  isOpen,
+  setIsSwiping,
+  onSwipeOpen,
+  onSwipeClose,
+  onDelete,
+  renderContent,
+}: any) => {
+  const panX = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!isOpen) {
+      Animated.spring(panX, { toValue: 0, useNativeDriver: true, bounciness: 2 }).start();
+    }
+  }, [isOpen]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) =>
+        Math.abs(gs.dx) > 10 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+      onMoveShouldSetPanResponderCapture: (_, gs) =>
+        Math.abs(gs.dx) > 12 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
+      onPanResponderGrant: () => {
+        setIsSwiping(true);
+        onSwipeOpen();
+      },
+      onPanResponderMove: (_, gs) => {
+        if (gs.dx < 0) {
+          panX.setValue(Math.max(gs.dx, -90));
+        } else {
+          panX.setValue(0);
+        }
+      },
+      onPanResponderRelease: (_, gs) => {
+        setIsSwiping(false);
+        if (gs.dx < -30) {
+          Animated.spring(panX, { toValue: -90, useNativeDriver: true, bounciness: 3 }).start();
+        } else {
+          Animated.spring(panX, { toValue: 0, useNativeDriver: true, bounciness: 2 }).start(() => onSwipeClose());
+        }
+      },
+      onPanResponderTerminate: () => {
+        setIsSwiping(false);
+        Animated.spring(panX, { toValue: 0, useNativeDriver: true }).start(() => onSwipeClose());
+      },
+    })
+  ).current;
+
+  const resetSwipe = () => {
+    Animated.spring(panX, { toValue: 0, useNativeDriver: true }).start(() => onSwipeClose());
+  };
+
+  const handleAction = () => {
+    resetSwipe();
+    if (onDelete) onDelete();
+  };
+
+  return (
+    <View style={tournSwipeStyles.container}>
+      {/* Action behind card (Delete) */}
+      <TouchableOpacity
+        style={tournSwipeStyles.deleteBack}
+        onPress={handleAction}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="trash-bin" size={22} color="#FFFFFF" />
+        <Text style={tournSwipeStyles.deleteText}>{"O'chirish"}</Text>
+      </TouchableOpacity>
+
+      {/* Foreground Card */}
+      <Animated.View style={[tournSwipeStyles.foreground, { transform: [{ translateX: panX }] }]} {...panResponder.panHandlers}>
+        {renderContent(item)}
+      </Animated.View>
+    </View>
+  );
+};
+
+const tournSwipeStyles = StyleSheet.create({
+  container: {
+    position: 'relative',
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#FF3B30',
+  },
+  deleteBack: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 90,
+    backgroundColor: '#FF3B30',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    zIndex: 1,
+  },
+  deleteText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  foreground: {
+    zIndex: 2,
+    borderRadius: 18,
+  },
+});
+
 export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) => {
   const { orgId, userRole, showToast } = useOrg();
   const { colors, isDark } = useTheme();
@@ -136,6 +247,10 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
   const [incomingCollabs, setIncomingCollabs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Swipe-to-delete & scroll lock state (1:1 with LeaguesScreen)
+  const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
+  const [isSwiping, setIsSwiping] = useState(false);
 
   // Tournament Create/Edit Modal
   const [showModal, setShowModal] = useState(false);
@@ -673,7 +788,8 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     };
   };
 
-  const renderTournamentCard = ({ item }: { item: any }) => {
+  // Render Tournament Card Content (no delete button — swipe to delete, 1:1 with LeaguesScreen)
+  const renderTournamentCardContent = (item: any) => {
     const stats = getTournStats(item.id);
     const duration = item.match_duration || 90;
     const halfTime = Math.round(duration / 2);
@@ -692,17 +808,10 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
             {/* Top Row: Upload BG & Status Switcher */}
             <View style={s.cardTopRow}>
               {!isReadOnlyUser && !isCollab ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleDirectUploadBg(item)} activeOpacity={0.8}>
-                    <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
-                    <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
-                  </TouchableOpacity>
-                  {item.export_bg_url ? (
-                    <TouchableOpacity style={s.deleteBgCorner} onPress={() => handleDeleteBgImage(item)} activeOpacity={0.8}>
-                      <Ionicons name="trash-outline" size={13} color="#FF5252" />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
+                <TouchableOpacity style={s.uploadBgBtn} onPress={() => handleDirectUploadBg(item)} activeOpacity={0.8}>
+                  <Ionicons name="cloud-upload-outline" size={13} color="rgba(255,255,255,0.9)" />
+                  <Text style={s.uploadBgBtnText}>{"Bg image"}</Text>
+                </TouchableOpacity>
               ) : isCollab ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(236,72,153,0.25)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(236,72,153,0.4)' }}>
                   <Ionicons name="link-outline" size={12} color="#EC4899" />
@@ -784,7 +893,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
               </View>
             </View>
 
-            {/* Bottom Action Tabs: Ligalar, Tahrirlash, O'chirish */}
+            {/* Bottom Action Tabs: Ligalar, Tahrirlash — O'chirish endi swipe orqali (LeaguesScreen bilan bir xil) */}
             {!isReadOnlyUser && !isCollab && (
               <View style={s.actionTabs}>
                 <TouchableOpacity
@@ -804,15 +913,6 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                   <Ionicons name="create-outline" size={16} color="rgba(255,255,255,0.85)" />
                   <Text style={s.actionTabText}>{"Tahrirlash"}</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[s.actionTab, s.actionTabDelete]}
-                  onPress={() => handleDeleteTournament(item)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="trash-outline" size={16} color="#FF5252" />
-                  <Text style={[s.actionTabText, { color: '#FF5252' }]}>{"O'chirish"}</Text>
-                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -821,43 +921,61 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     );
   };
 
+  // Render each item wrapped in SwipeableTournamentCard (swipe left to reveal delete — 1:1 with LeaguesScreen)
+  const renderTournamentCard = ({ item }: { item: any }) => {
+    if (isReadOnlyUser || item.isCollab) {
+      return renderTournamentCardContent(item);
+    }
+    return (
+      <SwipeableTournamentCard
+        item={item}
+        isOpen={openSwipeId === String(item.id)}
+        setIsSwiping={setIsSwiping}
+        onSwipeOpen={() => setOpenSwipeId(String(item.id))}
+        onSwipeClose={() => { if (openSwipeId === String(item.id)) setOpenSwipeId(null); }}
+        onDelete={() => handleDeleteTournament(item)}
+        renderContent={renderTournamentCardContent}
+      />
+    );
+  };
+
   return (
     <View style={[s.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* Top Header */}
-      <View style={s.header}>
+      <View style={[s.header, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
         <View style={s.headerLeft}>
           {onGoBack && (
-            <TouchableOpacity style={s.backBtn} onPress={onGoBack} activeOpacity={0.7}>
+            <TouchableOpacity style={[s.backBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard }]} onPress={onGoBack} activeOpacity={0.7}>
               {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
-              <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+              <Ionicons name="arrow-back" size={20} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
             </TouchableOpacity>
           )}
           <View>
-            <Text style={s.headerTitle}>Turnirlar</Text>
-            <Text style={s.headerSubtitle}>Ko'p ligali kubok va turnirlar boshqaruvi</Text>
+            <Text style={[s.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Turnirlar</Text>
+            <Text style={[s.headerSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>Ko'p ligali kubok va turnirlar boshqaruvi</Text>
           </View>
         </View>
 
         {!isReadOnlyUser && (
-          <TouchableOpacity style={s.createBtn} onPress={handleOpenCreateModal} activeOpacity={0.8}>
-            <Ionicons name="add" size={18} color="#000000" />
-            <Text style={s.createBtnText}>Yangi</Text>
+          <TouchableOpacity style={[s.createBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]} onPress={handleOpenCreateModal} activeOpacity={0.8}>
+            <Ionicons name="add" size={18} color={Platform.OS === 'android' ? '#FFFFFF' : '#000000'} />
+            <Text style={[s.createBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>Yangi</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {/* Incoming Invitations List */}
       {incomingCollabs.length > 0 && (
-        <View style={s.invitationsBox}>
+        <View style={[s.invitationsBox, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(251, 191, 36, 0.1)' : '#FEF3C7', borderColor: isDark ? 'rgba(251, 191, 36, 0.25)' : '#FDE68A' }]}>
           <View style={s.invitationHeader}>
             <Ionicons name="mail-unread-outline" size={16} color="#FBBF24" />
             <Text style={s.invitationTitle}>Hamkorlik takliflari ({incomingCollabs.length})</Text>
           </View>
           {incomingCollabs.map((collab: any) => (
-            <View key={collab.id} style={s.invitationItem}>
+            <View key={collab.id} style={[s.invitationItem, Platform.OS === 'android' && { borderTopColor: colors.border }]}>
               <View style={{ flex: 1 }}>
-                <Text style={s.invitationTournName}>{collab.tournament?.name || 'Turnir'}</Text>
-                <Text style={s.invitationSender}>Taklif etuvchi: {collab.sender_org?.name || 'Tashkilot'}</Text>
+                <Text style={[s.invitationTournName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{collab.tournament?.name || 'Turnir'}</Text>
+                <Text style={[s.invitationSender, Platform.OS === 'android' && { color: colors.textMuted }]}>Taklif etuvchi: {collab.sender_org?.name || 'Tashkilot'}</Text>
               </View>
               <View style={s.invitationActions}>
                 <TouchableOpacity
@@ -881,19 +999,19 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
       {/* List */}
       {loading ? (
         <View style={s.centerLoading}>
-          <ActivityIndicator size="large" color="#00FF66" />
+          <ActivityIndicator size="large" color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
         </View>
       ) : tournaments.length === 0 ? (
         <View style={s.emptyState}>
-          <Ionicons name="ribbon-outline" size={56} color="rgba(255,255,255,0.2)" />
-          <Text style={s.emptyTitle}>Hozircha turnirlar mavjud emas</Text>
-          <Text style={s.emptySub}>
+          <Ionicons name="ribbon-outline" size={56} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.2)"} />
+          <Text style={[s.emptyTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Hozircha turnirlar mavjud emas</Text>
+          <Text style={[s.emptySub, Platform.OS === 'android' && { color: colors.textMuted }]}>
             Turnir yaratish orqali bir nechta ligalarni birlashtirib kubok musobaqasini o'tkazing
           </Text>
           {!isReadOnlyUser && (
-            <TouchableOpacity style={s.emptyCreateBtn} onPress={handleOpenCreateModal}>
-              <Ionicons name="add-circle-outline" size={18} color="#000000" />
-              <Text style={s.emptyCreateBtnText}>Turnir yaratish</Text>
+            <TouchableOpacity style={[s.emptyCreateBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]} onPress={handleOpenCreateModal}>
+              <Ionicons name="add-circle-outline" size={18} color={Platform.OS === 'android' ? '#FFFFFF' : '#000000'} />
+              <Text style={[s.emptyCreateBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>Turnir yaratish</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -904,7 +1022,11 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
           renderItem={renderTournamentCard}
           contentContainerStyle={s.listContent}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00FF66" />}
+          scrollEnabled={!isSwiping}
+          onScrollBeginDrag={() => {
+            if (openSwipeId) setOpenSwipeId(null);
+          }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />}
         />
       )}
 
@@ -1233,17 +1355,24 @@ const s = StyleSheet.create({
   },
   /* Tournament Card (1:1 with LeaguesScreen card) */
   card: {
-    minHeight: 255,
+    width: '100%',
+    minHeight: 200,
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#0F172A',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
     marginBottom: 16,
   },
   cardFullBg: {
     width: '100%',
-    height: '100%',
+    minHeight: 200,
+    backgroundColor: 'rgba(6, 35, 84, 0.6)',
   },
   cardFullBgImage: {
     borderRadius: 18,

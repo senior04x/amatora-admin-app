@@ -23,10 +23,10 @@ import { useTheme } from '../context/ThemeContext';
 import { BlurView } from '../components/SafeBlurView';
 import { SwipeRow } from '../components/SwipeRow';
 import { MatchControlScreen } from './MatchControlScreen';
-import { useFinishedMatchesData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useFinishedMatchesData, useTeamsData, useLeaguesData, useTournamentStageOptions } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
-import { getStageDisplayTitle } from '../utils/tournamentUtils';
+import { getStageDisplayTitle, getActiveOrgTournaments, getStageOptionKey } from '../utils/tournamentUtils';
 
 interface Match {
   id: string | number;
@@ -112,12 +112,58 @@ export const FinishedMatchesScreen: React.FC<{
   const [page, setPage] = useState<number>(0);
   const [accumulatedMatches, setAccumulatedMatches] = useState<any[]>([]);
 
+  // Tournament / Musobaqa Filter State (Top Full-width expandable filter)
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [selectedTournament, setSelectedTournament] = useState<string>('all'); // 'all' | 'leagues' | 'tournaments_all' | tournamentId
+
+  useEffect(() => {
+    if (orgId) {
+      getActiveOrgTournaments(orgId)
+        .then((data) => setTournaments(data || []))
+        .catch((err) => console.warn('Error loading tournaments in FinishedMatchesScreen:', err));
+    }
+  }, [orgId]);
+
+  // Yuqori qism: Liga & Turnir / Liga / Turnir — 3 segmentli filtr rejimi
+  const [filterScope, setFilterScope] = useState<'all' | 'league' | 'tournament'>('all');
+
+  const handleSetFilterScope = (scope: 'all' | 'league' | 'tournament') => {
+    setFilterScope(scope);
+    setActiveDropdown('none');
+    setSelectedRound('all');
+    if (scope === 'all') {
+      setSelectedTournament('all');
+      setSelectedLeague('all');
+    } else if (scope === 'league') {
+      setSelectedTournament('leagues');
+      setSelectedLeague('all');
+    } else {
+      setSelectedLeague('all');
+      setSelectedTournament('tournaments_all');
+    }
+  };
+
+  // Tanlangan turnirning haqiqiy bosqichlari (1-tur, 2-tur, ..., Yarim final, Final)
+  const { data: tournamentStageOptions = [] } = useTournamentStageOptions(
+    filterScope === 'tournament' ? selectedTournament : null
+  );
+
+  // Aniq bir turnir tanlanganda: "Tur" filtrini avtomatik eng so'nggi (joriy) bosqichga o'rnatish
+  useEffect(() => {
+    if (filterScope !== 'tournament' || selectedTournament === 'tournaments_all' || selectedTournament === 'all') return;
+    if (tournamentStageOptions.length === 0) return;
+    const validKeys = tournamentStageOptions.map((o: any) => o.key);
+    if (!validKeys.includes(selectedRound)) {
+      setSelectedRound(tournamentStageOptions[tournamentStageOptions.length - 1].key);
+    }
+  }, [filterScope, selectedTournament, tournamentStageOptions]);
+
   // React Query Hooks (15 matches per page)
   const {
     data: finishedData,
     isLoading: loading,
     refetch: refetchFinishedMatches,
-  } = useFinishedMatchesData(orgId, selectedLeague, page, 15, collabLeagueNames);
+  } = useFinishedMatchesData(orgId, selectedLeague, page, 15, collabLeagueNames, selectedTournament);
 
   const { data: leagues = [] } = useLeaguesData(orgId);
   const { data: teams = [] } = useTeamsData(orgId);
@@ -127,7 +173,7 @@ export const FinishedMatchesScreen: React.FC<{
   useEffect(() => {
     setPage(0);
     setAccumulatedMatches([]);
-  }, [selectedLeague, orgId]);
+  }, [selectedLeague, selectedTournament, orgId]);
 
   useEffect(() => {
     if (finishedData?.matches) {
@@ -407,7 +453,14 @@ export const FinishedMatchesScreen: React.FC<{
 
   const filteredMatches = matches.filter((m) => {
     if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
-    if (selectedRound !== 'all' && String(m.round) !== selectedRound) return false;
+    if (selectedRound !== 'all') {
+      if (filterScope === 'tournament') {
+        // Turnir rejimida "Tur" qiymati stage+round kombinatsiyasi kaliti sifatida saqlanadi
+        if (getStageOptionKey(m.stage, m.round) !== selectedRound) return false;
+      } else if (String(m.round) !== selectedRound) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -442,9 +495,46 @@ export const FinishedMatchesScreen: React.FC<{
         </View>
       </View>
 
-      {/* 2 Select Filters: Liga, Tur */}
+      {/* Top Scope Selector: Liga & Turnir / Liga / Turnir — 3 ta aniq ko'rinadigan segment */}
+      <View style={styles.scopeSelectorContainer}>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'all' && styles.scopeSelectorBtnActive]}
+          onPress={() => handleSetFilterScope('all')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="globe-outline" size={14} color={filterScope === 'all' ? '#38BDF8' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'all' && { color: '#38BDF8' }, Platform.OS === 'android' && { color: filterScope === 'all' ? '#38BDF8' : colors.textMuted }]} numberOfLines={1}>
+            Liga & Turnir
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'league' && styles.scopeSelectorBtnActiveLeague]}
+          onPress={() => handleSetFilterScope('league')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="trophy-outline" size={14} color={filterScope === 'league' ? '#F59E0B' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'league' && { color: '#F59E0B' }, Platform.OS === 'android' && { color: filterScope === 'league' ? '#F59E0B' : colors.textMuted }]} numberOfLines={1}>
+            Liga
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'tournament' && styles.scopeSelectorBtnActiveTournament]}
+          onPress={() => handleSetFilterScope('tournament')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="ribbon-outline" size={14} color={filterScope === 'tournament' ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'tournament' && { color: '#EC4899' }, Platform.OS === 'android' && { color: filterScope === 'tournament' ? '#EC4899' : colors.textMuted }]} numberOfLines={1}>
+            Turnir
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 2 Select Filters: Liga/Turnir, Tur */}
       <View style={styles.filterBarContainer}>
-        {/* 1. Liga Select Dropdown */}
+        {/* 1. Liga/Turnir Select Dropdown — tanlangan filterScope'ga qarab ro'yxati almashadi */}
         <TouchableOpacity
           style={[
             styles.filterSelectBtn,
@@ -455,9 +545,13 @@ export const FinishedMatchesScreen: React.FC<{
           onPress={() => setActiveDropdown(activeDropdown === 'league' ? 'none' : 'league')}
         >
           {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
-          <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
+          <Ionicons name={filterScope === 'tournament' ? 'ribbon-outline' : 'trophy-outline'} size={14} color={filterScope === 'tournament' ? '#EC4899' : '#F59E0B'} />
           <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-            {selectedLeague === 'all' ? 'Barcha Ligalar' : selectedLeague}
+            {filterScope === 'tournament'
+              ? (selectedTournament === 'tournaments_all' || selectedTournament === 'all'
+                  ? 'Barcha Turnirlar'
+                  : (tournaments.find((t) => String(t.id) === String(selectedTournament))?.name || 'Turnir'))
+              : (selectedLeague === 'all' ? 'Barcha Ligalar' : selectedLeague)}
           </Text>
           <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
@@ -475,14 +569,16 @@ export const FinishedMatchesScreen: React.FC<{
           {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
           <Ionicons name="layers-outline" size={14} color="#3B82F6" />
           <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-            {selectedRound === 'all' ? 'Barcha Turlar' : selectedRound}
+            {filterScope === 'tournament'
+              ? (selectedRound === 'all' ? 'Barcha Turlar' : (tournamentStageOptions.find((o: any) => o.key === selectedRound)?.label || 'Tur'))
+              : (selectedRound === 'all' ? 'Barcha Turlar' : selectedRound)}
           </Text>
           <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
       </View>
 
-      {/* Dropdown Options */}
-      {activeDropdown === 'league' && (
+      {/* Dropdown Options: Liga ro'yxati (filterScope 'all' yoki 'league' bo'lganda) */}
+      {activeDropdown === 'league' && filterScope !== 'tournament' && (
         <View style={[
           styles.dropdownMenuCard,
           Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }
@@ -526,6 +622,51 @@ export const FinishedMatchesScreen: React.FC<{
         </View>
       )}
 
+      {/* Dropdown Options: Turnir ro'yxati (filterScope 'tournament' bo'lganda) */}
+      {activeDropdown === 'league' && filterScope === 'tournament' && (
+        <View style={[
+          styles.dropdownMenuCard,
+          Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }
+        ]}>
+          {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+          <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity
+              style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
+              onPress={() => {
+                setSelectedTournament('tournaments_all');
+                setActiveDropdown('none');
+              }}
+            >
+              <Text style={[
+                styles.dropdownMenuText,
+                Platform.OS === 'android' && { color: colors.textSecondary },
+                (selectedTournament === 'tournaments_all' || selectedTournament === 'all') && { color: '#EC4899', fontWeight: '900' }
+              ]}>
+                Barcha Turnirlar
+              </Text>
+            </TouchableOpacity>
+            {tournaments.map((t) => (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
+                onPress={() => {
+                  setSelectedTournament(String(t.id));
+                  setActiveDropdown('none');
+                }}
+              >
+                <Text style={[
+                  styles.dropdownMenuText,
+                  Platform.OS === 'android' && { color: colors.textSecondary },
+                  String(selectedTournament) === String(t.id) && { color: '#EC4899', fontWeight: '900' }
+                ]}>
+                  {t.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {activeDropdown === 'round' && (
         <View style={[
           styles.dropdownMenuCard,
@@ -548,7 +689,36 @@ export const FinishedMatchesScreen: React.FC<{
                 Barcha Turlar
               </Text>
             </TouchableOpacity>
-            {availableRounds.length > 0 ? (
+            {filterScope === 'tournament' ? (
+              tournamentStageOptions.length > 0 ? (
+                tournamentStageOptions.map((opt: any) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setSelectedRound(opt.key);
+                      setActiveDropdown('none');
+                    }}
+                  >
+                    <Text style={[
+                      styles.dropdownMenuText,
+                      Platform.OS === 'android' && { color: colors.textSecondary },
+                      selectedRound === opt.key && { color: '#EC4899', fontWeight: '900' }
+                    ]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
+                  <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+                    {selectedTournament === 'tournaments_all' || selectedTournament === 'all'
+                      ? "Avval turnirni tanlang"
+                      : "Hozircha turlar mavjud emas"}
+                  </Text>
+                </View>
+              )
+            ) : availableRounds.length > 0 ? (
               availableRounds.map((rnd) => (
                 <TouchableOpacity
                   key={rnd}
@@ -1002,6 +1172,42 @@ const styles = StyleSheet.create({
   finishedCountText: {
     color: '#10B981',
     fontSize: 12,
+    fontWeight: '800',
+  },
+  scopeSelectorContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    gap: 8,
+    marginBottom: 10,
+  },
+  scopeSelectorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  scopeSelectorBtnActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+  },
+  scopeSelectorBtnActiveLeague: {
+    borderColor: '#F59E0B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+  },
+  scopeSelectorBtnActiveTournament: {
+    borderColor: '#EC4899',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(236, 72, 153, 0.12)' : 'rgba(236, 72, 153, 0.1)',
+  },
+  scopeSelectorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11.5,
     fontWeight: '800',
   },
   filterBarContainer: {

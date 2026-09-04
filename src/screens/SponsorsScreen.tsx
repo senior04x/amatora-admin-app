@@ -19,6 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
+import { getActiveOrgTournaments } from '../utils/tournamentUtils';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -110,6 +111,11 @@ export const SponsorsScreen: React.FC = () => {
   const [showLeagueSettings, setShowLeagueSettings] = useState(false);
   const [showSponsorsSection, setShowSponsorsSection] = useState(true);
 
+  // Turnirlarda homiy ko'rinishi (Liga & Turnir / Liga / Turnir scope filtri)
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [showTournamentSettings, setShowTournamentSettings] = useState(false);
+  const [filterScope, setFilterScope] = useState<'all' | 'league' | 'tournament'>('all');
+
   // Modal State for Delete
   const [sponsorToDelete, setSponsorToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -120,6 +126,7 @@ export const SponsorsScreen: React.FC = () => {
   useEffect(() => {
     fetchSponsors();
     fetchLeagues();
+    fetchTournaments();
   }, [orgId]);
 
   const dbClient = supabase;
@@ -221,6 +228,86 @@ export const SponsorsScreen: React.FC = () => {
         .eq('id', league.id);
     } catch (e) {
       console.error('Error toggling league sponsors:', e);
+    }
+  };
+
+  // 2b. Fetch Tournaments and their Sponsor Visibility Settings
+  // (tournaments jadvalida show_sponsors ustuni yo'q — leagues bilan bir xil
+  // sponsors-jadval kalit/qiymat konvensiyasi orqali saqlanadi, sxema o'zgarishisiz)
+  const fetchTournaments = async () => {
+    try {
+      if (!orgId) {
+        setTournaments([]);
+        return;
+      }
+      const data = await getActiveOrgTournaments(orgId);
+
+      const { data: systemSettings } = await dbClient
+        .from('sponsors')
+        .select('*')
+        .like('name', 'TOURNAMENT_SHOW_SPONSORS_%');
+
+      const settingsMap: Record<string, boolean> = {};
+      (systemSettings || []).forEach((s: any) => {
+        const key = s.name.replace('TOURNAMENT_SHOW_SPONSORS_', '');
+        settingsMap[key] = s.logo_url === 'true';
+      });
+
+      const processed = (data || []).map((t: any) => {
+        let showSponsorsVal: boolean | undefined = undefined;
+        if (t.id !== undefined && t.id !== null && settingsMap[`${t.id}`] !== undefined) {
+          showSponsorsVal = settingsMap[`${t.id}`];
+        } else if (t.name && settingsMap[t.name] !== undefined) {
+          showSponsorsVal = settingsMap[t.name];
+        } else {
+          showSponsorsVal = true;
+        }
+        return {
+          ...t,
+          show_sponsors: showSponsorsVal !== false,
+        };
+      });
+      setTournaments(processed);
+    } catch (e) {
+      console.error('Error fetching tournaments in SponsorsScreen:', e);
+    }
+  };
+
+  // 2c. Toggle Tournament Sponsors Visibility
+  const toggleTournamentSponsors = async (tournament: any) => {
+    const nextVal = !tournament.show_sponsors;
+    setTournaments((prev) =>
+      prev.map((t) => (t.id === tournament.id ? { ...t, show_sponsors: nextVal } : t))
+    );
+
+    try {
+      const keysToSave = [`TOURNAMENT_SHOW_SPONSORS_${tournament.id}`, `TOURNAMENT_SHOW_SPONSORS_${tournament.name}`];
+      for (const keyName of keysToSave) {
+        if (!keyName) continue;
+        const { data: existing } = await dbClient
+          .from('sponsors')
+          .select('id')
+          .eq('name', keyName)
+          .maybeSingle();
+
+        if (existing) {
+          await dbClient
+            .from('sponsors')
+            .update({ logo_url: String(nextVal) })
+            .eq('id', existing.id);
+        } else {
+          await dbClient.from('sponsors').insert([
+            {
+              name: keyName,
+              logo_url: String(nextVal),
+              organization_id: orgId || null,
+              is_main: false,
+            },
+          ]);
+        }
+      }
+    } catch (e) {
+      console.error('Error toggling tournament sponsors:', e);
     }
   };
 
@@ -496,8 +583,47 @@ export const SponsorsScreen: React.FC = () => {
         </View>
       </View>
 
+      {/* Scope Selector: Liga & Turnir / Liga / Turnir — quyidagi bo'limlar shunga qarab ko'rinadi */}
+      {(leagues.length > 0 || tournaments.length > 0) && (
+        <View style={styles.scopeSelectorContainer}>
+          <TouchableOpacity
+            style={[styles.scopeSelectorBtn, filterScope === 'all' && styles.scopeSelectorBtnActive]}
+            onPress={() => setFilterScope('all')}
+            activeOpacity={0.8}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            <Ionicons name="globe-outline" size={14} color={filterScope === 'all' ? '#38BDF8' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+            <Text style={[styles.scopeSelectorText, filterScope === 'all' && { color: '#38BDF8' }, Platform.OS === 'android' && { color: filterScope === 'all' ? '#38BDF8' : colors.textMuted }]} numberOfLines={1}>
+              Liga & Turnir
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scopeSelectorBtn, filterScope === 'league' && styles.scopeSelectorBtnActiveLeague]}
+            onPress={() => setFilterScope('league')}
+            activeOpacity={0.8}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            <Ionicons name="trophy-outline" size={14} color={filterScope === 'league' ? '#F59E0B' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+            <Text style={[styles.scopeSelectorText, filterScope === 'league' && { color: '#F59E0B' }, Platform.OS === 'android' && { color: filterScope === 'league' ? '#F59E0B' : colors.textMuted }]} numberOfLines={1}>
+              Liga
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scopeSelectorBtn, filterScope === 'tournament' && styles.scopeSelectorBtnActiveTournament]}
+            onPress={() => setFilterScope('tournament')}
+            activeOpacity={0.8}
+          >
+            {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+            <Ionicons name="ribbon-outline" size={14} color={filterScope === 'tournament' ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+            <Text style={[styles.scopeSelectorText, filterScope === 'tournament' && { color: '#EC4899' }, Platform.OS === 'android' && { color: filterScope === 'tournament' ? '#EC4899' : colors.textMuted }]} numberOfLines={1}>
+              Turnir
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* SECTION 1: League Sponsors Visibility Accordion */}
-      {leagues.length > 0 && (
+      {leagues.length > 0 && filterScope !== 'tournament' && (
         <View style={[styles.sectionAccordionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
           <TouchableOpacity
@@ -559,6 +685,80 @@ export const SponsorsScreen: React.FC = () => {
                           onValueChange={() => toggleLeagueSponsors(league)}
                           trackColor={{ false: '#334155', true: '#059669' }}
                           thumbColor={isShow ? colors.accentGreen : (Platform.OS === 'android' ? colors.border : '#94A3B8')}
+                        />
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* SECTION 1b: Tournament Sponsors Visibility Accordion */}
+      {tournaments.length > 0 && filterScope !== 'league' && (
+        <View style={[styles.sectionAccordionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+          <TouchableOpacity
+            style={[styles.accordionHeaderBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated }]}
+            activeOpacity={0.8}
+            onPress={() => setShowTournamentSettings(!showTournamentSettings)}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Ionicons name="ribbon" size={20} color="#EC4899" />
+              <Text style={[styles.accordionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Turnirlarda Homiy Ko'rinishi"}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.accordionSubText, Platform.OS === 'android' && { color: colors.textMuted }, showTournamentSettings && { color: '#EC4899' }]}>
+                {showTournamentSettings ? 'Yopish' : 'Ochish'}
+              </Text>
+              <Ionicons
+                name={showTournamentSettings ? "chevron-up" : "chevron-down"}
+                size={18}
+                color={showTournamentSettings ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : "#94A3B8")}
+              />
+            </View>
+          </TouchableOpacity>
+
+          {showTournamentSettings && (
+            <View style={[styles.accordionBody, Platform.OS === 'android' && { borderTopColor: colors.border }]}>
+              <Text style={[styles.leagueTipText, Platform.OS === 'android' && { color: colors.textSecondary }]}>
+                {"⭐ Bosh Homiy har doim barcha turnir shablonlarida ko'rinadi. Pastki homiylar stripini har bir turnir uchun yoqish yoki o'chirish:"}
+              </Text>
+
+              <View style={{ gap: 10, marginTop: 12 }}>
+                {tournaments.map((tournament) => {
+                  const isShow = tournament.show_sponsors !== false;
+                  return (
+                    <TouchableOpacity
+                      key={tournament.id}
+                      style={[
+                        styles.leagueRowCard,
+                        Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                        isShow && (Platform.OS === 'android' ? { backgroundColor: isDark ? 'rgba(236, 72, 153, 0.08)' : '#FDF2F8', borderColor: '#EC4899' } : { backgroundColor: 'rgba(236, 72, 153, 0.08)', borderColor: 'rgba(236, 72, 153, 0.4)' }),
+                      ]}
+                      activeOpacity={0.8}
+                      onPress={() => toggleTournamentSponsors(tournament)}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                        {tournament.logo_url ? (
+                          <Image source={{ uri: tournament.logo_url }} style={styles.leagueRowLogo} />
+                        ) : (
+                          <Ionicons name="ribbon-outline" size={22} color="#EC4899" />
+                        )}
+                        <Text style={[styles.leagueRowName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{tournament.name}</Text>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={[styles.leagueStatusText, { color: isShow ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)') }]}>
+                          {isShow ? "YONIQLIK" : "O'CHIQ"}
+                        </Text>
+                        <Switch
+                          value={isShow}
+                          onValueChange={() => toggleTournamentSponsors(tournament)}
+                          trackColor={{ false: '#334155', true: '#EC4899' }}
+                          thumbColor={isShow ? '#EC4899' : (Platform.OS === 'android' ? colors.border : '#94A3B8')}
                         />
                       </View>
                     </TouchableOpacity>
@@ -895,6 +1095,41 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
     marginTop: 2,
+  },
+  scopeSelectorContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  scopeSelectorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  scopeSelectorBtnActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+  },
+  scopeSelectorBtnActiveLeague: {
+    borderColor: '#F59E0B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+  },
+  scopeSelectorBtnActiveTournament: {
+    borderColor: '#EC4899',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(236, 72, 153, 0.12)' : 'rgba(236, 72, 153, 0.1)',
+  },
+  scopeSelectorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11.5,
+    fontWeight: '800',
   },
   sectionAccordionCard: {
     backgroundColor: 'transparent',

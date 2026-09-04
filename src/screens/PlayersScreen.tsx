@@ -25,9 +25,10 @@ import * as Haptics from 'expo-haptics';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
-import { usePlayersData, useTeamsPaginatedData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { usePlayersData, useTeamsPaginatedData, useTeamsData, useLeaguesData, getLeagueNamesForTournamentFilter, getTeamIdsForLeagueNames } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
+import { getActiveOrgTournaments, getTournamentLeagues } from '../utils/tournamentUtils';
 
 interface Props {
   onNavigate?: (screen: string) => void;
@@ -366,18 +367,55 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
   const [showArchived, setShowArchived] = useState<boolean>(false);
 
+  // Turnir / Liga scope filtri (Liga & Turnir / Liga / Turnir)
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [filterScope, setFilterScope] = useState<'all' | 'league' | 'tournament'>('all');
+  const [selectedTournament, setSelectedTournament] = useState<string>('all'); // 'all' | 'tournaments_all' | tournamentId
+
+  useEffect(() => {
+    if (orgId) {
+      getActiveOrgTournaments(orgId)
+        .then((data) => setTournaments(data || []))
+        .catch((err) => console.warn('Error loading tournaments in PlayersScreen:', err));
+    }
+  }, [orgId]);
+
+  const handleSetFilterScope = (scope: 'all' | 'league' | 'tournament') => {
+    setFilterScope(scope);
+    setSelectedTeamFilter('all');
+    if (scope === 'tournament') {
+      setSelectedLeagueFilter('all');
+      setSelectedTournament('tournaments_all');
+    } else {
+      setSelectedTournament('all');
+      setSelectedLeagueFilter('all');
+    }
+  };
+
+  // Tanlangan turnirga biriktirilgan liga nomlari (Jamoa filtri ro'yxatini toraytirish uchun)
+  const [tournamentLeagueNames, setTournamentLeagueNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (filterScope === 'tournament' && selectedTournament !== 'all' && selectedTournament !== 'tournaments_all') {
+      getTournamentLeagues(selectedTournament)
+        .then((lgs: any[]) => setTournamentLeagueNames((lgs || []).map((l: any) => l.name).filter(Boolean)))
+        .catch(() => setTournamentLeagueNames([]));
+    } else {
+      setTournamentLeagueNames([]);
+    }
+  }, [filterScope, selectedTournament]);
+
   // 1. React Query Hooks for initial page (page 0)
   const {
     data: playersData,
     isLoading: loadingPlayers,
     refetch: refetchPlayers,
-  } = usePlayersData(orgId, debouncedSearchQuery, 0, PLAYER_PAGE_SIZE, showArchived, collabLeagueNames, selectedLeagueFilter, selectedTeamFilter);
+  } = usePlayersData(orgId, debouncedSearchQuery, 0, PLAYER_PAGE_SIZE, showArchived, collabLeagueNames, selectedLeagueFilter, selectedTeamFilter, selectedTournament);
 
   const {
     data: teamsData,
     isLoading: loadingTeams,
     refetch: refetchTeams,
-  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, 0, TEAM_PAGE_SIZE, showArchived, collabLeagueNames, selectedLeagueFilter);
+  } = useTeamsPaginatedData(orgId, debouncedSearchQuery, 0, TEAM_PAGE_SIZE, showArchived, collabLeagueNames, selectedLeagueFilter, selectedTournament);
 
   const { data: allTeamsList = [] } = useTeamsData(orgId, collabLeagueNames);
   const { data: leagues = [] } = useLeaguesData(orgId, collabLeagueIds);
@@ -389,7 +427,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     setAccumulatedTeams([]);
     setMorePlayersAvailable(null);
     setMoreTeamsAvailable(null);
-  }, [debouncedSearchQuery, showArchived, orgId, selectedLeagueFilter, selectedTeamFilter]);
+  }, [debouncedSearchQuery, showArchived, orgId, selectedLeagueFilter, selectedTeamFilter, selectedTournament]);
 
   // Instantaneous data resolution: use initial cache when page is 0, or accumulated state on pagination
   const players = playerPage === 0 ? (playersData?.players || accumulatedPlayers) : accumulatedPlayers;
@@ -757,6 +795,23 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           }
         }
 
+        // Turnir scope filtri
+        if (selectedTournament && selectedTournament !== 'all') {
+          const leagueNames = await getLeagueNamesForTournamentFilter(orgId, selectedTournament);
+          if (leagueNames && leagueNames.length > 0) {
+            const tTeamIds = await getTeamIdsForLeagueNames(leagueNames);
+            if (tTeamIds.length > 0) {
+              query = query.in('team_id', tTeamIds);
+            } else {
+              setMorePlayersAvailable(false);
+              return;
+            }
+          } else {
+            setMorePlayersAvailable(false);
+            return;
+          }
+        }
+
         if (selectedTeamFilter && selectedTeamFilter !== 'all') {
           query = query.eq('team_id', String(selectedTeamFilter));
         }
@@ -805,6 +860,20 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
         if (selectedLeagueFilter && selectedLeagueFilter !== 'all') {
           query = query.ilike('league', `%${selectedLeagueFilter}%`);
+        }
+
+        // Turnir scope filtri
+        if (selectedTournament && selectedTournament !== 'all') {
+          const leagueNames = await getLeagueNamesForTournamentFilter(orgId, selectedTournament);
+          if (leagueNames && leagueNames.length > 0) {
+            const orExpr = leagueNames
+              .map((n) => `league.ilike.%${String(n).replace(/[,%]/g, '')}%`)
+              .join(',');
+            query = query.or(orExpr);
+          } else {
+            setMoreTeamsAvailable(false);
+            return;
+          }
         }
 
         if (debouncedSearchQuery && debouncedSearchQuery.trim()) {
@@ -1417,16 +1486,71 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         )}
       </View>
 
-      {/* 2 Top Filter Selectors: Liga & Jamoa */}
+      {/* Scope Selector: Liga & Turnir / Liga / Turnir */}
+      <View style={styles.scopeSelectorContainer}>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'all' && styles.scopeSelectorBtnActive]}
+          onPress={() => handleSetFilterScope('all')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="globe-outline" size={14} color={filterScope === 'all' ? '#38BDF8' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'all' && { color: '#38BDF8' }, Platform.OS === 'android' && { color: filterScope === 'all' ? '#38BDF8' : colors.textMuted }]} numberOfLines={1}>
+            Liga & Turnir
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'league' && styles.scopeSelectorBtnActiveLeague]}
+          onPress={() => handleSetFilterScope('league')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="trophy-outline" size={14} color={filterScope === 'league' ? '#F59E0B' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'league' && { color: '#F59E0B' }, Platform.OS === 'android' && { color: filterScope === 'league' ? '#F59E0B' : colors.textMuted }]} numberOfLines={1}>
+            Liga
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'tournament' && styles.scopeSelectorBtnActiveTournament]}
+          onPress={() => handleSetFilterScope('tournament')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="ribbon-outline" size={14} color={filterScope === 'tournament' ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'tournament' && { color: '#EC4899' }, Platform.OS === 'android' && { color: filterScope === 'tournament' ? '#EC4899' : colors.textMuted }]} numberOfLines={1}>
+            Turnir
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 2 Top Filter Selectors: Liga/Turnir & Jamoa */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        {/* League Filter Trigger */}
+        {/* League / Tournament Filter Trigger — filterScope'ga qarab ro'yxati almashadi */}
         <TouchableOpacity
           style={[
             styles.topFilterBtn,
-            selectedLeagueFilter !== 'all' && styles.topFilterBtnActive,
-            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: selectedLeagueFilter !== 'all' ? colors.accentGreen : colors.border },
+            (selectedLeagueFilter !== 'all' || selectedTournament !== 'all') && styles.topFilterBtnActive,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: (selectedLeagueFilter !== 'all' || selectedTournament !== 'all') ? colors.accentGreen : colors.border },
           ]}
           onPress={() => {
+            if (filterScope === 'tournament') {
+              const tournamentOptions = [
+                { label: 'Barcha Turnirlar', value: 'tournaments_all' },
+                ...tournaments.map((t: any) => ({ label: t.name, value: String(t.id) })),
+              ];
+              setSelectPickerConfig({
+                title: 'Turnir boyicha filter',
+                selectedValue: selectedTournament,
+                options: tournamentOptions,
+                onSelect: (val) => {
+                  setSelectedTournament(val);
+                  if (selectedTeamFilter !== 'all') {
+                    setSelectedTeamFilter('all');
+                  }
+                },
+              });
+              return;
+            }
             const leagueOptions = [
               { label: 'Barcha Ligalar', value: 'all' },
               ...leagues.map((l: any) => ({ label: l.name, value: l.name })),
@@ -1445,15 +1569,19 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           }}
           activeOpacity={0.7}
         >
-          <Ionicons name="trophy-outline" size={15} color={selectedLeagueFilter !== 'all' ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF87') : colors.textMuted} />
+          <Ionicons name={filterScope === 'tournament' ? 'ribbon-outline' : 'trophy-outline'} size={15} color={filterScope === 'tournament' ? '#EC4899' : (selectedLeagueFilter !== 'all' ? (Platform.OS === 'android' ? colors.accentGreen : '#00FF87') : colors.textMuted)} />
           <Text
             style={[
               styles.topFilterBtnText,
-              Platform.OS === 'android' && { color: selectedLeagueFilter !== 'all' ? colors.accentGreen : colors.textPrimary },
+              Platform.OS === 'android' && { color: (selectedLeagueFilter !== 'all' || selectedTournament !== 'all') ? colors.accentGreen : colors.textPrimary },
             ]}
             numberOfLines={1}
           >
-            {selectedLeagueFilter === 'all' ? 'Barcha Ligalar' : selectedLeagueFilter}
+            {filterScope === 'tournament'
+              ? (selectedTournament === 'tournaments_all' || selectedTournament === 'all'
+                  ? 'Barcha Turnirlar'
+                  : (tournaments.find((t: any) => String(t.id) === String(selectedTournament))?.name || 'Turnir'))
+              : (selectedLeagueFilter === 'all' ? 'Barcha Ligalar' : selectedLeagueFilter)}
           </Text>
           <Ionicons name="chevron-down" size={13} color={colors.textMuted} />
         </TouchableOpacity>
@@ -1467,7 +1595,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: selectedTeamFilter !== 'all' ? colors.accentGreen : colors.border },
             ]}
             onPress={() => {
-              const filteredTeamsList = selectedLeagueFilter === 'all'
+              const filteredTeamsList = filterScope === 'tournament' && tournamentLeagueNames.length > 0
+                ? allTeamsList.filter((t: any) => {
+                    const l1 = (t.league || '').toLowerCase().trim();
+                    return tournamentLeagueNames.some((n) => l1.includes(n.toLowerCase().trim()));
+                  })
+                : selectedLeagueFilter === 'all'
                 ? allTeamsList
                 : allTeamsList.filter((t: any) => {
                     const l1 = (t.league || '').toLowerCase().trim();
@@ -3113,6 +3246,41 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.4)',
     fontSize: 13,
     fontWeight: '600',
+  },
+  scopeSelectorContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  scopeSelectorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  scopeSelectorBtnActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+  },
+  scopeSelectorBtnActiveLeague: {
+    borderColor: '#F59E0B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+  },
+  scopeSelectorBtnActiveTournament: {
+    borderColor: '#EC4899',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(236, 72, 153, 0.12)' : 'rgba(236, 72, 153, 0.1)',
+  },
+  scopeSelectorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11.5,
+    fontWeight: '800',
   },
   topFilterBtn: {
     flex: 1,

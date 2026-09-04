@@ -21,7 +21,10 @@ import * as Print from 'expo-print';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
-import { getStageDisplayTitle } from '../utils/tournamentUtils';
+import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
+
+// Pleyoff (knockout) bosqichlari — guruh bosqichidan farqli, raqamli tur emas, bitta bosqich
+const KNOCKOUT_STAGES = ['round_of_32', 'round_of_16', 'quarterfinal', 'semifinal', 'final'];
 
 // Helper component for scaling 1080x1080 canvas graphics for device previews
 const ScaledCanvasPreview = ({
@@ -266,7 +269,17 @@ export const ExportScreen: React.FC = () => {
   const { isDark, colors } = useTheme();
   const [leagues, setLeagues] = useState<any[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<any>(null);
+  const [savedLeagueSelection, setSavedLeagueSelection] = useState<any>(null);
   const [showLeagueDropdown, setShowLeagueDropdown] = useState(false);
+
+  // Turnir eksporti: "Liga / Turnir" 2-segmentli tanlov (Export har doim BITTA aniq
+  // subyekt — liga yoki turnir — uchun ishlaydi, shuning uchun boshqa sahifalardagi
+  // 3-segmentli "hammasi" varianti bu yerda ma'noga ega emas).
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [exportScope, setExportScope] = useState<'league' | 'tournament'>('league');
+  const [selectedTournament, setSelectedTournament] = useState<any>(null);
+  const [showTournamentDropdown, setShowTournamentDropdown] = useState(false);
+
   const [selectedRound, setSelectedRound] = useState<string>('1');
   const [availableRounds, setAvailableRounds] = useState<string[]>(['1']);
   const [showRoundDropdown, setShowRoundDropdown] = useState(false);
@@ -306,7 +319,61 @@ export const ExportScreen: React.FC = () => {
   useEffect(() => {
     fetchLeagues();
     fetchOrgData();
+    fetchTournaments();
   }, [orgId]);
+
+  const fetchTournaments = async () => {
+    try {
+      if (!orgId) return;
+      const list = await getActiveOrgTournaments(orgId);
+      setTournaments(list || []);
+    } catch (e) {
+      console.error('Error fetching tournaments for export:', e);
+    }
+  };
+
+  const buildTournamentProxy = (t: any) => ({
+    id: `tournament_${t.id}`,
+    name: t.name,
+    logo_url: t.logo_url,
+    bg_image: t.export_bg_url || t.bg_image || null,
+    isCollab: !!t.isCollab,
+    org1: t.org1,
+    org2: t.org2,
+    _isTournament: true,
+    _tournamentId: t.id,
+  });
+
+  const handleSetExportScope = (scope: 'league' | 'tournament') => {
+    if (scope === exportScope) return;
+    setExportScope(scope);
+    setShowLeagueDropdown(false);
+    setShowTournamentDropdown(false);
+    setShowRoundDropdown(false);
+    if (scope === 'tournament') {
+      const t = selectedTournament || tournaments[0];
+      if (t) {
+        setSelectedTournament(t);
+        setSelectedLeague(buildTournamentProxy(t));
+      } else {
+        // Turnirlar hali yuklanmagan yoki mavjud emas — quyidagi useEffect
+        // tournaments ro'yxati kelganda avtomatik birinchisini tanlaydi.
+        setSelectedLeague(null);
+      }
+    } else if (savedLeagueSelection) {
+      setSelectedLeague(savedLeagueSelection);
+    }
+  };
+
+  // Turnirlar ro'yxati (async) scope 'tournament'ga o'tilgandan KEYIN kelib qolishi
+  // mumkin — shunday holatda birinchi turnirni avtomatik tanlaydi.
+  useEffect(() => {
+    if (exportScope === 'tournament' && !selectedTournament && tournaments.length > 0) {
+      const t = tournaments[0];
+      setSelectedTournament(t);
+      setSelectedLeague(buildTournamentProxy(t));
+    }
+  }, [tournaments, exportScope]);
 
   const fetchOrgData = async () => {
     try {
@@ -324,10 +391,14 @@ export const ExportScreen: React.FC = () => {
   };
 
   useEffect(() => {
-    if (selectedLeague) {
+    if (exportScope === 'tournament') {
+      if (selectedTournament) {
+        fetchTournamentData(selectedTournament);
+      }
+    } else if (selectedLeague) {
       fetchLeagueData(selectedLeague);
     }
-  }, [selectedLeague, orgId, collabLeagueNames]);
+  }, [exportScope, selectedTournament, selectedLeague, orgId, collabLeagueNames]);
 
   const fetchLeagues = async () => {
     setLoading(true);
@@ -392,10 +463,16 @@ export const ExportScreen: React.FC = () => {
         });
 
         setLeagues(merged);
-        setSelectedLeague(merged[0]);
+        setSavedLeagueSelection(merged[0]);
+        if (exportScope !== 'tournament') {
+          setSelectedLeague(merged[0]);
+        }
       } else {
         setLeagues([]);
-        setSelectedLeague(null);
+        setSavedLeagueSelection(null);
+        if (exportScope !== 'tournament') {
+          setSelectedLeague(null);
+        }
         setLoading(false);
       }
     } catch (e) {
@@ -471,8 +548,12 @@ export const ExportScreen: React.FC = () => {
     try {
       const dbClient = supabase;
 
-      // Parallel fetch of 4 independent queries: collabs, sponsors, teams, matches
-      const [collabRes, sponsorsRes, teamsRes, matchesRes] = await Promise.all([
+      // Parallel fetch of 3 independent queries: collabs, sponsors, teams.
+      // (Matches endi bularning tagida, teamIds ma'lum bo'lgandan KEYIN, faqat shu liga
+      // jamoalariga tegishli qatorlar bilan cheklab olinadi — avval butun tashkilotning
+      // BARCHA o'yinlari pagination'siz yuklanardi, bu ~50,000 concurrent user sharoitida
+      // scale muammosi edi.)
+      const [collabRes, sponsorsRes, teamsRes] = await Promise.all([
         leagueId
           ? dbClient
               .from('league_collabs')
@@ -508,22 +589,6 @@ export const ExportScreen: React.FC = () => {
             }
           }
           return teamQuery;
-        })(),
-
-        (() => {
-          let matchQuery = dbClient
-            .from('matches')
-            .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
-            .order('match_date', { ascending: true });
-          if (orgId) {
-            if (collabLeagueNames && collabLeagueNames.length > 0) {
-              const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-              matchQuery = matchQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-            } else {
-              matchQuery = matchQuery.eq('organization_id', orgId);
-            }
-          }
-          return matchQuery;
         })()
       ]);
 
@@ -579,46 +644,137 @@ export const ExportScreen: React.FC = () => {
 
       // 2. Process Teams
       const teamsList = teamsRes?.data || [];
+      const leagueNameClean = String(leagueName || '').trim().toLowerCase();
       const filteredTeams = teamsList.filter((t: any) => {
-        if (!leagueName && !leagueId) return true;
-        if (leagueId && t.league_id && String(t.league_id) === String(leagueId)) return true;
-        if (leagueName && t.league) {
-          return String(t.league).toLowerCase().includes(String(leagueName).toLowerCase());
+        if (!leagueNameClean) return true;
+        if (t.league) {
+          const tLeague = String(t.league).toLowerCase();
+          return tLeague.includes(leagueNameClean) || leagueNameClean.includes(tLeague);
         }
         return false;
       });
 
-      const targetTeams = filteredTeams.length > 0 ? filteredTeams : (
-        teamsList.filter((t: any) => leagueId && String(t.league_id) === String(leagueId))
-      );
-      const teamIds = new Set(targetTeams.map((t: any) => t.id));
-      const targetTeamIds = Array.from(teamIds);
+      let targetTeams = filteredTeams.length > 0 ? filteredTeams : teamsList;
+      let teamIds = new Set(targetTeams.map((t: any) => t.id));
+      let targetTeamIds = Array.from(teamIds);
+      const teamIdsCsv = targetTeamIds.length > 0 ? targetTeamIds.join(',') : null;
 
-      // 3. Process Matches
-      const allMatchesData = matchesRes?.data || [];
-      const allLeagueMatches = allMatchesData.filter((m: any) =>
-        teamIds.has(m.home_team_id) || teamIds.has(m.away_team_id) || (leagueId && String(m.league_id) === String(leagueId))
-      );
+      // 3. Fetch & Process Matches — matches jadvalida liga 'league' (text) ustuni orqali saqlanadi
+      let matchQuery = dbClient
+        .from('matches')
+        .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
+        .order('match_date', { ascending: true });
 
-      let maxRound = 0;
+      if (leagueName) {
+        matchQuery = matchQuery.ilike('league', `%${leagueName.trim()}%`);
+      } else if (teamIdsCsv) {
+        matchQuery = matchQuery.or(`home_team_id.in.(${teamIdsCsv}),away_team_id.in.(${teamIdsCsv})`);
+      } else if (orgId) {
+        if (collabLeagueNames && collabLeagueNames.length > 0) {
+          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+          matchQuery = matchQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+        } else {
+          matchQuery = matchQuery.eq('organization_id', orgId);
+        }
+      }
+
+      let { data: matchesQueryData, error: matchErr } = await matchQuery;
+      if (matchErr) {
+        console.warn('Primary matchQuery error in fetchLeagueData:', matchErr);
+      }
+
+      // Xavfsiz fallback: agar league nomi bo'yicha topilmasa, teamIds yoki orgId bo'yicha qayta tekshiramiz
+      if ((!matchesQueryData || matchesQueryData.length === 0 || matchErr) && (teamIdsCsv || orgId)) {
+        let fallbackQuery = dbClient
+          .from('matches')
+          .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
+          .order('match_date', { ascending: true });
+
+        if (teamIdsCsv) {
+          fallbackQuery = fallbackQuery.or(`home_team_id.in.(${teamIdsCsv}),away_team_id.in.(${teamIdsCsv})`);
+        } else if (orgId) {
+          fallbackQuery = fallbackQuery.eq('organization_id', orgId);
+        }
+        const { data: fbData } = await fallbackQuery;
+        if (fbData && fbData.length > 0) {
+          matchesQueryData = fbData;
+        }
+      }
+
+      const allMatchesData = matchesQueryData || [];
+      const allLeagueMatches = allMatchesData.filter((m: any) => {
+        // Faqat liga o'yinlari (turnir o'yinlarini aralashtirmaymiz)
+        if (m.tournament_id) return false;
+        const mLeague = String(m.league || '').trim().toLowerCase();
+        if (leagueNameClean && (mLeague === leagueNameClean || mLeague.includes(leagueNameClean) || leagueNameClean.includes(mLeague))) {
+          return true;
+        }
+        if (teamIds.has(m.home_team_id) || teamIds.has(m.away_team_id)) {
+          return true;
+        }
+        return false;
+      });
+
+      // O'yinlarda qatnashayotgan jamoalarni ham targetTeams ro'yxatiga qo'shamiz
+      const targetTeamMap = new Map<any, any>();
+      targetTeams.forEach((t: any) => targetTeamMap.set(t.id, t));
       allLeagueMatches.forEach((m: any) => {
-        if (m.round && parseInt(m.round) > maxRound) {
-          maxRound = parseInt(m.round);
+        if (m.home_team_id && !targetTeamMap.has(m.home_team_id)) {
+          const found = teamsList.find((t: any) => t.id === m.home_team_id);
+          if (found) {
+            targetTeamMap.set(found.id, found);
+            teamIds.add(found.id);
+          }
+        }
+        if (m.away_team_id && !targetTeamMap.has(m.away_team_id)) {
+          const found = teamsList.find((t: any) => t.id === m.away_team_id);
+          if (found) {
+            targetTeamMap.set(found.id, found);
+            teamIds.add(found.id);
+          }
         }
       });
-      if (maxRound === 0) maxRound = 1;
+      targetTeams = Array.from(targetTeamMap.values());
+      targetTeamIds = Array.from(teamIds);
 
-      const roundOpts: string[] = ['all'];
+      // Haqiqiy turlar ro'yxatini aniqlash (1..maxRound va mavjud turlar)
+      const roundSet = new Set<string>();
+      let maxRound = 0;
+      allLeagueMatches.forEach((m: any) => {
+        if (m.round !== null && m.round !== undefined) {
+          const rStr = String(m.round).trim();
+          if (rStr) {
+            roundSet.add(rStr);
+            const num = parseInt(rStr, 10);
+            if (!isNaN(num) && num > maxRound) {
+              maxRound = num;
+            }
+          }
+        }
+      });
+
+      // Agar maxRound aniqlangan bo'lsa (masalan 7), 1 dan 7 gacha barcha turlarni kiritamiz
       for (let i = 1; i <= maxRound; i++) {
-        roundOpts.push(String(i));
+        roundSet.add(String(i));
       }
+
+      const sortedRounds = Array.from(roundSet).sort((a, b) => {
+        const numA = Number(a.replace(/[^0-9]/g, ''));
+        const numB = Number(b.replace(/[^0-9]/g, ''));
+        if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+          return numA - numB;
+        }
+        return a.localeCompare(b);
+      });
+
+      const roundOpts: string[] = ['all', ...(sortedRounds.length > 0 ? sortedRounds : ['1'])];
       setAvailableRounds(roundOpts);
 
       const finishedMatchesList = allLeagueMatches.filter((m: any) =>
         m.status === 'finished' || (m.home_score !== null && m.away_score !== null && m.home_score !== undefined && m.away_score !== undefined)
       );
       const finishedRounds = finishedMatchesList.map((m: any) => Number(m.round || 1)).filter((r: any) => !isNaN(r));
-      const latestFinishedRound = finishedRounds.length > 0 ? Math.max(...finishedRounds) : 1;
+      const latestFinishedRound = finishedRounds.length > 0 ? Math.max(...finishedRounds) : (maxRound > 0 ? 1 : 1);
       setSelectedRound(String(latestFinishedRound));
 
       // 4. Compute Standings Table with Overrides applied
@@ -782,6 +938,302 @@ export const ExportScreen: React.FC = () => {
     }
   };
 
+  // Turnir eksporti uchun ma'lumotlarni yuklaydi — fetchLeagueData bilan bir xil
+  // state'larni to'ldiradi (teams/matches/scorers/assists/cardPlayers/availableRounds/
+  // sponsor state'lari), shunda MAVJUD render/PDF kodi ularni AVTOMATIK ishlatadi.
+  // Jamoalar/o'yinlar to'g'ridan-to'g'ri `tournament_id` FK orqali (liga nomi bo'yicha
+  // matnli qidiruv shart emas, tezroq va aniqroq) va server tomonida filtrlanadi.
+  const fetchTournamentData = async (tournamentObj: any) => {
+    setLoading(true);
+    setTeams([]);
+    setMatches([]);
+    setScorers([]);
+    setAssists([]);
+    setCardPlayers([]);
+    setCollabInfo(null);
+    setMainSponsorLogo(null);
+    setSecondarySponsors([]);
+
+    const tournamentId = tournamentObj?.id;
+
+    try {
+      const dbClient = supabase;
+
+      if (tournamentObj?.isCollab) {
+        setCollabInfo({ sender_org: tournamentObj.org1, receiver_org: tournamentObj.org2 });
+      }
+
+      const [sponsorsRes, matchesRes] = await Promise.all([
+        (() => {
+          let spQuery = dbClient
+            .from('sponsors')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (orgId) {
+            spQuery = spQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+          }
+          return spQuery;
+        })(),
+
+        tournamentId
+          ? dbClient
+              .from('matches')
+              .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
+              .eq('tournament_id', tournamentId)
+              .order('match_date', { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      // 1. Homiylar — TOURNAMENT_SHOW_SPONSORS_ konvensiyasi (SponsorsScreen.tsx bilan bir xil)
+      const allSp = sponsorsRes?.data || [];
+      const settingsMap: Record<string, boolean> = {};
+      allSp.forEach((s: any) => {
+        if (s.name && s.name.startsWith('TOURNAMENT_SHOW_SPONSORS_')) {
+          const key = s.name.replace('TOURNAMENT_SHOW_SPONSORS_', '');
+          settingsMap[key] = s.logo_url === 'true';
+        }
+      });
+      const realSponsors = allSp.filter(isRealSponsor);
+
+      let showSponsorsForThisTournament = true;
+      if (tournamentId !== undefined && tournamentId !== null && settingsMap[`${tournamentId}`] !== undefined) {
+        showSponsorsForThisTournament = settingsMap[`${tournamentId}`];
+      } else if (tournamentObj?.name && settingsMap[tournamentObj.name] !== undefined) {
+        showSponsorsForThisTournament = settingsMap[tournamentObj.name];
+      }
+
+      const main = realSponsors.find((s: any) => s.is_main === true) || (realSponsors.length > 0 ? realSponsors[0] : null);
+      setMainSponsorLogo(main?.logo_url || null);
+
+      if (showSponsorsForThisTournament && realSponsors.length > 0) {
+        const secondaries = realSponsors.filter((s: any) => s.id !== main?.id && s.is_selected !== false);
+        setSecondarySponsors(secondaries.filter((s: any) => !!s.logo_url));
+      } else {
+        setSecondarySponsors([]);
+      }
+
+      // 2. O'yinlar — bevosita tournament_id bo'yicha (server tomonida, scale-safe)
+      const allTournamentMatches = matchesRes?.data || [];
+
+      // 3. Jamoalarni to'g'ridan-to'g'ri shu o'yinlar ishtirokchilaridan aniqlaymiz
+      const teamIdSet = new Set<any>();
+      allTournamentMatches.forEach((m: any) => {
+        if (m.home_team_id) teamIdSet.add(m.home_team_id);
+        if (m.away_team_id) teamIdSet.add(m.away_team_id);
+      });
+      const targetTeamIds = Array.from(teamIdSet);
+
+      let targetTeams: any[] = [];
+      if (targetTeamIds.length > 0) {
+        const { data: teamsData } = await dbClient
+          .from('teams')
+          .select('*')
+          .in('id', targetTeamIds);
+        targetTeams = teamsData || [];
+      }
+
+      // 4. Bosqichlar ro'yxati: guruh turlari (1..N) + mavjud pleyoff bosqichlari
+      let maxGroupRound = 0;
+      const knockoutStagesPresent = new Set<string>();
+      allTournamentMatches.forEach((m: any) => {
+        if (m.stage && m.stage !== 'group') {
+          knockoutStagesPresent.add(m.stage);
+        } else if (m.round && parseInt(m.round) > maxGroupRound) {
+          maxGroupRound = parseInt(m.round);
+        }
+      });
+
+      const roundOpts: string[] = ['all'];
+      for (let i = 1; i <= maxGroupRound; i++) {
+        roundOpts.push(String(i));
+      }
+      KNOCKOUT_STAGES.forEach((stg) => {
+        if (knockoutStagesPresent.has(stg)) roundOpts.push(stg);
+      });
+      setAvailableRounds(roundOpts);
+
+      const finishedMatchesList = allTournamentMatches.filter((m: any) =>
+        m.status === 'finished' || (m.home_score !== null && m.away_score !== null && m.home_score !== undefined && m.away_score !== undefined)
+      );
+
+      // Default: eng so'nggi bosqich (guruh bo'lsa eng katta tur, aks holda eng oxirgi
+      // yakunlangan pleyoff bosqichi) — "Barchasi" emas.
+      let defaultRound = 'all';
+      const finishedKnockout = finishedMatchesList.filter((m: any) => m.stage && m.stage !== 'group');
+      if (finishedKnockout.length > 0) {
+        let latestIdx = -1;
+        finishedKnockout.forEach((m: any) => {
+          const idx = KNOCKOUT_STAGES.indexOf(m.stage);
+          if (idx > latestIdx) latestIdx = idx;
+        });
+        defaultRound = latestIdx >= 0 ? KNOCKOUT_STAGES[latestIdx] : 'all';
+      } else {
+        const finishedGroupRounds = finishedMatchesList
+          .filter((m: any) => !m.stage || m.stage === 'group')
+          .map((m: any) => Number(m.round || 1))
+          .filter((r: any) => !isNaN(r));
+        defaultRound = finishedGroupRounds.length > 0
+          ? String(Math.max(...finishedGroupRounds))
+          : (roundOpts.length > 1 ? roundOpts[roundOpts.length - 1] : 'all');
+      }
+      setSelectedRound(defaultRound);
+
+      // 5. Standings — faqat guruh bosqichi o'yinlari asosida (pleyoff W/D/L jadvalga aralashmaydi)
+      const tableMap: any = {};
+      targetTeams.forEach((t: any) => {
+        tableMap[t.id] = {
+          ...t,
+          raw_played: 0, raw_won: 0, raw_drawn: 0, raw_lost: 0, raw_gf: 0, raw_ga: 0, raw_pts: 0,
+        };
+      });
+
+      finishedMatchesList
+        .filter((m: any) => !m.stage || m.stage === 'group')
+        .forEach((m: any) => {
+          const hId = m.home_team_id;
+          const aId = m.away_team_id;
+          const hScore = parseInt(m.home_score || 0);
+          const aScore = parseInt(m.away_score || 0);
+
+          if (tableMap[hId]) {
+            tableMap[hId].raw_played += 1;
+            tableMap[hId].raw_gf += hScore;
+            tableMap[hId].raw_ga += aScore;
+            if (hScore > aScore) { tableMap[hId].raw_won += 1; tableMap[hId].raw_pts += 3; }
+            else if (hScore === aScore) { tableMap[hId].raw_drawn += 1; tableMap[hId].raw_pts += 1; }
+            else { tableMap[hId].raw_lost += 1; }
+          }
+          if (tableMap[aId]) {
+            tableMap[aId].raw_played += 1;
+            tableMap[aId].raw_gf += aScore;
+            tableMap[aId].raw_ga += hScore;
+            if (aScore > hScore) { tableMap[aId].raw_won += 1; tableMap[aId].raw_pts += 3; }
+            else if (aScore === hScore) { tableMap[aId].raw_drawn += 1; tableMap[aId].raw_pts += 1; }
+            else { tableMap[aId].raw_lost += 1; }
+          }
+        });
+
+      const computedStandings = Object.values(tableMap)
+        .filter((t: any) => !t.is_archived)
+        .map((t: any) => {
+          t.played = t.raw_played;
+          t.won = t.raw_won;
+          t.drawn = t.raw_drawn;
+          t.lost = t.raw_lost;
+          t.gf = t.raw_gf;
+          t.ga = t.raw_ga;
+          t.points = t.raw_pts;
+          t.gd = t.gf - t.ga;
+          return t;
+        })
+        .sort((a: any, b: any) => {
+          if (b.points !== a.points) return b.points - a.points;
+          if (b.gd !== a.gd) return b.gd - a.gd;
+          if (b.gf !== a.gf) return b.gf - a.gf;
+          return b.won - a.won;
+        });
+
+      setTeams(computedStandings);
+
+      const enrichedMatches = allTournamentMatches.map((m: any) => ({
+        ...m,
+        home_team: m.home_team_data?.name || m.home_team || m.home_team_name || 'Jamoa 1',
+        away_team: m.away_team_data?.name || m.away_team || m.away_team_name || 'Jamoa 2',
+        home_team_logo: m.home_team_data?.logo_url,
+        away_team_logo: m.away_team_data?.logo_url,
+      }));
+      enrichedMatches.sort(compareMatches);
+      setMatches(enrichedMatches);
+
+      // 6. Voqealar (gol/pas/kartochka) — team_id bo'yicha, pagination bilan (scale-safe)
+      let eventsData: any[] = [];
+      if (targetTeamIds.length > 0) {
+        let page = 0;
+        const PAGE_SIZE = 1000;
+        while (true) {
+          const { data: pageEvents, error: evErr } = await dbClient
+            .from('match_events')
+            .select('id, event_type, player_id, team_id, match_id, player:applications(first_name, last_name, photo_url), team:teams(name, logo_url)')
+            .in('team_id', targetTeamIds)
+            .in('event_type', ['goal', 'assist', 'yellow_card', 'red_card'])
+            .order('id', { ascending: true })
+            .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+          if (evErr) {
+            console.error('Error fetching match_events (tournament):', evErr);
+            break;
+          }
+          if (!pageEvents || pageEvents.length === 0) break;
+          eventsData = eventsData.concat(pageEvents);
+          if (pageEvents.length < PAGE_SIZE) break;
+          page++;
+        }
+      }
+
+      if (eventsData && eventsData.length > 0) {
+        const matchIdsInTournament = new Set(allTournamentMatches.map((m: any) => m.id));
+        const filteredEvents = eventsData.filter((e: any) => matchIdsInTournament.has(e.match_id));
+        const goalMap: any = {};
+        const assistMap: any = {};
+        const cardMap: any = {};
+
+        filteredEvents.forEach((ev: any) => {
+          const pId = ev.player_id || ev.id;
+          const pName = ev.player ? `${ev.player.first_name || ''} ${ev.player.last_name || ''}`.trim() : (ev.player_name || 'O\'yinchi');
+          const pTeam = ev.team ? ev.team.name : (ev.team_name || 'Jamoa');
+          const pPhoto = ev.player?.photo_url || ev.player_photo || ev.team?.logo_url;
+
+          if (ev.event_type === 'goal') {
+            if (!goalMap[pId]) goalMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, goals: 0, played: 1 };
+            goalMap[pId].goals += 1;
+          }
+          if (ev.event_type === 'assist') {
+            if (!assistMap[pId]) assistMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, assists: 0, played: 1 };
+            assistMap[pId].assists += 1;
+          }
+          if (ev.event_type === 'yellow_card' || ev.event_type === 'red_card') {
+            if (!cardMap[pId]) cardMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, yellow: 0, red: 0 };
+            if (ev.event_type === 'yellow_card') cardMap[pId].yellow += 1;
+            if (ev.event_type === 'red_card') cardMap[pId].red += 1;
+          }
+        });
+
+        setScorers(Object.values(goalMap).sort((a: any, b: any) => b.goals - a.goals));
+        setAssists(Object.values(assistMap).sort((a: any, b: any) => b.assists - a.assists));
+        setCardPlayers(Object.values(cardMap).sort((a: any, b: any) => (b.yellow + b.red * 2) - (a.yellow + a.red * 2)));
+
+        const cardEvents = filteredEvents.filter((ev: any) => ev.event_type === 'yellow_card' || ev.event_type === 'red_card');
+        const goalEvents = filteredEvents.filter((ev: any) => ev.event_type === 'goal');
+        setRawCardEvents(cardEvents);
+        setRawGoalEvents(goalEvents);
+      }
+    } catch (e) {
+      console.error('Error in fetchTournamentData:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Belgilangan "Tur" filtriga bitta o'yin mos keladimi — guruh bosqichi (raqamli tur)
+  // va pleyoff bosqichlari (stage nomi) uchun bir xil ishlaydigan umumiy tekshiruv.
+  const matchInSelectedRound = (m: any): boolean => {
+    if (!m) return false;
+    if (!selectedRound || selectedRound === 'all') return true;
+    if (KNOCKOUT_STAGES.includes(selectedRound)) {
+      return (m.stage || 'group') === selectedRound;
+    }
+    return String(m.round || '') === String(selectedRound);
+  };
+
+  // Tanlangan "Tur" uchun ko'rinadigan yorliq matni (masalan "3-TUR" yoki "YARIM FINAL")
+  const selectedRoundLabel = (): string => {
+    if (!selectedRound || selectedRound === 'all') return '';
+    if (KNOCKOUT_STAGES.includes(selectedRound)) {
+      return getStageDisplayTitle(selectedRound, null);
+    }
+    return `${selectedRound}-TUR`;
+  };
+
   // Process Cards Export (Barcha or Belgilangan tur)
   const processCardsExport = async (filterMode: 'all' | 'round') => {
     setShowCardsModal(false);
@@ -791,13 +1243,9 @@ export const ExportScreen: React.FC = () => {
 
       const filteredEvents = rawCardEvents.filter((ev: any) => {
         if (filterMode === 'all') return true;
+        if (!selectedRound || selectedRound === 'all') return true;
         const matchObj = matches.find((m: any) => String(m.id) === String(ev.match_id));
-        const matchRoundStr = matchObj ? String(matchObj.round || '') : '';
-        const targetRoundStr = (selectedRound && selectedRound !== 'all') ? String(selectedRound) : '';
-        if (targetRoundStr) {
-          return matchRoundStr === targetRoundStr;
-        }
-        return true;
+        return matchInSelectedRound(matchObj);
       });
 
       filteredEvents.forEach((ev: any) => {
@@ -1009,7 +1457,7 @@ export const ExportScreen: React.FC = () => {
 
   // Calculate active match count for NATIJALAR card sizing
   const currentRoundMatches = (selectedRound && selectedRound !== 'all')
-    ? matches.filter((m: any) => String(m.round || '') === String(selectedRound))
+    ? matches.filter(matchInSelectedRound)
     : matches;
   const activeMatchCount = currentRoundMatches.length > 0 ? currentRoundMatches.length : matches.length;
 
@@ -1053,22 +1501,51 @@ export const ExportScreen: React.FC = () => {
         Platform.OS === 'android' && { backgroundColor: colors.bgPrimary, borderBottomColor: colors.border },
       ]}>
         {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+
+        {/* Liga / Turnir Scope Toggle */}
+        <View style={styles.exportScopeToggle}>
+          <TouchableOpacity
+            style={[styles.exportScopeBtn, exportScope === 'league' && styles.exportScopeBtnActiveLeague]}
+            onPress={() => handleSetExportScope('league')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="trophy-outline" size={14} color={exportScope === 'league' ? '#F59E0B' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+            <Text style={[styles.exportScopeText, exportScope === 'league' && { color: '#F59E0B' }, Platform.OS === 'android' && { color: exportScope === 'league' ? '#F59E0B' : colors.textMuted }]}>
+              {"Liga"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.exportScopeBtn, exportScope === 'tournament' && styles.exportScopeBtnActiveTournament]}
+            onPress={() => handleSetExportScope('tournament')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="ribbon-outline" size={14} color={exportScope === 'tournament' ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+            <Text style={[styles.exportScopeText, exportScope === 'tournament' && { color: '#EC4899' }, Platform.OS === 'android' && { color: exportScope === 'tournament' ? '#EC4899' : colors.textMuted }]}>
+              {"Turnir"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.dropdownsRow}>
-          {/* League Dropdown Trigger */}
+          {/* League / Tournament Dropdown Trigger (scope-aware) */}
           <View style={styles.dropdownWrapper}>
-            <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Liga:"}</Text>
+            <Text style={[styles.dropdownLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{exportScope === 'tournament' ? "Turnir:" : "Liga:"}</Text>
             <TouchableOpacity
               style={[styles.dropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
               onPress={() => {
-                setShowLeagueDropdown(true);
+                if (exportScope === 'tournament') {
+                  setShowTournamentDropdown(true);
+                } else {
+                  setShowLeagueDropdown(true);
+                }
                 setShowRoundDropdown(false);
               }}
               activeOpacity={0.8}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 4 }}>
-                <Ionicons name="trophy" size={15} color="#F59E0B" />
+                <Ionicons name={exportScope === 'tournament' ? 'ribbon' : 'trophy'} size={15} color={exportScope === 'tournament' ? '#EC4899' : '#F59E0B'} />
                 <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-                  {selectedLeague?.name || "Ligalarni yuklash..."}
+                  {selectedLeague?.name || (exportScope === 'tournament' ? "Turnirlarni yuklash..." : "Ligalarni yuklash...")}
                 </Text>
               </View>
               <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
@@ -1089,7 +1566,7 @@ export const ExportScreen: React.FC = () => {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 4 }}>
                 <Ionicons name="layers" size={15} color="#38BDF8" />
                 <Text style={[styles.dropdownBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-                  {selectedRound === 'all' ? 'Barchasi' : `${selectedRound}-Tur`}
+                  {selectedRound === 'all' ? 'Barchasi' : (KNOCKOUT_STAGES.includes(selectedRound) ? getStageDisplayTitle(selectedRound, null) : `${selectedRound}-Tur`)}
                 </Text>
               </View>
               <Ionicons name="chevron-down" size={16} color={Platform.OS === 'android' ? colors.textMuted : "#94A3B8"} />
@@ -1156,6 +1633,7 @@ export const ExportScreen: React.FC = () => {
                       ]}
                       onPress={() => {
                         setSelectedLeague(lg);
+                        setSavedLeagueSelection(lg);
                         setShowLeagueDropdown(false);
                       }}
                       activeOpacity={0.7}
@@ -1178,6 +1656,101 @@ export const ExportScreen: React.FC = () => {
                           numberOfLines={1}
                         >
                           {lg.name}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <Ionicons name="checkmark-circle" size={20} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Tournament Selection Modal Picker */}
+      <Modal
+        visible={showTournamentDropdown}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTournamentDropdown(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.filterModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowTournamentDropdown(false)}
+          />
+          <View style={[
+            styles.filterModalContent,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }
+          ]}>
+            {Platform.OS === 'ios' && <BlurView intensity={95} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+
+            <View style={[styles.filterModalHeader, Platform.OS === 'android' && { borderBottomColor: colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="ribbon" size={20} color="#EC4899" />
+                <Text style={[styles.filterModalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Turnirni tanlang"}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowTournamentDropdown(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.filterModalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.7)"} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={true} nestedScrollEnabled>
+              {tournaments.length === 0 ? (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)', fontSize: 13 }}>
+                    {"Turnirlar topilmadi"}
+                  </Text>
+                </View>
+              ) : (
+                tournaments.map((t: any) => {
+                  const isSelected = String(selectedTournament?.id) === String(t.id);
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[
+                        styles.filterModalItem,
+                        Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border },
+                        isSelected && styles.filterModalItemActive,
+                        Platform.OS === 'android' && isSelected && {
+                          backgroundColor: isDark ? 'rgba(0, 255, 102, 0.15)' : '#ECFDF5',
+                          borderColor: colors.accentGreen,
+                        },
+                      ]}
+                      onPress={() => {
+                        setSelectedTournament(t);
+                        setSelectedLeague(buildTournamentProxy(t));
+                        setShowTournamentDropdown(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                        {t.logo_url ? (
+                          <Image source={{ uri: t.logo_url }} style={{ width: 26, height: 26, borderRadius: 13, resizeMode: 'cover' }} />
+                        ) : (
+                          <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(236, 72, 153, 0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="ribbon-outline" size={14} color="#EC4899" />
+                          </View>
+                        )}
+                        <Text
+                          style={[
+                            styles.filterModalItemText,
+                            Platform.OS === 'android' && { color: colors.textPrimary },
+                            isSelected && styles.filterModalItemTextActive,
+                            Platform.OS === 'android' && isSelected && { color: colors.accentGreen },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {t.name}
                         </Text>
                       </View>
                       {isSelected && (
@@ -1232,7 +1805,9 @@ export const ExportScreen: React.FC = () => {
                 const stageMatch = matches.find((m: any) => String(m.round) === String(r) && m.stage && m.stage !== 'group');
                 const roundTitle = r === 'all'
                   ? 'Barcha turlar'
-                  : (stageMatch ? getStageDisplayTitle(stageMatch.stage, stageMatch.round) : `${r}-Tur`);
+                  : (KNOCKOUT_STAGES.includes(r)
+                      ? getStageDisplayTitle(r, null)
+                      : (stageMatch ? getStageDisplayTitle(stageMatch.stage, stageMatch.round) : `${r}-Tur`));
                 return (
                   <TouchableOpacity
                     key={r}
@@ -1418,6 +1993,7 @@ export const ExportScreen: React.FC = () => {
                         <View style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.3)', overflow: 'hidden' }}>
                           <Text style={{ textAlign: 'center', paddingVertical: 9, paddingHorizontal: 12, fontSize: 16, fontWeight: '900', color: '#ffffff', textTransform: 'uppercase', backgroundColor: 'rgba(255, 255, 255, 0.14)', borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.25)', letterSpacing: 0.5 }}>
                             {(() => {
+                              if (KNOCKOUT_STAGES.includes(selectedRound)) return `${selectedRoundLabel()} NATIJALARI`;
                               const stageMatch = matches.find((m: any) => selectedRound !== 'all' && String(m.round) === String(selectedRound) && m.stage && m.stage !== 'group');
                               if (stageMatch) return `${getStageDisplayTitle(stageMatch.stage, stageMatch.round)} NATIJALARI`;
                               return selectedRound === 'all' ? "NATIJALAR" : `${selectedRound}-TUR NATIJALARI`;
@@ -1426,7 +2002,7 @@ export const ExportScreen: React.FC = () => {
                           <View style={{ justifyContent: 'flex-start', paddingTop: 2, paddingBottom: 4, paddingHorizontal: 8 }}>
                             {(() => {
                               const roundMatches = (selectedRound && selectedRound !== 'all')
-                                ? matches.filter((m: any) => String(m.round || '') === String(selectedRound))
+                                ? matches.filter(matchInSelectedRound)
                                 : matches;
                               const listToRender = roundMatches.length > 0 ? roundMatches : matches;
 
@@ -1645,12 +2221,15 @@ export const ExportScreen: React.FC = () => {
               const rounds = matches.map((m: any) => Number(m.round || 1)).filter(r => !isNaN(r));
               return rounds.length > 0 ? String(Math.max(...rounds)) : '1';
             })();
+            const currentScheduleRoundLabel = KNOCKOUT_STAGES.includes(currentScheduleRound)
+              ? getStageDisplayTitle(currentScheduleRound, null)
+              : `${currentScheduleRound}-TUR`;
 
             return (
               <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
                 <View style={styles.sectionHeaderRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{`2. O'yin Jadvali (${currentScheduleRound}-TUR)`}</Text>
+                    <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{`2. O'yin Jadvali (${currentScheduleRoundLabel})`}</Text>
                     <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Match Fixtures PNG (1080x1080)"}</Text>
                   </View>
               <TouchableOpacity
@@ -1722,8 +2301,8 @@ export const ExportScreen: React.FC = () => {
                       let hasScheduledMatches = false;
 
                       if (selectedRound && selectedRound !== 'all') {
-                        activeRoundNumber = Number(selectedRound);
-                        listToRender = matches.filter((m: any) => String(m.round || '') === String(selectedRound));
+                        activeRoundNumber = Number(selectedRound) || 0;
+                        listToRender = matches.filter(matchInSelectedRound);
                         hasScheduledMatches = listToRender.some((m: any) =>
                           m.status === 'scheduled' ||
                           m.status === 'first_half' ||
@@ -1914,7 +2493,7 @@ export const ExportScreen: React.FC = () => {
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
-                  {selectedRound && selectedRound !== 'all' ? `3. Qizil va Sariq Kartochkalar (${selectedRound}-TUR)` : "3. Qizil va Sariq Kartochkalar (BARCHA)"}
+                  {selectedRound && selectedRound !== 'all' ? `3. Qizil va Sariq Kartochkalar (${selectedRoundLabel()})` : "3. Qizil va Sariq Kartochkalar (BARCHA)"}
                 </Text>
                 <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Cards & Penalties PNG (1080x1080)"}</Text>
               </View>
@@ -1986,8 +2565,7 @@ export const ExportScreen: React.FC = () => {
                       const filteredEvents = rawCardEvents.filter((ev: any) => {
                         if (!selectedRound || selectedRound === 'all') return true;
                         const matchObj = matches.find((m: any) => String(m.id) === String(ev.match_id));
-                        const matchRoundStr = matchObj ? String(matchObj.round || '') : '';
-                        return matchRoundStr === String(selectedRound);
+                        return matchInSelectedRound(matchObj);
                       });
 
                       filteredEvents.forEach((ev: any) => {
@@ -2104,7 +2682,7 @@ export const ExportScreen: React.FC = () => {
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
-                  {selectedRound && selectedRound !== 'all' ? `4. To'purarlar Jadvali (${selectedRound}-TUR)` : "4. To'purarlar Jadvali (BARCHA)"}
+                  {selectedRound && selectedRound !== 'all' ? `4. To'purarlar Jadvali (${selectedRoundLabel()})` : "4. To'purarlar Jadvali (BARCHA)"}
                 </Text>
                 <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Top Scorers PNG (1080x1080)"}</Text>
               </View>
@@ -2174,8 +2752,7 @@ export const ExportScreen: React.FC = () => {
                       const filteredEvents = rawGoalEvents.filter((ev: any) => {
                         if (!selectedRound || selectedRound === 'all') return true;
                         const matchObj = matches.find((m: any) => String(m.id) === String(ev.match_id));
-                        const matchRoundStr = matchObj ? String(matchObj.round || '') : '';
-                        return matchRoundStr === String(selectedRound);
+                        return matchInSelectedRound(matchObj);
                       });
 
                       filteredEvents.forEach((ev: any) => {
@@ -2189,7 +2766,7 @@ export const ExportScreen: React.FC = () => {
                       });
 
                       const displayScorers = Object.values(goalMap).sort((a: any, b: any) => b.goals - a.goals);
-                      const roundLabel = selectedRound && selectedRound !== 'all' ? `${selectedRound}-TUR` : 'BARCHA TURLAR';
+                      const roundLabel = selectedRound && selectedRound !== 'all' ? selectedRoundLabel() : 'BARCHA TURLAR';
 
                       return (
                         <View style={{ width: '86%', alignSelf: 'center', backgroundColor: 'rgba(255, 255, 255, 0.12)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.25)', overflow: 'hidden' }}>
@@ -2565,6 +3142,36 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.15)',
     zIndex: 10,
     elevation: 4,
+  },
+  exportScopeToggle: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  exportScopeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  exportScopeBtnActiveLeague: {
+    backgroundColor: 'rgba(245, 158, 11, 0.14)',
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  exportScopeBtnActiveTournament: {
+    backgroundColor: 'rgba(236, 72, 153, 0.14)',
+    borderColor: 'rgba(236, 72, 153, 0.4)',
+  },
+  exportScopeText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '800',
   },
   dropdownsRow: {
     flexDirection: 'row',

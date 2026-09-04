@@ -25,10 +25,10 @@ import { SwipeRow } from '../components/SwipeRow';
 import { BlurView } from '../components/SafeBlurView';
 import { MatchControlScreen } from './MatchControlScreen';
 import { adminNotificationService } from '../utils/adminNotificationService';
-import { useMatchesData, useTeamsData, useLeaguesData, useLeagueRoundsData } from '../api/hooks';
+import { useMatchesData, useTeamsData, useLeaguesData, useLeagueRoundsData, useTournamentStageOptions } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
-import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
+import { getStageDisplayTitle, getActiveOrgTournaments, getStageOptionKey } from '../utils/tournamentUtils';
 
 interface Match {
   id: string | number;
@@ -125,14 +125,6 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     }
   }, [orgId]);
 
-  const getTournamentFilterLabel = () => {
-    if (selectedTournament === 'all') return "Barcha o'yinlar (Liga & Turnir)";
-    if (selectedTournament === 'leagues') return "Faqat Liga o'yinlari";
-    if (selectedTournament === 'tournaments_all') return "Barcha Turnirlar";
-    const found = tournaments.find((t) => String(t.id) === String(selectedTournament));
-    return found ? `Turnir: ${found.name}` : "Turnir";
-  };
-
   // React Query Hooks
   const {
     data: matches = [],
@@ -148,6 +140,40 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
   // Dropdown open states
   const [activeDropdown, setActiveDropdown] = useState<'none' | 'tournament' | 'league' | 'round' | 'status'>('none');
+
+  // Yuqori qism: Liga & Turnir / Liga / Turnir — 3 segmentli filtr rejimi
+  const [filterScope, setFilterScope] = useState<'all' | 'league' | 'tournament'>('all');
+
+  const handleSetFilterScope = (scope: 'all' | 'league' | 'tournament') => {
+    setFilterScope(scope);
+    setActiveDropdown('none');
+    setSelectedRound('all');
+    if (scope === 'all') {
+      setSelectedTournament('all');
+      setSelectedLeague('all');
+    } else if (scope === 'league') {
+      setSelectedTournament('leagues');
+      setSelectedLeague('all');
+    } else {
+      setSelectedLeague('all');
+      setSelectedTournament('tournaments_all');
+    }
+  };
+
+  // Tanlangan turnirning haqiqiy bosqichlari (1-tur, 2-tur, ..., Yarim final, Final)
+  const { data: tournamentStageOptions = [] } = useTournamentStageOptions(
+    filterScope === 'tournament' ? selectedTournament : null
+  );
+
+  // Aniq bir turnir tanlanganda: "Tur" filtrini avtomatik eng so'nggi (joriy) bosqichga o'rnatish
+  useEffect(() => {
+    if (filterScope !== 'tournament' || selectedTournament === 'tournaments_all' || selectedTournament === 'all') return;
+    if (tournamentStageOptions.length === 0) return;
+    const validKeys = tournamentStageOptions.map((o: any) => o.key);
+    if (!validKeys.includes(selectedRound)) {
+      setSelectedRound(tournamentStageOptions[tournamentStageOptions.length - 1].key);
+    }
+  }, [filterScope, selectedTournament, tournamentStageOptions]);
 
   // Active Control Match Object State (0ms instant transition without blocking spinner)
   const [activeControlMatch, setActiveControlMatch] = useState<Match | null>(null);
@@ -504,15 +530,20 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     }
 
     if (selectedRound !== 'all') {
-      const matchRoundStr = String(m.round || '').trim().toLowerCase();
-      const selectedRoundStr = String(selectedRound).trim().toLowerCase();
-      const cleanMatch = matchRoundStr.replace(/[^0-9]/g, '');
-      const cleanSelected = selectedRoundStr.replace(/[^0-9]/g, '');
+      if (filterScope === 'tournament') {
+        // Turnir rejimida "Tur" qiymati stage+round kombinatsiyasi kaliti sifatida saqlanadi
+        if (getStageOptionKey(m.stage, m.round) !== selectedRound) return false;
+      } else {
+        const matchRoundStr = String(m.round || '').trim().toLowerCase();
+        const selectedRoundStr = String(selectedRound).trim().toLowerCase();
+        const cleanMatch = matchRoundStr.replace(/[^0-9]/g, '');
+        const cleanSelected = selectedRoundStr.replace(/[^0-9]/g, '');
 
-      if (cleanMatch && cleanSelected) {
-        if (cleanMatch !== cleanSelected) return false;
-      } else if (matchRoundStr !== selectedRoundStr) {
-        return false;
+        if (cleanMatch && cleanSelected) {
+          if (cleanMatch !== cleanSelected) return false;
+        } else if (matchRoundStr !== selectedRoundStr) {
+          return false;
+        }
       }
     }
     
@@ -545,8 +576,13 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     // If same status, sort by Date and Time (closest matches first)
     const dateA = new Date(`${a.match_date || '2099-01-01'}T${a.match_time || '00:00:00'}`).getTime();
     const dateB = new Date(`${b.match_date || '2099-01-01'}T${b.match_time || '00:00:00'}`).getTime();
-    
-    return dateA - dateB;
+
+    if (dateA !== dateB) return dateA - dateB;
+
+    // Sana va vaqt bir xil bo'lsa: 1-maydon har doim 2-maydondan oldin ko'rsatiladi
+    const locA = a.location === '2-maydon' ? 2 : 1;
+    const locB = b.location === '2-maydon' ? 2 : 1;
+    return locA - locB;
   });
 
   // Unique and combined list of all leagues including co-host leagues
@@ -592,66 +628,58 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         </View>
       </View>
 
-      {/* Top Full-Width Tournament / Competition Filter Trigger */}
-      <View style={styles.tournamentFilterBarContainer}>
+      {/* Top Scope Selector: Liga & Turnir / Liga / Turnir — 3 ta aniq ko'rinadigan segment */}
+      <View style={styles.scopeSelectorContainer}>
         <TouchableOpacity
-          style={[
-            styles.tournamentFilterBtn,
-            activeDropdown === 'tournament' && styles.tournamentFilterBtnActive,
-            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border },
-            selectedTournament !== 'all' && styles.tournamentFilterBtnSelected,
-          ]}
-          onPress={() => setActiveDropdown(activeDropdown === 'tournament' ? 'none' : 'tournament')}
+          style={[styles.scopeSelectorBtn, filterScope === 'all' && styles.scopeSelectorBtnActive]}
+          onPress={() => handleSetFilterScope('all')}
           activeOpacity={0.8}
         >
           {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-          <View style={styles.tournamentFilterBtnContent}>
-            <View style={styles.tournamentFilterLeft}>
-              <Ionicons
-                name={selectedTournament === 'all' ? 'globe-outline' : selectedTournament === 'leagues' ? 'trophy-outline' : 'ribbon-outline'}
-                size={16}
-                color={selectedTournament === 'all' ? '#38BDF8' : selectedTournament === 'leagues' ? '#F59E0B' : '#EC4899'}
-              />
-              <Text
-                style={[
-                  styles.tournamentFilterText,
-                  Platform.OS === 'android' && { color: colors.textPrimary },
-                  selectedTournament !== 'all' && { color: selectedTournament === 'leagues' ? '#F59E0B' : '#EC4899', fontWeight: '800' },
-                ]}
-                numberOfLines={1}
-              >
-                {getTournamentFilterLabel()}
-              </Text>
-            </View>
-            <View style={styles.tournamentFilterRight}>
-              {selectedTournament !== 'all' && (
-                <View style={[styles.activeFilterPill, selectedTournament === 'leagues' && { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(245, 158, 11, 0.4)' }]}>
-                  <Text style={[styles.activeFilterPillText, selectedTournament === 'leagues' && { color: '#F59E0B' }]}>
-                    {selectedTournament === 'leagues' ? 'Liga' : 'Turnir'}
-                  </Text>
-                </View>
-              )}
-              <Ionicons
-                name={activeDropdown === 'tournament' ? 'chevron-up' : 'chevron-down'}
-                size={15}
-                color={Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.6)'}
-              />
-            </View>
-          </View>
+          <Ionicons name="globe-outline" size={14} color={filterScope === 'all' ? '#38BDF8' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'all' && { color: '#38BDF8' }, Platform.OS === 'android' && { color: filterScope === 'all' ? '#38BDF8' : colors.textMuted }]} numberOfLines={1}>
+            Liga & Turnir
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'league' && styles.scopeSelectorBtnActiveLeague]}
+          onPress={() => handleSetFilterScope('league')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="trophy-outline" size={14} color={filterScope === 'league' ? '#F59E0B' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'league' && { color: '#F59E0B' }, Platform.OS === 'android' && { color: filterScope === 'league' ? '#F59E0B' : colors.textMuted }]} numberOfLines={1}>
+            Liga
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'tournament' && styles.scopeSelectorBtnActiveTournament]}
+          onPress={() => handleSetFilterScope('tournament')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="ribbon-outline" size={14} color={filterScope === 'tournament' ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'tournament' && { color: '#EC4899' }, Platform.OS === 'android' && { color: filterScope === 'tournament' ? '#EC4899' : colors.textMuted }]} numberOfLines={1}>
+            Turnir
+          </Text>
         </TouchableOpacity>
       </View>
 
       {/* 3 Select Filter Triggers Bar */}
       <View style={styles.filterBarContainer}>
-        {/* 1. Liga Select Dropdown */}
+        {/* 1. Liga/Turnir Select Dropdown — tanlangan filterScope'ga qarab ro'yxati almashadi */}
         <TouchableOpacity
           style={[styles.filterSelectBtn, activeDropdown === 'league' && styles.filterSelectBtnActive, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
           onPress={() => setActiveDropdown(activeDropdown === 'league' ? 'none' : 'league')}
         >
           {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-          <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
+          <Ionicons name={filterScope === 'tournament' ? 'ribbon-outline' : 'trophy-outline'} size={14} color={filterScope === 'tournament' ? '#EC4899' : '#F59E0B'} />
           <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-            {selectedLeague === 'all' ? 'Barcha Ligalar' : selectedLeague}
+            {filterScope === 'tournament'
+              ? (selectedTournament === 'tournaments_all' || selectedTournament === 'all'
+                  ? 'Barcha Turnirlar'
+                  : (tournaments.find((t) => String(t.id) === String(selectedTournament))?.name || 'Turnir'))
+              : (selectedLeague === 'all' ? 'Barcha Ligalar' : selectedLeague)}
           </Text>
           <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
@@ -664,7 +692,9 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
           {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <Ionicons name="layers-outline" size={14} color="#3B82F6" />
           <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-            {selectedRound === 'all' ? 'Barcha Turlar' : selectedRound}
+            {filterScope === 'tournament'
+              ? (selectedRound === 'all' ? 'Barcha Turlar' : (tournamentStageOptions.find((o: any) => o.key === selectedRound)?.label || 'Tur'))
+              : (selectedRound === 'all' ? 'Barcha Turlar' : selectedRound)}
           </Text>
           <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
@@ -687,101 +717,8 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         </TouchableOpacity>
       </View>
 
-      {/* Expandable Dropdown Options Container */}
-      {activeDropdown === 'tournament' && (
-        <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-          <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
-            {/* 1. All Competitions */}
-            <TouchableOpacity
-              style={styles.dropdownMenuItem}
-              onPress={() => {
-                setSelectedTournament('all');
-                setActiveDropdown('none');
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="globe-outline" size={16} color="#38BDF8" style={{ marginRight: 8 }} />
-                <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedTournament === 'all' && { color: '#38BDF8', fontWeight: '900' }]}>
-                  {"Barcha o'yinlar (Liga & Turnir)"}
-                </Text>
-                {selectedTournament === 'all' && <Ionicons name="checkmark" size={16} color="#38BDF8" style={{ marginLeft: 'auto' }} />}
-              </View>
-            </TouchableOpacity>
-
-            {/* 2. Leagues Only */}
-            <TouchableOpacity
-              style={styles.dropdownMenuItem}
-              onPress={() => {
-                setSelectedTournament('leagues');
-                setActiveDropdown('none');
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="trophy-outline" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
-                <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedTournament === 'leagues' && { color: '#F59E0B', fontWeight: '900' }]}>
-                  {"Faqat Liga o'yinlari"}
-                </Text>
-                {selectedTournament === 'leagues' && <Ionicons name="checkmark" size={16} color="#F59E0B" style={{ marginLeft: 'auto' }} />}
-              </View>
-            </TouchableOpacity>
-
-            {/* Turnirlar Bo'limi */}
-            {tournaments.length > 0 && (
-              <>
-                <View style={styles.dropdownSectionHeader}>
-                  <Text style={[styles.dropdownSectionTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
-                    TURNIRLAR
-                  </Text>
-                </View>
-
-                {tournaments.length > 1 && (
-                  <TouchableOpacity
-                    style={styles.dropdownMenuItem}
-                    onPress={() => {
-                      setSelectedTournament('tournaments_all');
-                      setActiveDropdown('none');
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <Ionicons name="ribbon-outline" size={16} color="#EC4899" style={{ marginRight: 8 }} />
-                      <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedTournament === 'tournaments_all' && { color: '#EC4899', fontWeight: '900' }]}>
-                        {"Barcha Turnirlar"}
-                      </Text>
-                      {selectedTournament === 'tournaments_all' && <Ionicons name="checkmark" size={16} color="#EC4899" style={{ marginLeft: 'auto' }} />}
-                    </View>
-                  </TouchableOpacity>
-                )}
-
-                {tournaments.map((t) => {
-                  const isSel = String(selectedTournament) === String(t.id);
-                  return (
-                    <TouchableOpacity
-                      key={t.id}
-                      style={styles.dropdownMenuItem}
-                      onPress={() => {
-                        setSelectedTournament(String(t.id));
-                        setActiveDropdown('none');
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="ribbon-outline" size={16} color="#EC4899" style={{ marginRight: 8 }} />
-                        <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, isSel && { color: '#EC4899', fontWeight: '900' }]}>
-                          {t.name}
-                        </Text>
-                        {isSel && <Ionicons name="checkmark" size={16} color="#EC4899" style={{ marginLeft: 'auto' }} />}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </>
-            )}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Expandable Dropdown Options Container */}
-      {activeDropdown === 'league' && (
+      {/* Expandable Dropdown: Liga ro'yxati (filterScope 'all' yoki 'league' bo'lganda) */}
+      {activeDropdown === 'league' && filterScope !== 'tournament' && (
         <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
@@ -814,6 +751,40 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         </View>
       )}
 
+      {/* Expandable Dropdown: Turnir ro'yxati (filterScope 'tournament' bo'lganda) */}
+      {activeDropdown === 'league' && filterScope === 'tournament' && (
+        <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setSelectedTournament('tournaments_all');
+                setActiveDropdown('none');
+              }}
+            >
+              <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, (selectedTournament === 'tournaments_all' || selectedTournament === 'all') && { color: '#EC4899', fontWeight: '900' }]}>
+                Barcha Turnirlar
+              </Text>
+            </TouchableOpacity>
+            {tournaments.map((t) => (
+              <TouchableOpacity
+                key={t.id}
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setSelectedTournament(String(t.id));
+                  setActiveDropdown('none');
+                }}
+              >
+                <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, String(selectedTournament) === String(t.id) && { color: '#EC4899', fontWeight: '900' }]}>
+                  {t.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {activeDropdown === 'round' && (
         <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
@@ -829,7 +800,32 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                 Barcha Turlar
               </Text>
             </TouchableOpacity>
-            {dbRounds.length > 0 ? (
+            {filterScope === 'tournament' ? (
+              tournamentStageOptions.length > 0 ? (
+                tournamentStageOptions.map((opt: any) => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setSelectedRound(opt.key);
+                      setActiveDropdown('none');
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedRound === opt.key && { color: '#EC4899', fontWeight: '900' }]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
+                  <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+                    {selectedTournament === 'tournaments_all' || selectedTournament === 'all'
+                      ? "Avval turnirni tanlang"
+                      : "Hozircha turlar mavjud emas"}
+                  </Text>
+                </View>
+              )
+            ) : dbRounds.length > 0 ? (
               dbRounds.map((rnd: string) => (
                 <TouchableOpacity
                   key={rnd}
@@ -1599,6 +1595,41 @@ const styles = StyleSheet.create({
   activeFilterPillText: {
     color: '#EC4899',
     fontSize: 10,
+    fontWeight: '800',
+  },
+  scopeSelectorContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  scopeSelectorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  scopeSelectorBtnActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+  },
+  scopeSelectorBtnActiveLeague: {
+    borderColor: '#F59E0B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+  },
+  scopeSelectorBtnActiveTournament: {
+    borderColor: '#EC4899',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(236, 72, 153, 0.12)' : 'rgba(236, 72, 153, 0.1)',
+  },
+  scopeSelectorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11.5,
     fontWeight: '800',
   },
   dropdownSectionHeader: {

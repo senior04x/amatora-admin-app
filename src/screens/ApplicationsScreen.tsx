@@ -22,9 +22,10 @@ import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
-import { useApplicationsData, useApplicationsCountsData, useTeamsData, useLeaguesData } from '../api/hooks';
+import { useApplicationsData, useApplicationsCountsData, useTeamsData, useLeaguesData, getLeagueNamesForTournamentFilter, getTeamIdsForLeagueNames } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
+import { getActiveOrgTournaments } from '../utils/tournamentUtils';
 
 interface Props {
   initialTab?: 'players' | 'teams';
@@ -200,6 +201,31 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showLeagueDropdown, setShowLeagueDropdown] = useState(false);
 
+  // Turnir / Liga scope filtri (Liga & Turnir / Liga / Turnir)
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [filterScope, setFilterScope] = useState<'all' | 'league' | 'tournament'>('all');
+  const [selectedTournament, setSelectedTournament] = useState<string>('all'); // 'all' | 'tournaments_all' | tournamentId
+
+  useEffect(() => {
+    if (orgId) {
+      getActiveOrgTournaments(orgId)
+        .then((data) => setTournaments(data || []))
+        .catch((err) => console.warn('Error loading tournaments in ApplicationsScreen:', err));
+    }
+  }, [orgId]);
+
+  const handleSetFilterScope = (scope: 'all' | 'league' | 'tournament') => {
+    setFilterScope(scope);
+    setShowLeagueDropdown(false);
+    if (scope === 'tournament') {
+      setLeagueFilter('all');
+      setSelectedTournament('tournaments_all');
+    } else {
+      setSelectedTournament('all');
+      setLeagueFilter('all');
+    }
+  };
+
   // 1. React Query Hooks — ONLY for initial page (page 0)
   const {
     data: applicationsData,
@@ -212,7 +238,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     leagueFilter,
     0,
     PLAYER_PAGE_SIZE,
-    collabLeagueNames
+    collabLeagueNames,
+    selectedTournament
   );
 
   const { data: dbCounts = { pending: 0, approved: 0, rejected: 0, total: 0 }, refetch: refetchCounts } =
@@ -229,7 +256,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     setAccumulatedTeamApps([]);
     setMorePlayerAppsAvailable(null);
     setMoreTeamAppsAvailable(null);
-  }, [statusFilter, leagueFilter, orgId, activeTab]);
+  }, [statusFilter, leagueFilter, selectedTournament, orgId, activeTab]);
 
   // Instantaneous data resolution: use initial cache when page is 0, or accumulated state on pagination
   const rawItems = playerPage === 0 && activeTab === 'players'
@@ -550,6 +577,25 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           }
         }
 
+        // Turnir scope filtri
+        if (selectedTournament && selectedTournament !== 'all') {
+          const leagueNames = await getLeagueNamesForTournamentFilter(orgId, selectedTournament);
+          if (leagueNames && leagueNames.length > 0) {
+            const tTeamIds = await getTeamIdsForLeagueNames(leagueNames);
+            if (tTeamIds.length > 0) {
+              query = query.in('team_id', tTeamIds);
+            } else {
+              setMorePlayerAppsAvailable(false);
+              setLoadingMore(false);
+              return;
+            }
+          } else {
+            setMorePlayerAppsAvailable(false);
+            setLoadingMore(false);
+            return;
+          }
+        }
+
         // Status filter
         if (statusFilter !== 'all') {
           if (statusFilter === 'pending') {
@@ -601,6 +647,21 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         // League filter
         if (leagueFilter && leagueFilter !== 'all' && leagueFilter.trim()) {
           query = query.ilike('league', `%${leagueFilter.trim()}%`);
+        }
+
+        // Turnir scope filtri
+        if (selectedTournament && selectedTournament !== 'all') {
+          const leagueNames = await getLeagueNamesForTournamentFilter(orgId, selectedTournament);
+          if (leagueNames && leagueNames.length > 0) {
+            const orExpr = leagueNames
+              .map((n) => `league.ilike.%${String(n).replace(/[,%]/g, '')}%`)
+              .join(',');
+            query = query.or(orExpr);
+          } else {
+            setMoreTeamAppsAvailable(false);
+            setLoadingMore(false);
+            return;
+          }
         }
 
         // Status filter
@@ -1177,6 +1238,43 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         </View>
       </View>
 
+      {/* Scope Selector: Liga & Turnir / Liga / Turnir */}
+      <View style={styles.scopeSelectorContainer}>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'all' && styles.scopeSelectorBtnActive]}
+          onPress={() => handleSetFilterScope('all')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="globe-outline" size={14} color={filterScope === 'all' ? '#38BDF8' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'all' && { color: '#38BDF8' }, Platform.OS === 'android' && { color: filterScope === 'all' ? '#38BDF8' : colors.textMuted }]} numberOfLines={1}>
+            Liga & Turnir
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'league' && styles.scopeSelectorBtnActiveLeague]}
+          onPress={() => handleSetFilterScope('league')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="trophy-outline" size={14} color={filterScope === 'league' ? '#F59E0B' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'league' && { color: '#F59E0B' }, Platform.OS === 'android' && { color: filterScope === 'league' ? '#F59E0B' : colors.textMuted }]} numberOfLines={1}>
+            Liga
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeSelectorBtn, filterScope === 'tournament' && styles.scopeSelectorBtnActiveTournament]}
+          onPress={() => handleSetFilterScope('tournament')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <Ionicons name="ribbon-outline" size={14} color={filterScope === 'tournament' ? '#EC4899' : (Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.5)')} />
+          <Text style={[styles.scopeSelectorText, filterScope === 'tournament' && { color: '#EC4899' }, Platform.OS === 'android' && { color: filterScope === 'tournament' ? '#EC4899' : colors.textMuted }]} numberOfLines={1}>
+            Turnir
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Select Dropdown Filters Row */}
       <View style={styles.filtersRow}>
         {/* Status Dropdown Filter */}
@@ -1214,9 +1312,13 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           activeOpacity={0.7}
         >
           {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-          <Ionicons name="trophy-outline" size={14} color="#F59E0B" />
+          <Ionicons name={filterScope === 'tournament' ? 'ribbon-outline' : 'trophy-outline'} size={14} color={filterScope === 'tournament' ? '#EC4899' : '#F59E0B'} />
           <Text style={[styles.filterSelectText, Platform.OS === 'android' && { color: colors.textPrimary }]} numberOfLines={1}>
-            {leagueFilter === 'all' ? 'Barcha Ligalar' : leagueFilter}
+            {filterScope === 'tournament'
+              ? (selectedTournament === 'tournaments_all' || selectedTournament === 'all'
+                  ? 'Barcha Turnirlar'
+                  : (tournaments.find((t) => String(t.id) === String(selectedTournament))?.name || 'Turnir'))
+              : (leagueFilter === 'all' ? 'Barcha Ligalar' : leagueFilter)}
           </Text>
           <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
         </TouchableOpacity>
@@ -1258,8 +1360,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
         </View>
       )}
 
-      {/* Dropdown Menu Overlay - League */}
-      {showLeagueDropdown && (
+      {/* Dropdown Menu Overlay - League / Tournament (filterScope'ga qarab) */}
+      {showLeagueDropdown && filterScope !== 'tournament' && (
         <View style={[styles.dropdownMenuBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
           <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
@@ -1303,6 +1405,51 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   ]}
                 >
                   {lg.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {showLeagueDropdown && filterScope === 'tournament' && (
+        <View style={[styles.dropdownMenuBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <ScrollView style={{ maxHeight: 180 }} showsVerticalScrollIndicator={false}>
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setSelectedTournament('tournaments_all');
+                setShowLeagueDropdown(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.dropdownMenuText,
+                  Platform.OS === 'android' && { color: colors.textSecondary },
+                  (selectedTournament === 'tournaments_all' || selectedTournament === 'all') && { color: '#EC4899', fontWeight: '900' },
+                ]}
+              >
+                {"Barcha Turnirlar"}
+              </Text>
+            </TouchableOpacity>
+            {tournaments.map((t) => (
+              <TouchableOpacity
+                key={t.id}
+                style={styles.dropdownMenuItem}
+                onPress={() => {
+                  setSelectedTournament(String(t.id));
+                  setShowLeagueDropdown(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dropdownMenuText,
+                    Platform.OS === 'android' && { color: colors.textSecondary },
+                    String(selectedTournament) === String(t.id) && { color: '#EC4899', fontWeight: '900' },
+                  ]}
+                >
+                  {t.name}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1936,6 +2083,41 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  scopeSelectorContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  scopeSelectorBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  scopeSelectorBtnActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+  },
+  scopeSelectorBtnActiveLeague: {
+    borderColor: '#F59E0B',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+  },
+  scopeSelectorBtnActiveTournament: {
+    borderColor: '#EC4899',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(236, 72, 153, 0.12)' : 'rgba(236, 72, 153, 0.1)',
+  },
+  scopeSelectorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11.5,
+    fontWeight: '800',
+  },
   filtersRow: {
     flexDirection: 'row',
     gap: 8,

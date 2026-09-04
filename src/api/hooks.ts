@@ -1,6 +1,51 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabaseClient';
 import { queryKeys } from './queryKeys';
+import { getTournamentRoundOptions } from '../utils/tournamentUtils';
+
+/**
+ * Turnir scope filtri uchun yordamchi: tanlangan turnir(lar)ga biriktirilgan
+ * liga nomlarini qaytaradi ('tournaments_all' bo'lsa — tashkilotning barcha
+ * turnirlariga biriktirilgan ligalar birlashtirilib qaytariladi).
+ * Natija — teams.league (vergul bilan ajratilgan matn) ustuniga qarshi
+ * ilike OR so'rovi qurish uchun ishlatiladi.
+ */
+export async function getLeagueNamesForTournamentFilter(orgId: any, tournamentFilter: string): Promise<string[] | null> {
+  if (!tournamentFilter || tournamentFilter === 'all' || tournamentFilter === 'leagues') return null;
+  const targetOrgId = Number(orgId) || 1;
+  try {
+    if (tournamentFilter === 'tournaments_all') {
+      const { data, error } = await supabase
+        .from('tournament_leagues')
+        .select('league:league_id (name), tournament:tournament_id!inner (organization_id)')
+        .eq('tournament.organization_id', targetOrgId);
+      if (error || !data) return [];
+      return Array.from(new Set(data.map((r: any) => r.league?.name).filter(Boolean)));
+    }
+    const { data, error } = await supabase
+      .from('tournament_leagues')
+      .select('league:league_id (name)')
+      .eq('tournament_id', tournamentFilter);
+    if (error || !data) return [];
+    return Array.from(new Set(data.map((r: any) => r.league?.name).filter(Boolean)));
+  } catch (e) {
+    console.warn('getLeagueNamesForTournamentFilter error:', e);
+    return [];
+  }
+}
+
+/**
+ * Berilgan liga nomlari ro'yxatiga mos keluvchi jamoa id'larini qaytaradi
+ * (teams.league vergul bilan ajratilgan matn bo'lgani uchun ilike OR bilan).
+ */
+export async function getTeamIdsForLeagueNames(leagueNames: string[]): Promise<any[]> {
+  if (!leagueNames || leagueNames.length === 0) return [];
+  const orExpr = leagueNames
+    .map((n) => `league.ilike.%${String(n).replace(/[,%]/g, '')}%`)
+    .join(',');
+  const { data } = await supabase.from('teams').select('id').or(orExpr);
+  return (data || []).map((t: any) => t.id).filter(Boolean);
+}
 
 /**
  * Hook for fetching Dashboard metrics and counts
@@ -224,10 +269,11 @@ export const usePlayersData = (
   archived = false,
   collabLeagueNames: string[] = [],
   league = 'all',
-  teamId: string | number = 'all'
+  teamId: string | number = 'all',
+  tournamentFilter: string = 'all' // 'all' | 'tournaments_all' | tournamentId
 ) => {
   return useQuery({
-    queryKey: queryKeys.players(orgId, search, page, pageSize, archived, league, String(teamId), collabLeagueNames),
+    queryKey: [...queryKeys.players(orgId, search, page, pageSize, archived, league, String(teamId), collabLeagueNames), tournamentFilter],
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
@@ -306,6 +352,21 @@ export const usePlayersData = (
         }
       }
 
+      // Turnir scope filtri: shu turnir(lar)ga biriktirilgan liga jamoalari orqali
+      if (tournamentFilter && tournamentFilter !== 'all') {
+        const leagueNames = await getLeagueNamesForTournamentFilter(orgId, tournamentFilter);
+        if (leagueNames && leagueNames.length > 0) {
+          const tTeamIds = await getTeamIdsForLeagueNames(leagueNames);
+          if (tTeamIds.length > 0) {
+            query = query.in('team_id', tTeamIds);
+          } else {
+            return { players: [], hasMore: false };
+          }
+        } else {
+          return { players: [], hasMore: false };
+        }
+      }
+
       if (teamId && teamId !== 'all') {
         query = query.eq('team_id', String(teamId));
       }
@@ -344,10 +405,11 @@ export const useTeamsPaginatedData = (
   pageSize = 10,
   archived = false,
   collabLeagueNames: string[] = [],
-  league = 'all'
+  league = 'all',
+  tournamentFilter: string = 'all' // 'all' | 'tournaments_all' | tournamentId
 ) => {
   return useQuery({
-    queryKey: queryKeys.paginatedTeams(orgId, search, page, pageSize, league, collabLeagueNames),
+    queryKey: [...queryKeys.paginatedTeams(orgId, search, page, pageSize, league, collabLeagueNames), tournamentFilter],
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
@@ -370,6 +432,19 @@ export const useTeamsPaginatedData = (
 
       if (league && league !== 'all') {
         query = query.ilike('league', `%${league}%`);
+      }
+
+      // Turnir scope filtri: shu turnir(lar)ga biriktirilgan ligalar bo'yicha
+      if (tournamentFilter && tournamentFilter !== 'all') {
+        const leagueNames = await getLeagueNamesForTournamentFilter(orgId, tournamentFilter);
+        if (leagueNames && leagueNames.length > 0) {
+          const orExpr = leagueNames
+            .map((n) => `league.ilike.%${String(n).replace(/[,%]/g, '')}%`)
+            .join(',');
+          query = query.or(orExpr);
+        } else {
+          return { teams: [], hasMore: false };
+        }
       }
 
       if (search && search.trim()) {
@@ -403,10 +478,11 @@ export const useApplicationsData = (
   league: string = 'all',
   page = 0,
   pageSize = 25,
-  collabLeagueNames: string[] = []
+  collabLeagueNames: string[] = [],
+  tournamentFilter: string = 'all' // 'all' | 'tournaments_all' | tournamentId
 ) => {
   return useQuery({
-    queryKey: queryKeys.applications(orgId, tab, status, league, page, pageSize),
+    queryKey: [...queryKeys.applications(orgId, tab, status, league, page, pageSize), tournamentFilter],
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
@@ -489,6 +565,21 @@ export const useApplicationsData = (
             return { items: [], hasMore: false };
           }
         }
+
+        // Turnir scope filtri: shu turnir(lar)ga biriktirilgan liga jamoalari orqali
+        if (tournamentFilter && tournamentFilter !== 'all') {
+          const leagueNames = await getLeagueNamesForTournamentFilter(orgId, tournamentFilter);
+          if (leagueNames && leagueNames.length > 0) {
+            const tTeamIds = await getTeamIdsForLeagueNames(leagueNames);
+            if (tTeamIds.length > 0) {
+              query = query.in('team_id', tTeamIds);
+            } else {
+              return { items: [], hasMore: false };
+            }
+          } else {
+            return { items: [], hasMore: false };
+          }
+        }
       } else {
         // Teams Tab
         if (collabLeagueNames && collabLeagueNames.length > 0) {
@@ -500,6 +591,19 @@ export const useApplicationsData = (
 
         if (league && league !== 'all' && league.trim()) {
           query = query.ilike('league', `%${league.trim()}%`);
+        }
+
+        // Turnir scope filtri (Teams Tab): shu turnir(lar)ga biriktirilgan ligalar bo'yicha
+        if (tournamentFilter && tournamentFilter !== 'all') {
+          const leagueNames = await getLeagueNamesForTournamentFilter(orgId, tournamentFilter);
+          if (leagueNames && leagueNames.length > 0) {
+            const orExpr = leagueNames
+              .map((n) => `league.ilike.%${String(n).replace(/[,%]/g, '')}%`)
+              .join(',');
+            query = query.or(orExpr);
+          } else {
+            return { items: [], hasMore: false };
+          }
         }
       }
 
@@ -819,10 +923,11 @@ export const useFinishedMatchesData = (
   leagueName = 'all',
   page = 0,
   pageSize = 15,
-  collabLeagueNames: string[] = []
+  collabLeagueNames: string[] = [],
+  tournamentFilter: string = 'all' // 'all' | 'leagues' | 'tournaments_all' | tournamentId
 ) => {
   return useQuery({
-    queryKey: queryKeys.finishedMatches(orgId, leagueName, page, pageSize, collabLeagueNames),
+    queryKey: queryKeys.finishedMatches(orgId, leagueName, page, pageSize, collabLeagueNames, tournamentFilter),
     queryFn: async () => {
       const targetOrgId = Number(orgId) || 1;
       const from = page * pageSize;
@@ -857,6 +962,8 @@ export const useFinishedMatchesData = (
         .in('status', ['finished', 'FINISHED', 'tugagan', 'yakunlangan', 'completed'])
         .order('match_date', { ascending: false })
         .order('match_time', { ascending: false })
+        // Sana/vaqt bir xil bo'lsa: 1-maydon har doim 2-maydondan oldin ko'rsatiladi
+        .order('location', { ascending: true })
         .order('id', { ascending: false })
         .range(from, to);
 
@@ -867,6 +974,15 @@ export const useFinishedMatchesData = (
         query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
       } else if (targetOrgId) {
         query = query.eq('organization_id', targetOrgId);
+      }
+
+      // Turnir / Liga scope filtri (server-side, pagination bilan mos ishlashi uchun)
+      if (tournamentFilter === 'leagues') {
+        query = query.is('tournament_id', null);
+      } else if (tournamentFilter === 'tournaments_all') {
+        query = query.not('tournament_id', 'is', null);
+      } else if (tournamentFilter && tournamentFilter !== 'all') {
+        query = query.eq('tournament_id', tournamentFilter);
       }
 
       const { data, count, error } = await query;
@@ -887,6 +1003,14 @@ export const useFinishedMatchesData = (
           } else {
             fbQuery = fbQuery.eq('organization_id', targetOrgId);
           }
+        }
+
+        if (tournamentFilter === 'leagues') {
+          fbQuery = fbQuery.is('tournament_id', null);
+        } else if (tournamentFilter === 'tournaments_all') {
+          fbQuery = fbQuery.not('tournament_id', 'is', null);
+        } else if (tournamentFilter && tournamentFilter !== 'all') {
+          fbQuery = fbQuery.eq('tournament_id', tournamentFilter);
         }
 
         const { data: fallbackData } = await fbQuery;
@@ -958,6 +1082,30 @@ export const useLeagueRoundsData = (
     },
     enabled: !!orgId && Number(orgId) > 0,
     staleTime: 60 * 1000,
+  });
+};
+
+/**
+ * Hook for fetching a specific tournament's distinct stage/round options
+ * (1-tur, 2-tur, ..., Chorak final, Yarim final, Final) — pastdagi "Tur" filtrini
+ * shu turnirning haqiqiy bosqichlari bilan to'ldirish va eng so'nggi bosqichni
+ * default qilib belgilash uchun ishlatiladi.
+ */
+export const useTournamentStageOptions = (tournamentId: any) => {
+  const isValidId = !!tournamentId && tournamentId !== 'all' && tournamentId !== 'leagues' && tournamentId !== 'tournaments_all';
+  return useQuery({
+    queryKey: ['tournamentStageOptions', isValidId ? String(tournamentId) : 'none'],
+    queryFn: async () => {
+      if (!isValidId) return [];
+      const { data, error } = await supabase
+        .from('matches')
+        .select('stage, round')
+        .eq('tournament_id', tournamentId);
+      if (error || !data) return [];
+      return getTournamentRoundOptions(data);
+    },
+    enabled: isValidId,
+    staleTime: 30 * 1000,
   });
 };
 

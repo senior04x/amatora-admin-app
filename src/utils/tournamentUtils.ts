@@ -34,6 +34,69 @@ export function getStageDisplayTitle(stage?: string | null, round?: number | str
   return STAGE_LABELS[stage] || stage.toUpperCase();
 }
 
+const STAGE_ORDER: Record<string, number> = {
+  group: 0,
+  round_of_32: 1,
+  round_of_16: 2,
+  quarterfinal: 3,
+  semifinal: 4,
+  final: 5,
+};
+
+/**
+ * Bosqichlarni tabiiy tartibda (guruh turlari -> pleyoff) taqqoslash uchun sonli kalit.
+ */
+export function getStageSortKey(stage?: string | null, round?: number | string | null): number {
+  const stageKey = stage || 'group';
+  const stageIndex = STAGE_ORDER[stageKey] ?? 0;
+  const roundNum = stageKey === 'group' ? (Number(round) || 0) : 0;
+  return stageIndex * 1000 + roundNum;
+}
+
+/**
+ * Bitta stage+round kombinatsiyasi uchun unikal kalit (filtr uchun).
+ */
+export function getStageOptionKey(stage?: string | null, round?: number | string | null): string {
+  const stageKey = stage || 'group';
+  const roundKey = stageKey === 'group' ? (round ?? '') : '';
+  return `${stageKey}::${roundKey}`;
+}
+
+export interface TournamentStageOption {
+  key: string;
+  stage: string;
+  round: number | string | null;
+  label: string;
+}
+
+/**
+ * Berilgan o'yinlar ro'yxatidan (faqat stage/round maydonlari kifoya) unikal bosqich
+ * variantlarini, tabiiy tartibda (1-tur, 2-tur, ..., Chorak final, Yarim final, Final)
+ * qaytaradi. Ro'yxatning oxirgi elementi — eng so'nggi (joriy) bosqich hisoblanadi.
+ */
+export function getTournamentRoundOptions(
+  rows: Array<{ stage?: string | null; round?: number | string | null }> = []
+): TournamentStageOption[] {
+  const map = new Map<string, TournamentStageOption & { sortKey: number }>();
+  rows.forEach((m) => {
+    const stageKey = m.stage || 'group';
+    const roundVal = stageKey === 'group' ? (m.round ?? null) : null;
+    const key = getStageOptionKey(m.stage, m.round);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        stage: stageKey,
+        round: roundVal,
+        label: getStageDisplayTitle(m.stage, m.round),
+        sortKey: getStageSortKey(m.stage, m.round),
+      });
+    }
+  });
+  return Array.from(map.values())
+    .sort((a, b) => a.sortKey - b.sortKey)
+    .map(({ sortKey, ...rest }) => rest);
+}
+
 /**
  * Tashkilotga tegishli barcha faol turnirlarni yuklaydi:
  * 1. O'zi yaratgan turnirlar

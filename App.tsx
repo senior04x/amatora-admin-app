@@ -29,6 +29,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons, Feather, FontAwesome } from '@expo/vector-icons';
 import * as Font from 'expo-font';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { appQueryClient } from './src/api/queryClient';
 import { OrgProvider, useOrg } from './src/context/OrgContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
@@ -88,6 +89,7 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, userRole } = useOrg();
   const { isDark, colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards'
   >('dashboard');
@@ -410,7 +412,9 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             }),
           },
           Platform.OS === 'android' && {
-            bottom: 0,
+            // Android'da tizim navigatsiya paneli (gesture bar / 3 tugma) ostiga
+            // kirib qolmasligi uchun pastki safe-area masofasi qo'shildi.
+            bottom: insets.bottom,
             left: 0,
             right: 0,
             width: '100%',
@@ -717,11 +721,13 @@ function AppContent() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={appQueryClient}>
-      <ThemeProvider>
-        <AppContent />
-      </ThemeProvider>
-    </QueryClientProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={appQueryClient}>
+        <ThemeProvider>
+          <AppContent />
+        </ThemeProvider>
+      </QueryClientProvider>
+    </SafeAreaProvider>
   );
 }
 

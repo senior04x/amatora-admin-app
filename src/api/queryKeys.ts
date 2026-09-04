@@ -72,8 +72,8 @@ export const queryKeys = {
   matches: (orgId: any, leagueName: string = 'all', collabLeagueNames: string[] = []) => 
     ['matches', Number(orgId) || 1, leagueName, (collabLeagueNames || []).sort().join(',')] as const,
   
-  finishedMatches: (orgId: any, leagueName: string = 'all', page: number = 0, pageSize: number = 15, collabLeagueNames: string[] = []) => 
-    ['finishedMatches', Number(orgId) || 1, leagueName, page, pageSize, (collabLeagueNames || []).sort().join(',')] as const,
+  finishedMatches: (orgId: any, leagueName: string = 'all', page: number = 0, pageSize: number = 15, collabLeagueNames: string[] = [], tournamentFilter: string = 'all') =>
+    ['finishedMatches', Number(orgId) || 1, leagueName, page, pageSize, (collabLeagueNames || []).sort().join(','), tournamentFilter] as const,
   
   transfers: (orgId: any, status: string = 'all', page: number = 0, pageSize: number = 15) => 
     ['transfers', Number(orgId) || 1, status, page, pageSize] as const,
