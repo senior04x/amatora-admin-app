@@ -23,7 +23,6 @@ import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
-import { buildPlayoffBracket, BracketSlotTeam, BracketMatch } from '../utils/playoffBracketUtils';
 
 // Pleyoff (knockout) bosqichlari — guruh bosqichidan farqli, raqamli tur emas, bitta bosqich
 const KNOCKOUT_STAGES = ['round_of_32', 'round_of_16', 'quarterfinal', 'semifinal', 'final'];
@@ -317,7 +316,6 @@ export const ExportScreen: React.FC = () => {
   const scheduleRef = useRef<any>(null);
   const cardsRef = useRef<any>(null);
   const scorersRef = useRef<any>(null);
-  const bracketRef = useRef<any>(null);
 
   // Match Schedule Day & Part pagination states (max 8 matches per 1x1 image)
   const [selectedScheduleDayIdx, setSelectedScheduleDayIdx] = useState<number>(0);
@@ -1308,7 +1306,7 @@ export const ExportScreen: React.FC = () => {
         if (isAvailable) {
           await Sharing.shareAsync(uri, {
             mimeType: 'image/png',
-            dialogTitle: `${selectedLeague?.name || 'AMATORA'} - ${sectionName} PNG`,
+            dialogTitle: `${(exportScope === 'tournament' ? selectedTournament?.name : selectedLeague?.name) || 'AMATORA'} - ${sectionName} PNG`,
             UTI: 'public.png',
           });
         } else {
@@ -1616,128 +1614,9 @@ export const ExportScreen: React.FC = () => {
     return groups;
   }, [matches, selectedRound]);
 
-  // Playoff Bracket Data (1/4 -> 1/2 -> Final)
-  const bracketData = React.useMemo(() => buildPlayoffBracket(matches, teams), [matches, teams]);
-
-  const renderBracketTeamPill = (
-    team?: BracketSlotTeam | null,
-    align: 'left' | 'right' | 'center' = 'left',
-    width: number = 190
-  ) => {
-    if (!team) {
-      return (
-        <View
-          style={{
-            width,
-            height: 40,
-            borderRadius: 12,
-            backgroundColor: 'rgba(56, 189, 248, 0.08)',
-            borderWidth: 1,
-            borderColor: 'rgba(56, 189, 248, 0.25)',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <Text style={{ color: 'rgba(255, 255, 255, 0.4)', fontSize: 11, fontWeight: '700' }}>
-            {"Kutilmoqda..."}
-          </Text>
-        </View>
-      );
-    }
-
-    const isWinner = team.isWinner;
-    const isLoser = team.isLoser;
-
-    return (
-      <View
-        style={{
-          width,
-          height: 40,
-          borderRadius: 12,
-          backgroundColor: isWinner
-            ? 'rgba(56, 189, 248, 0.32)'
-            : isLoser
-            ? 'rgba(0, 0, 0, 0.6)'
-            : 'rgba(255, 255, 255, 0.12)',
-          borderWidth: isWinner ? 2 : 1,
-          borderColor: isWinner
-            ? '#38BDF8'
-            : isLoser
-            ? 'rgba(255, 255, 255, 0.08)'
-            : 'rgba(255, 255, 255, 0.22)',
-          opacity: isLoser ? 0.35 : 1,
-          flexDirection: align === 'right' ? 'row-reverse' : 'row',
-          alignItems: 'center',
-          paddingHorizontal: 8,
-          gap: 6,
-        }}
-      >
-        {team.logo_url ? (
-          <Image
-            source={{ uri: team.logo_url }}
-            style={{ width: 26, height: 26, borderRadius: 13, resizeMode: 'contain', backgroundColor: 'rgba(255,255,255,0.1)' }}
-          />
-        ) : (
-          <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>{(team.name || '?')[0]}</Text>
-          </View>
-        )}
-
-        <Text
-          style={{
-            flex: 1,
-            color: isWinner ? '#38BDF8' : '#ffffff',
-            fontSize: width < 150 ? 11 : 12,
-            fontWeight: isWinner ? '900' : '800',
-            textAlign: align === 'right' ? 'right' : 'left',
-          }}
-          numberOfLines={1}
-        >
-          {team.name}
-        </Text>
-
-        {team.score !== null && team.score !== undefined && (
-          <View
-            style={{
-              minWidth: 22,
-              height: 22,
-              borderRadius: 6,
-              backgroundColor: isWinner ? '#38BDF8' : 'rgba(255,255,255,0.2)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingHorizontal: 4,
-            }}
-          >
-            <Text
-              style={{
-                color: isWinner ? '#050c1f' : '#ffffff',
-                fontSize: 12,
-                fontWeight: '900',
-              }}
-            >
-              {team.score}
-              {team.penalty_score !== null && team.penalty_score !== undefined ? `(${team.penalty_score})` : ''}
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderBracketMatchPair = (
-    match?: BracketMatch,
-    align: 'left' | 'right' | 'center' = 'left',
-    width: number = 190
-  ) => {
-    return (
-      <View style={{ gap: 4, alignItems: align === 'center' ? 'center' : 'stretch' }}>
-        {renderBracketTeamPill(match?.team1, align, width)}
-        {renderBracketTeamPill(match?.team2, align, width)}
-      </View>
-    );
-  };
 
   // Dynamic values for Standings Table canvas (Enlarged team name fonts)
+  const isTournament = exportScope === 'tournament';
   const teamCount = teams.length;
   let rowPadding = 9.7;
   let fontSize = 22.5;
@@ -1765,9 +1644,43 @@ export const ExportScreen: React.FC = () => {
     headerFontSize = 17.5;
   }
 
+  // Dynamic values for 9:16 Tournament Standings Poster (matching Standings.jsx)
+  let tournCanvasHeight = 1080;
+  if (teamCount > 30) tournCanvasHeight = 1920;
+  else if (teamCount > 22) tournCanvasHeight = 1680;
+  else if (teamCount > 15) tournCanvasHeight = 1440;
+  else if (teamCount > 10) tournCanvasHeight = 1260;
+  else tournCanvasHeight = 1080;
+
+  const availTableHeight = tournCanvasHeight - 270;
+  const computedTournRowHeight = Math.max(26, Math.min(52, Math.floor(availTableHeight / Math.max(1, teamCount))));
+  const tFontSize = teamCount > 35 ? 13 : teamCount > 24 ? 15 : teamCount > 16 ? 17 : 19;
+  const tLogoSize = teamCount > 35 ? 20 : teamCount > 24 ? 24 : teamCount > 16 ? 28 : 34;
+
+  let zone1Limit = 8;
+  let zone2Limit = 24;
+  let zone1Label = '1\\8 FINAL';
+  let zone2Label = '1\\16 FINAL';
+  let zone3Label = 'TURNIRNI TARK ETADIGANLAR';
+
+  if (teamCount < 16) {
+    zone1Limit = 4;
+    zone2Limit = 8;
+    zone1Label = '1\\4 FINAL';
+    zone2Label = 'PLEY-OFF';
+  } else if (teamCount < 24) {
+    zone1Limit = 4;
+    zone2Limit = 12;
+    zone1Label = '1\\4 FINAL';
+    zone2Label = '1\\8 FINAL';
+  }
+
+  const orgName = (orgData?.name || 'AMATORA').toUpperCase();
+  const tournName = (selectedTournament?.name || 'TURNIR').toUpperCase();
+
   // Theme check for graphics (matching Standings.jsx)
-  const isCollab = selectedLeague?.isCollab || !!collabInfo;
-  const exportBgUrl = selectedLeague?.bg_image || null;
+  const isCollab = isTournament ? (selectedTournament?.isCollab || !!collabInfo) : (selectedLeague?.isCollab || !!collabInfo);
+  const exportBgUrl = isTournament ? (selectedTournament?.bg_image || selectedLeague?.bg_image || null) : (selectedLeague?.bg_image || null);
 
   return (
     <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
@@ -2142,7 +2055,9 @@ export const ExportScreen: React.FC = () => {
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"1. Turnir Jadvali"}</Text>
-                <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>{"1:1 Formatdagi Standings Post PNG (1080x1080)"}</Text>
+                <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                  {isTournament ? "9:16 Formatdagi Turnir Jadvali PNG" : "1:1 Formatdagi Standings Post PNG (1080x1080)"}
+                </Text>
               </View>
               <TouchableOpacity
                 style={[styles.downloadBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
@@ -2154,19 +2069,335 @@ export const ExportScreen: React.FC = () => {
                 ) : (
                   <>
                     <Ionicons name="download" size={16} color={Platform.OS === 'android' ? colors.textPrimary : "#FFFFFF"} />
-                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG (1x1)"}</Text>
+                    <Text style={[styles.downloadBtnText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"PNG yuklab olish"}</Text>
                   </>
                 )}
               </TouchableOpacity>
             </View>
 
             {/* Scaled Preview Wrapper */}
-            <ScaledCanvasPreview refObj={standingsRef} width={1080} height={1080}>
-              <ImageBackground
-                source={exportBgUrl ? { uri: exportBgUrl } : undefined}
-                style={{ width: 1080, height: 1080, backgroundColor: '#062354' }}
-                resizeMode="cover"
-              >
+            <ScaledCanvasPreview refObj={standingsRef} width={1080} height={isTournament ? tournCanvasHeight : 1080}>
+              {isTournament ? (
+                <ImageBackground
+                  source={exportBgUrl ? { uri: exportBgUrl } : undefined}
+                  style={{ width: 1080, height: tournCanvasHeight, backgroundColor: '#060a12' }}
+                  resizeMode="cover"
+                >
+                  <View
+                    style={{
+                      flex: 1,
+                      backgroundColor: 'rgba(6, 10, 18, 0.94)',
+                      width: 1080,
+                      height: tournCanvasHeight,
+                      justifyContent: 'space-between',
+                      paddingHorizontal: 32,
+                      paddingVertical: 24,
+                    }}
+                  >
+                    {/* Top Header */}
+                    <View style={{ height: 110, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10, width: 1080 - 64 }}>
+                      {/* Left Emblem */}
+                      <View style={{ width: 220, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        {isCollab ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            {selectedTournament?.org1?.logo_url || orgData?.logo_url ? (
+                              <Image source={{ uri: selectedTournament?.org1?.logo_url || orgData?.logo_url }} style={{ height: 65, width: 65, resizeMode: 'contain' }} />
+                            ) : null}
+                            <Text style={{ color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }}>✕</Text>
+                            {selectedTournament?.org2?.logo_url ? (
+                              <Image source={{ uri: selectedTournament?.org2?.logo_url }} style={{ height: 55, width: 55, resizeMode: 'contain' }} />
+                            ) : null}
+                          </View>
+                        ) : (
+                          orgData?.logo_url ? (
+                            <Image source={{ uri: orgData.logo_url }} style={{ maxHeight: 75, maxWidth: 200, width: 180, height: 75, resizeMode: 'contain' }} />
+                          ) : (
+                            <Text style={{ color: '#00FF66', fontSize: 28, fontWeight: '900', letterSpacing: 1.5 }}>{"AMATORA"}</Text>
+                          )
+                        )}
+                      </View>
+
+                      {/* Center: Tournament Logo / Title */}
+                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                        {selectedTournament?.logo_url ? (
+                          <Image source={{ uri: selectedTournament.logo_url }} style={{ maxHeight: 85, maxWidth: 420, width: 360, height: 85, resizeMode: 'contain' }} />
+                        ) : (
+                          <View style={{ alignItems: 'center' }}>
+                            <Text style={{ fontSize: 13, color: '#94a3b8', fontWeight: '800', letterSpacing: 3 }}>{orgName}</Text>
+                            <Text style={{ fontSize: 28, color: '#ffffff', fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' }}>{tournName}</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Right Brand / Media Logo */}
+                      <View style={{ width: 220, alignItems: 'flex-end', justifyContent: 'center' }}>
+                        {mainSponsorLogo ? (
+                          <Image source={{ uri: mainSponsorLogo }} style={{ maxHeight: 70, maxWidth: 200, width: 180, height: 70, resizeMode: 'contain' }} />
+                        ) : (
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={{ fontSize: 18, fontWeight: '900', color: '#ffffff', letterSpacing: 1 }}>{orgName}</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#38bdf8', letterSpacing: 2 }}>{"MEDIA"}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Center Section: Left Rotated Title + Table + Right Zone Labels */}
+                    <View style={{ flex: 1, flexDirection: 'row', gap: 16, alignItems: 'stretch', minHeight: 0 }}>
+                      {/* Left Vertical Column with Rotated Title */}
+                      <View
+                        style={{
+                          width: 65,
+                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                          borderRadius: 14,
+                          borderWidth: 1,
+                          borderColor: 'rgba(255, 255, 255, 0.08)',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          overflow: 'hidden',
+                          position: 'relative',
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: Math.min(availTableHeight, 700),
+                            height: 65,
+                            position: 'absolute',
+                            transform: [{ rotate: '-90deg' }],
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 14,
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#94a3b8', letterSpacing: 3 }}>
+                            {`${orgName} ${tournName}`}
+                          </Text>
+                          <Text style={{ fontSize: 28, fontWeight: '900', color: '#ffffff', letterSpacing: 4 }}>
+                            {"TURNIR JADVALI"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Center Table Container */}
+                      <View
+                        style={{
+                          flex: 1,
+                          backgroundColor: 'rgba(255, 255, 255, 0.035)',
+                          borderRadius: 16,
+                          borderWidth: 1,
+                          borderColor: 'rgba(255, 255, 255, 0.1)',
+                          overflow: 'hidden',
+                          flexDirection: 'column',
+                        }}
+                      >
+                        {/* Table Header */}
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: 'rgba(255, 255, 255, 0.07)',
+                            paddingVertical: 10,
+                            paddingHorizontal: 14,
+                            borderBottomWidth: 2,
+                            borderBottomColor: 'rgba(255, 255, 255, 0.15)',
+                          }}
+                        >
+                          <Text style={{ width: 44, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"#"}</Text>
+                          <Text style={{ flex: 1, paddingLeft: 12, color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"JAMOALAR"}</Text>
+                          <Text style={{ width: 72, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"O'YIN"}</Text>
+                          <Text style={{ width: 72, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"T/N"}</Text>
+                          <Text style={{ width: 80, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"OCHKO"}</Text>
+                        </View>
+
+                        {/* Table Body */}
+                        <View style={{ flex: 1, flexDirection: 'column', justifyContent: 'space-between' }}>
+                          {teams.length === 0 ? (
+                            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                              <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, fontWeight: '700' }}>{"JAMOALAR MAVJUD EMAS"}</Text>
+                            </View>
+                          ) : (
+                            teams.map((t: any, idx: number) => {
+                              const rank = idx + 1;
+                              const isZone1End = rank === zone1Limit;
+                              const isZone2End = rank === zone2Limit;
+                              const inZone1 = rank <= zone1Limit;
+                              const inZone2 = rank > zone1Limit && rank <= zone2Limit;
+
+                              let borderBottomColor = 'rgba(255, 255, 255, 0.04)';
+                              let borderBottomWidth = 1;
+                              if (isZone1End && rank < teamCount) {
+                                borderBottomColor = '#22c55e';
+                                borderBottomWidth = 2.5;
+                              } else if (isZone2End && rank < teamCount) {
+                                borderBottomColor = '#ef4444';
+                                borderBottomWidth = 2.5;
+                              }
+
+                              let rowBg = idx % 2 === 0 ? 'rgba(255, 255, 255, 0.015)' : 'transparent';
+                              if (inZone1) rowBg = 'rgba(34, 197, 94, 0.04)';
+                              else if (inZone2) rowBg = 'rgba(56, 189, 248, 0.03)';
+
+                              return (
+                                <View
+                                  key={t.id || idx}
+                                  style={{
+                                    height: computedTournRowHeight,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    paddingHorizontal: 14,
+                                    backgroundColor: rowBg,
+                                    borderBottomWidth,
+                                    borderBottomColor,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      width: 44,
+                                      textAlign: 'center',
+                                      fontWeight: '900',
+                                      fontSize: tFontSize,
+                                      color: inZone1 ? '#22c55e' : (inZone2 ? '#38bdf8' : '#cbd5e1'),
+                                    }}
+                                  >
+                                    {rank}
+                                  </Text>
+
+                                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', paddingLeft: 12, gap: 10 }}>
+                                    {t.logo_url ? (
+                                      <Image
+                                        source={{ uri: t.logo_url }}
+                                        style={{ width: tLogoSize, height: tLogoSize, borderRadius: tLogoSize / 2, resizeMode: 'cover', backgroundColor: 'rgba(255,255,255,0.08)' }}
+                                      />
+                                    ) : (
+                                      <View style={{ width: tLogoSize, height: tLogoSize, borderRadius: tLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>{(t.name || '?')[0]}</Text>
+                                      </View>
+                                    )}
+                                    <Text
+                                      style={{
+                                        flex: 1,
+                                        color: '#ffffff',
+                                        fontSize: tFontSize,
+                                        fontWeight: '800',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: 0.3,
+                                      }}
+                                      numberOfLines={1}
+                                    >
+                                      {t.name}
+                                    </Text>
+                                  </View>
+
+                                  <Text style={{ width: 72, textAlign: 'center', color: '#e2e8f0', fontWeight: '700', fontSize: tFontSize }}>
+                                    {t.played ?? 0}
+                                  </Text>
+                                  <Text style={{ width: 72, textAlign: 'center', color: (t.gd > 0 ? '#38bdf8' : t.gd < 0 ? '#f87171' : '#cbd5e1'), fontWeight: '800', fontSize: tFontSize }}>
+                                    {t.gd ?? 0}
+                                  </Text>
+                                  <Text style={{ width: 80, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>
+                                    {t.points ?? 0}
+                                  </Text>
+                                </View>
+                              );
+                            })
+                          )}
+                        </View>
+                      </View>
+
+                      {/* Right Side Column with Bracket Zone Labels */}
+                      <View
+                        style={{
+                          width: 46,
+                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                          borderRadius: 14,
+                          borderWidth: 1,
+                          borderColor: 'rgba(255, 255, 255, 0.08)',
+                          overflow: 'hidden',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        {/* Zone 1 Label: 1\8 FINAL */}
+                        <View
+                          style={{
+                            flex: Math.min(zone1Limit, teamCount),
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            backgroundColor: 'rgba(34, 197, 94, 0.08)',
+                            borderBottomWidth: teamCount > zone1Limit ? 2 : 0,
+                            borderBottomColor: '#22c55e',
+                            position: 'relative',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <View style={{ width: 200, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 13, fontWeight: '900', color: '#22c55e', letterSpacing: 3 }}>
+                              {zone1Label}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Zone 2 Label: 1\16 FINAL */}
+                        {teamCount > zone1Limit && (
+                          <View
+                            style={{
+                              flex: Math.min(zone2Limit - zone1Limit, Math.max(0, teamCount - zone1Limit)),
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              backgroundColor: 'rgba(56, 189, 248, 0.06)',
+                              borderBottomWidth: teamCount > zone2Limit ? 2 : 0,
+                              borderBottomColor: '#ef4444',
+                              position: 'relative',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <View style={{ width: 200, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 13, fontWeight: '900', color: '#38bdf8', letterSpacing: 3 }}>
+                                {zone2Label}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+
+                        {/* Zone 3 Label: TURNIRNI TARK ETADIGANLAR */}
+                        {teamCount > zone2Limit && (
+                          <View
+                            style={{
+                              flex: Math.max(0, teamCount - zone2Limit),
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                              position: 'relative',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <View style={{ width: 280, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 11, fontWeight: '900', color: '#ef4444', letterSpacing: 3 }} numberOfLines={1}>
+                                {zone3Label}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Bottom Social Handle */}
+                    <View style={{ height: 42, alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
+                      <View style={{ paddingVertical: 6, paddingHorizontal: 20, borderRadius: 20, backgroundColor: 'rgba(255, 255, 255, 0.06)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.12)' }}>
+                        <Text style={{ color: '#cbd5e1', fontSize: 13.5, fontWeight: '800', letterSpacing: 1 }}>
+                          {`@${(orgData?.name || selectedTournament?.name || 'amatora').toLowerCase().replace(/\s+/g, '_')}`}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </ImageBackground>
+              ) : (
+                <ImageBackground
+                  source={exportBgUrl ? { uri: exportBgUrl } : undefined}
+                  style={{ width: 1080, height: 1080, backgroundColor: '#062354' }}
+                  resizeMode="cover"
+                >
                 <View style={{ flex: 1, backgroundColor: 'rgba(10, 13, 18, 0.82)', width: 1080, height: 1080, justifyContent: 'space-between' }}>
                   
                   {/* Export Header */}
@@ -2476,7 +2707,8 @@ export const ExportScreen: React.FC = () => {
 
                 </View>
               </ImageBackground>
-            </ScaledCanvasPreview>
+            )}
+          </ScaledCanvasPreview>
           </View>
 
           {/* 2. O'YIN JADVALI (1080x1080 MATCH FIXTURES GRAPHIC) */}
@@ -3221,178 +3453,11 @@ export const ExportScreen: React.FC = () => {
             </ScaledCanvasPreview>
           </View>
 
-          {/* 5. PLEY-OFF TO'RI (1/4, 1/2, FINAL) — Faqat pley-off o'yinlari mavjud bo'lganda ko'rinadi */}
-          {bracketData.hasPlayoffMatches && (
-            <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-              <View style={styles.sectionHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
-                    {"5. Pley-off To'ri (1/4, 1/2, Final)"}
-                  </Text>
-                  <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
-                    {"1:1 Formatdagi Playoff Bracket PNG (1080x1080)"}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.downloadBtn}
-                  onPress={() => handleExportPNG(bracketRef, 'Playoff_Tori')}
-                  disabled={downloadingSection === 'Playoff_Tori'}
-                  activeOpacity={0.8}
-                >
-                  {downloadingSection === 'Playoff_Tori' ? (
-                    <ActivityIndicator size="small" color="#000" />
-                  ) : (
-                    <>
-                      <Ionicons name="download-outline" size={16} color="#000" />
-                      <Text style={styles.downloadBtnText}>{"Rasmni Yuklab Olish"}</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-
-              {/* 1080x1080 ViewShot Canvas for Bracket */}
-              <ScaledCanvasPreview width={1080} height={1080} refObj={bracketRef}>
-                <ImageBackground
-                  source={exportBgUrl ? { uri: exportBgUrl } : undefined}
-                  style={{ width: 1080, height: 1080, backgroundColor: '#050c1f' }}
-                >
-                  {/* Dark Glass Overlay */}
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: exportBgUrl ? 'rgba(5, 12, 31, 0.88)' : '#050c1f' }]} />
-
-                  <View style={{ flex: 1, paddingHorizontal: 36, paddingVertical: 28, justifyContent: 'space-between' }}>
-                    {/* Top Header */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 100, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.15)', paddingBottom: 12 }}>
-                      <View style={{ width: 200, alignItems: 'flex-start' }}>
-                        {mainSponsorLogo ? (
-                          <Image source={{ uri: mainSponsorLogo }} style={{ height: 50, maxWidth: 180, resizeMode: 'contain' }} />
-                        ) : (
-                          <View style={{ height: 50 }} />
-                        )}
-                      </View>
-
-                      <View style={{ alignItems: 'center', flex: 1 }}>
-                        <Text style={{ color: '#ffffff', fontSize: 32, fontWeight: '900', letterSpacing: 4, textTransform: 'uppercase' }}>
-                          {"TURNIR JADVALI"}
-                        </Text>
-                        <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '800', letterSpacing: 2, textTransform: 'uppercase', marginTop: 4 }}>
-                          {selectedTournament?.name || selectedLeague?.name || "CHAMPIONS LEAGUE"}
-                        </Text>
-                      </View>
-
-                      <View style={{ width: 200, alignItems: 'flex-end' }}>
-                        {selectedTournament?.logo_url ? (
-                          <Image source={{ uri: selectedTournament.logo_url }} style={{ width: 62, height: 62, resizeMode: 'contain' }} />
-                        ) : selectedLeague?.logo_url || orgData?.logo_url ? (
-                          <Image source={{ uri: selectedLeague?.logo_url || orgData?.logo_url }} style={{ width: 62, height: 62, resizeMode: 'contain' }} />
-                        ) : (
-                          <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: 'rgba(56, 189, 248, 0.2)', alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="trophy" size={32} color="#38BDF8" />
-                          </View>
-                        )}
-                      </View>
-                    </View>
-
-                    {/* Main Bracket Field (Left Wing, Center Trophy & Final, Right Wing) */}
-                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 14 }}>
-                      {/* 1. LEFT WING (QF1, QF2 -> SF1) */}
-                      <View style={{ width: 340, height: 680, flexDirection: 'row', alignItems: 'center' }}>
-                        {/* QF Column */}
-                        <View style={{ width: 190, height: '100%', justifyContent: 'space-around' }}>
-                          <View>
-                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
-                            {renderBracketMatchPair(bracketData.qf[0], 'left', 190)}
-                          </View>
-                          <View>
-                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
-                            {renderBracketMatchPair(bracketData.qf[1], 'left', 190)}
-                          </View>
-                        </View>
-
-                        {/* Connector lines Left */}
-                        <View style={{ width: 30, height: 380, justifyContent: 'center', alignItems: 'center' }}>
-                          <View style={{ width: 15, height: 260, borderTopWidth: 2, borderBottomWidth: 2, borderRightWidth: 2, borderColor: 'rgba(56, 189, 248, 0.5)' }} />
-                          <View style={{ position: 'absolute', right: 0, width: 15, height: 2, backgroundColor: 'rgba(56, 189, 248, 0.5)' }} />
-                        </View>
-
-                        {/* SF1 Column */}
-                        <View style={{ width: 120, height: '100%', justifyContent: 'center' }}>
-                          <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/2"}</Text>
-                          {renderBracketMatchPair(bracketData.sf[0], 'left', 120)}
-                        </View>
-                      </View>
-
-                      {/* 2. CENTER FINAL (Trophy + Final Match) */}
-                      <View style={{ width: 280, height: 680, alignItems: 'center', justifyContent: 'center' }}>
-                        <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(56, 189, 248, 0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(56, 189, 248, 0.3)', marginBottom: 8 }}>
-                          <Ionicons name="trophy" size={72} color="#38BDF8" />
-                        </View>
-                        <Text style={{ color: '#ffffff', fontSize: 26, fontWeight: '900', letterSpacing: 4, marginBottom: 16 }}>
-                          {"FINAL"}
-                        </Text>
-                        <View style={{ width: '100%', alignItems: 'center' }}>
-                          {renderBracketMatchPair(bracketData.final, 'center', 240)}
-                        </View>
-
-                        {bracketData.champion && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 14, backgroundColor: 'rgba(255, 215, 0, 0.2)', borderWidth: 1.5, borderColor: '#FFD700' }}>
-                            <Ionicons name="ribbon" size={20} color="#FFD700" />
-                            <Text style={{ color: '#FFD700', fontSize: 15, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase' }}>
-                              {`Chempion: ${bracketData.champion.name}`}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-
-                      {/* 3. RIGHT WING (SF2 <- QF3, QF4) */}
-                      <View style={{ width: 340, height: 680, flexDirection: 'row-reverse', alignItems: 'center' }}>
-                        {/* QF Column */}
-                        <View style={{ width: 190, height: '100%', justifyContent: 'space-around' }}>
-                          <View>
-                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
-                            {renderBracketMatchPair(bracketData.qf[2], 'right', 190)}
-                          </View>
-                          <View>
-                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
-                            {renderBracketMatchPair(bracketData.qf[3], 'right', 190)}
-                          </View>
-                        </View>
-
-                        {/* Connector lines Right */}
-                        <View style={{ width: 30, height: 380, justifyContent: 'center', alignItems: 'center' }}>
-                          <View style={{ width: 15, height: 260, borderTopWidth: 2, borderBottomWidth: 2, borderLeftWidth: 2, borderColor: 'rgba(56, 189, 248, 0.5)' }} />
-                          <View style={{ position: 'absolute', left: 0, width: 15, height: 2, backgroundColor: 'rgba(56, 189, 248, 0.5)' }} />
-                        </View>
-
-                        {/* SF2 Column */}
-                        <View style={{ width: 120, height: '100%', justifyContent: 'center' }}>
-                          <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/2"}</Text>
-                          {renderBracketMatchPair(bracketData.sf[1], 'right', 120)}
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* Bottom Footer */}
-                    <View style={{ height: 60, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.15)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Ionicons name="logo-instagram" size={18} color="rgba(255, 255, 255, 0.7)" />
-                        <Ionicons name="paper-plane" size={18} color="rgba(255, 255, 255, 0.7)" />
-                        <Ionicons name="logo-facebook" size={18} color="rgba(255, 255, 255, 0.7)" />
-                      </View>
-                      <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '800', letterSpacing: 1 }}>
-                        {orgData?.name ? `@${orgData.name.toLowerCase().replace(/\s+/g, '_')}` : "@havas_football"}
-                      </Text>
-                    </View>
-                  </View>
-                </ImageBackground>
-              </ScaledCanvasPreview>
-            </View>
-          )}
-
-          {/* 6. PDF YUKLAB OLISH */}
+          {/* 5. PDF YUKLAB OLISH */}
           <View style={[styles.exportSectionCard, { borderColor: '#10B981', backgroundColor: Platform.OS === 'android' ? (isDark ? 'rgba(16, 185, 129, 0.06)' : '#ECFDF5') : 'rgba(16, 185, 129, 0.06)' }]}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.sectionTitle, { color: '#10B981' }]}>{"6. PDF Hujjat Eksporti"}</Text>
+                <Text style={[styles.sectionTitle, { color: '#10B981' }]}>{"5. PDF Hujjat Eksporti"}</Text>
                 <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
                   {"Jamoalar va o'yinchilarning to'liq ma'lumotlarini PDF formatida yuklab olish"}
                 </Text>
