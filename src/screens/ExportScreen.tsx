@@ -22,6 +22,7 @@ import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
 import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
+import { buildPlayoffBracket, BracketSlotTeam, BracketMatch } from '../utils/playoffBracketUtils';
 
 // Pleyoff (knockout) bosqichlari — guruh bosqichidan farqli, raqamli tur emas, bitta bosqich
 const KNOCKOUT_STAGES = ['round_of_32', 'round_of_16', 'quarterfinal', 'semifinal', 'final'];
@@ -315,6 +316,7 @@ export const ExportScreen: React.FC = () => {
   const scheduleRef = useRef<any>(null);
   const cardsRef = useRef<any>(null);
   const scorersRef = useRef<any>(null);
+  const bracketRef = useRef<any>(null);
 
   useEffect(() => {
     fetchLeagues();
@@ -1460,6 +1462,127 @@ export const ExportScreen: React.FC = () => {
     ? matches.filter(matchInSelectedRound)
     : matches;
   const activeMatchCount = currentRoundMatches.length > 0 ? currentRoundMatches.length : matches.length;
+
+  // Playoff Bracket Data (1/4 -> 1/2 -> Final)
+  const bracketData = React.useMemo(() => buildPlayoffBracket(matches, teams), [matches, teams]);
+
+  const renderBracketTeamPill = (
+    team?: BracketSlotTeam | null,
+    align: 'left' | 'right' | 'center' = 'left',
+    width: number = 190
+  ) => {
+    if (!team) {
+      return (
+        <View
+          style={{
+            width,
+            height: 40,
+            borderRadius: 12,
+            backgroundColor: 'rgba(56, 189, 248, 0.08)',
+            borderWidth: 1,
+            borderColor: 'rgba(56, 189, 248, 0.25)',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <Text style={{ color: 'rgba(255, 255, 255, 0.4)', fontSize: 11, fontWeight: '700' }}>
+            {"Kutilmoqda..."}
+          </Text>
+        </View>
+      );
+    }
+
+    const isWinner = team.isWinner;
+    const isLoser = team.isLoser;
+
+    return (
+      <View
+        style={{
+          width,
+          height: 40,
+          borderRadius: 12,
+          backgroundColor: isWinner
+            ? 'rgba(56, 189, 248, 0.32)'
+            : isLoser
+            ? 'rgba(0, 0, 0, 0.6)'
+            : 'rgba(255, 255, 255, 0.12)',
+          borderWidth: isWinner ? 2 : 1,
+          borderColor: isWinner
+            ? '#38BDF8'
+            : isLoser
+            ? 'rgba(255, 255, 255, 0.08)'
+            : 'rgba(255, 255, 255, 0.22)',
+          opacity: isLoser ? 0.35 : 1,
+          flexDirection: align === 'right' ? 'row-reverse' : 'row',
+          alignItems: 'center',
+          paddingHorizontal: 8,
+          gap: 6,
+        }}
+      >
+        {team.logo_url ? (
+          <Image
+            source={{ uri: team.logo_url }}
+            style={{ width: 26, height: 26, borderRadius: 13, resizeMode: 'contain', backgroundColor: 'rgba(255,255,255,0.1)' }}
+          />
+        ) : (
+          <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>{(team.name || '?')[0]}</Text>
+          </View>
+        )}
+
+        <Text
+          style={{
+            flex: 1,
+            color: isWinner ? '#38BDF8' : '#ffffff',
+            fontSize: width < 150 ? 11 : 12,
+            fontWeight: isWinner ? '900' : '800',
+            textAlign: align === 'right' ? 'right' : 'left',
+          }}
+          numberOfLines={1}
+        >
+          {team.name}
+        </Text>
+
+        {team.score !== null && team.score !== undefined && (
+          <View
+            style={{
+              minWidth: 22,
+              height: 22,
+              borderRadius: 6,
+              backgroundColor: isWinner ? '#38BDF8' : 'rgba(255,255,255,0.2)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingHorizontal: 4,
+            }}
+          >
+            <Text
+              style={{
+                color: isWinner ? '#050c1f' : '#ffffff',
+                fontSize: 12,
+                fontWeight: '900',
+              }}
+            >
+              {team.score}
+              {team.penalty_score !== null && team.penalty_score !== undefined ? `(${team.penalty_score})` : ''}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderBracketMatchPair = (
+    match?: BracketMatch,
+    align: 'left' | 'right' | 'center' = 'left',
+    width: number = 190
+  ) => {
+    return (
+      <View style={{ gap: 4, alignItems: align === 'center' ? 'center' : 'stretch' }}>
+        {renderBracketTeamPill(match?.team1, align, width)}
+        {renderBracketTeamPill(match?.team2, align, width)}
+      </View>
+    );
+  };
 
   // Dynamic values for Standings Table canvas (Enlarged team name fonts)
   const teamCount = teams.length;
@@ -2857,11 +2980,178 @@ export const ExportScreen: React.FC = () => {
             </ScaledCanvasPreview>
           </View>
 
-          {/* 5. PDF YUKLAB OLISH */}
+          {/* 5. PLEY-OFF TO'RI (1/4, 1/2, FINAL) — Faqat pley-off o'yinlari mavjud bo'lganda ko'rinadi */}
+          {bracketData.hasPlayoffMatches && (
+            <View style={[styles.exportSectionCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+                    {"5. Pley-off To'ri (1/4, 1/2, Final)"}
+                  </Text>
+                  <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                    {"1:1 Formatdagi Playoff Bracket PNG (1080x1080)"}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.downloadBtn}
+                  onPress={() => handleExportPNG(bracketRef, 'Playoff_Tori')}
+                  disabled={downloadingSection === 'Playoff_Tori'}
+                  activeOpacity={0.8}
+                >
+                  {downloadingSection === 'Playoff_Tori' ? (
+                    <ActivityIndicator size="small" color="#000" />
+                  ) : (
+                    <>
+                      <Ionicons name="download-outline" size={16} color="#000" />
+                      <Text style={styles.downloadBtnText}>{"Rasmni Yuklab Olish"}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* 1080x1080 ViewShot Canvas for Bracket */}
+              <ScaledCanvasPreview width={1080} height={1080} refObj={bracketRef}>
+                <ImageBackground
+                  source={exportBgUrl ? { uri: exportBgUrl } : undefined}
+                  style={{ width: 1080, height: 1080, backgroundColor: '#050c1f' }}
+                >
+                  {/* Dark Glass Overlay */}
+                  <View style={[StyleSheet.absoluteFill, { backgroundColor: exportBgUrl ? 'rgba(5, 12, 31, 0.88)' : '#050c1f' }]} />
+
+                  <View style={{ flex: 1, paddingHorizontal: 36, paddingVertical: 28, justifyContent: 'space-between' }}>
+                    {/* Top Header */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 100, borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.15)', paddingBottom: 12 }}>
+                      <View style={{ width: 200, alignItems: 'flex-start' }}>
+                        {mainSponsorLogo ? (
+                          <Image source={{ uri: mainSponsorLogo }} style={{ height: 50, maxWidth: 180, resizeMode: 'contain' }} />
+                        ) : (
+                          <View style={{ height: 50 }} />
+                        )}
+                      </View>
+
+                      <View style={{ alignItems: 'center', flex: 1 }}>
+                        <Text style={{ color: '#ffffff', fontSize: 32, fontWeight: '900', letterSpacing: 4, textTransform: 'uppercase' }}>
+                          {"TURNIR JADVALI"}
+                        </Text>
+                        <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '800', letterSpacing: 2, textTransform: 'uppercase', marginTop: 4 }}>
+                          {selectedTournament?.name || selectedLeague?.name || "CHAMPIONS LEAGUE"}
+                        </Text>
+                      </View>
+
+                      <View style={{ width: 200, alignItems: 'flex-end' }}>
+                        {selectedTournament?.logo_url ? (
+                          <Image source={{ uri: selectedTournament.logo_url }} style={{ width: 62, height: 62, resizeMode: 'contain' }} />
+                        ) : selectedLeague?.logo_url || orgData?.logo_url ? (
+                          <Image source={{ uri: selectedLeague?.logo_url || orgData?.logo_url }} style={{ width: 62, height: 62, resizeMode: 'contain' }} />
+                        ) : (
+                          <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: 'rgba(56, 189, 248, 0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="trophy" size={32} color="#38BDF8" />
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Main Bracket Field (Left Wing, Center Trophy & Final, Right Wing) */}
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 14 }}>
+                      {/* 1. LEFT WING (QF1, QF2 -> SF1) */}
+                      <View style={{ width: 340, height: 680, flexDirection: 'row', alignItems: 'center' }}>
+                        {/* QF Column */}
+                        <View style={{ width: 190, height: '100%', justifyContent: 'space-around' }}>
+                          <View>
+                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
+                            {renderBracketMatchPair(bracketData.qf[0], 'left', 190)}
+                          </View>
+                          <View>
+                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
+                            {renderBracketMatchPair(bracketData.qf[1], 'left', 190)}
+                          </View>
+                        </View>
+
+                        {/* Connector lines Left */}
+                        <View style={{ width: 30, height: 380, justifyContent: 'center', alignItems: 'center' }}>
+                          <View style={{ width: 15, height: 260, borderTopWidth: 2, borderBottomWidth: 2, borderRightWidth: 2, borderColor: 'rgba(56, 189, 248, 0.5)' }} />
+                          <View style={{ position: 'absolute', right: 0, width: 15, height: 2, backgroundColor: 'rgba(56, 189, 248, 0.5)' }} />
+                        </View>
+
+                        {/* SF1 Column */}
+                        <View style={{ width: 120, height: '100%', justifyContent: 'center' }}>
+                          <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/2"}</Text>
+                          {renderBracketMatchPair(bracketData.sf[0], 'left', 120)}
+                        </View>
+                      </View>
+
+                      {/* 2. CENTER FINAL (Trophy + Final Match) */}
+                      <View style={{ width: 280, height: 680, alignItems: 'center', justifyContent: 'center' }}>
+                        <View style={{ width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(56, 189, 248, 0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(56, 189, 248, 0.3)', marginBottom: 8 }}>
+                          <Ionicons name="trophy" size={72} color="#38BDF8" />
+                        </View>
+                        <Text style={{ color: '#ffffff', fontSize: 26, fontWeight: '900', letterSpacing: 4, marginBottom: 16 }}>
+                          {"FINAL"}
+                        </Text>
+                        <View style={{ width: '100%', alignItems: 'center' }}>
+                          {renderBracketMatchPair(bracketData.final, 'center', 240)}
+                        </View>
+
+                        {bracketData.champion && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 14, backgroundColor: 'rgba(255, 215, 0, 0.2)', borderWidth: 1.5, borderColor: '#FFD700' }}>
+                            <Ionicons name="ribbon" size={20} color="#FFD700" />
+                            <Text style={{ color: '#FFD700', fontSize: 15, fontWeight: '900', letterSpacing: 1, textTransform: 'uppercase' }}>
+                              {`Chempion: ${bracketData.champion.name}`}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* 3. RIGHT WING (SF2 <- QF3, QF4) */}
+                      <View style={{ width: 340, height: 680, flexDirection: 'row-reverse', alignItems: 'center' }}>
+                        {/* QF Column */}
+                        <View style={{ width: 190, height: '100%', justifyContent: 'space-around' }}>
+                          <View>
+                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
+                            {renderBracketMatchPair(bracketData.qf[2], 'right', 190)}
+                          </View>
+                          <View>
+                            <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/4"}</Text>
+                            {renderBracketMatchPair(bracketData.qf[3], 'right', 190)}
+                          </View>
+                        </View>
+
+                        {/* Connector lines Right */}
+                        <View style={{ width: 30, height: 380, justifyContent: 'center', alignItems: 'center' }}>
+                          <View style={{ width: 15, height: 260, borderTopWidth: 2, borderBottomWidth: 2, borderLeftWidth: 2, borderColor: 'rgba(56, 189, 248, 0.5)' }} />
+                          <View style={{ position: 'absolute', left: 0, width: 15, height: 2, backgroundColor: 'rgba(56, 189, 248, 0.5)' }} />
+                        </View>
+
+                        {/* SF2 Column */}
+                        <View style={{ width: 120, height: '100%', justifyContent: 'center' }}>
+                          <Text style={{ color: '#38BDF8', fontSize: 16, fontWeight: '900', textAlign: 'center', marginBottom: 8, letterSpacing: 1 }}>{"1/2"}</Text>
+                          {renderBracketMatchPair(bracketData.sf[1], 'right', 120)}
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Bottom Footer */}
+                    <View style={{ height: 60, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.15)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Ionicons name="logo-instagram" size={18} color="rgba(255, 255, 255, 0.7)" />
+                        <Ionicons name="paper-plane" size={18} color="rgba(255, 255, 255, 0.7)" />
+                        <Ionicons name="logo-facebook" size={18} color="rgba(255, 255, 255, 0.7)" />
+                      </View>
+                      <Text style={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: 16, fontWeight: '800', letterSpacing: 1 }}>
+                        {orgData?.name ? `@${orgData.name.toLowerCase().replace(/\s+/g, '_')}` : "@havas_football"}
+                      </Text>
+                    </View>
+                  </View>
+                </ImageBackground>
+              </ScaledCanvasPreview>
+            </View>
+          )}
+
+          {/* 6. PDF YUKLAB OLISH */}
           <View style={[styles.exportSectionCard, { borderColor: '#10B981', backgroundColor: Platform.OS === 'android' ? (isDark ? 'rgba(16, 185, 129, 0.06)' : '#ECFDF5') : 'rgba(16, 185, 129, 0.06)' }]}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.sectionTitle, { color: '#10B981' }]}>{"5. PDF Hujjat Eksporti"}</Text>
+                <Text style={[styles.sectionTitle, { color: '#10B981' }]}>{"6. PDF Hujjat Eksporti"}</Text>
                 <Text style={[styles.sectionSubtitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
                   {"Jamoalar va o'yinchilarning to'liq ma'lumotlarini PDF formatida yuklab olish"}
                 </Text>
