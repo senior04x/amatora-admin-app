@@ -24,7 +24,7 @@ import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { BlurView } from '../components/SafeBlurView';
-import { getTournamentTeams } from '../utils/tournamentUtils';
+import { getTournamentTeams, parseTournamentTier, formatTournamentDescription, DEFAULT_TOURNAMENT_COLORS } from '../utils/tournamentUtils';
 
 const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
   try {
@@ -259,31 +259,6 @@ export const DURATION_PRESETS = [
   { value: 90, label: "90 daqiqa (45x2)", tag: "Katta futbol (Standart)" },
 ];
 
-export function parseTournamentTier(t: any): { tier: number; parentId: number | null; cleanDescription: string } {
-  let tier = t?.tier ? Number(t.tier) : 1;
-  let parentId = t?.parent_tournament_id ? Number(t.parent_tournament_id) : null;
-  let cleanDesc = t?.description || '';
-
-  if (cleanDesc && cleanDesc.includes('[TIER:')) {
-    const match = cleanDesc.match(/\[TIER:(\d+)(?:\|PARENT:(\d+|null)?)?\]\s*(.*)/s);
-    if (match) {
-      if (!t?.tier) tier = Number(match[1]) || 1;
-      if (!t?.parent_tournament_id && match[2] && match[2] !== 'null') {
-        parentId = Number(match[2]);
-      }
-      cleanDesc = match[3] || '';
-    }
-  }
-
-  return { tier, parentId, cleanDescription: cleanDesc };
-}
-
-export function formatTournamentDescription(tier: number, parentId: number | null, userDesc: string): string {
-  const meta = `[TIER:${tier}|PARENT:${parentId || ''}]`;
-  const trimmed = (userDesc || '').trim();
-  return trimmed ? `${meta}\n${trimmed}` : meta;
-}
-
 export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) => {
   const { orgId, userRole, showToast } = useOrg();
   const { colors, isDark } = useTheme();
@@ -310,6 +285,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
   const [formDuration, setFormDuration] = useState<number>(90);
   const [formTier, setFormTier] = useState<number>(1);
   const [formParentTournamentId, setFormParentTournamentId] = useState<number | null>(null);
+  const [formColor, setFormColor] = useState<string>('#38BDF8');
   const [isDurationDropdownOpen, setIsDurationDropdownOpen] = useState(false);
   const [isParentTournDropdownOpen, setIsParentTournDropdownOpen] = useState(false);
   const [formStartDate, setFormStartDate] = useState('');
@@ -437,6 +413,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     setFormDuration(90);
     setFormTier(1);
     setFormParentTournamentId(null);
+    setFormColor('#38BDF8');
     setIsDurationDropdownOpen(false);
     setIsParentTournDropdownOpen(false);
     setFormStartDate('');
@@ -456,6 +433,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     setFormDuration(t.match_duration || 90);
     setFormTier(parsed.tier);
     setFormParentTournamentId(parsed.parentId);
+    setFormColor(parsed.color || '#38BDF8');
     setIsDurationDropdownOpen(false);
     setIsParentTournDropdownOpen(false);
     setFormStartDate(t.start_date || '');
@@ -540,7 +518,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
       if (isLocalDeviceUri(finalLogo)) finalLogo = '';
       if (isLocalDeviceUri(finalBg)) finalBg = '';
 
-      const descToSave = formatTournamentDescription(formTier, formTier === 2 ? formParentTournamentId : null, formDescription);
+      const descToSave = formatTournamentDescription(formTier, formTier === 2 ? formParentTournamentId : null, formDescription, formColor);
 
       const basePayload: any = {
         name: formName.trim(),
@@ -559,6 +537,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
         parent_tournament_id: formTier === 2 ? formParentTournamentId : null,
       };
 
+      let savedTournId = editingTournament?.id;
       if (editingTournament) {
         const { error } = await supabase
           .from('tournaments')
@@ -577,20 +556,36 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
 
         if (showToast) showToast({ message: "Turnir muvaffaqiyatli yangilandi ✓", type: 'success' });
       } else {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from('tournaments')
-          .insert([{ ...fullPayload, organization_id: orgId }]);
+          .insert([{ ...fullPayload, organization_id: orgId }])
+          .select();
 
         if (error && (error.code === '42703' || error.message?.includes('column'))) {
           const retry = await supabase
             .from('tournaments')
-            .insert([{ ...basePayload, organization_id: orgId }]);
+            .insert([{ ...basePayload, organization_id: orgId }])
+            .select();
           if (retry.error) throw retry.error;
+          if (retry.data?.[0]) savedTournId = retry.data[0].id;
         } else if (error) {
           throw error;
+        } else if (inserted?.[0]) {
+          savedTournId = inserted[0].id;
         }
 
         if (showToast) showToast({ message: "Turnir muvaffaqiyatli yaratildi ✓", type: 'success' });
+      }
+
+      if (savedTournId && formColor) {
+        try {
+          await supabase.from('sponsors').upsert({
+            tournament_id: savedTournId,
+            name: `TOURNAMENT_COLOR_${savedTournId}`,
+            logo_url: formColor,
+            website_url: formColor,
+          }, { onConflict: 'tournament_id,name' });
+        } catch (_) {}
       }
 
       setShowModal(false);
@@ -1020,6 +1015,12 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                     <Text style={s.badgeParentTournText} numberOfLines={1}>{parentTourn.name}</Text>
                   </View>
                 ) : null}
+                <View style={[s.badgeTournColor, { borderColor: `${parsedTier.color || '#38BDF8'}60` }]}>
+                  <View style={[s.colorDot, { backgroundColor: parsedTier.color || '#38BDF8' }]} />
+                  <Text style={[s.badgeTournColorText, { color: parsedTier.color || '#38BDF8' }]}>
+                    {parsedTier.color || '#38BDF8'}
+                  </Text>
+                </View>
                 {item.start_date ? (
                   <View style={s.badgeSeason}>
                     <Text style={s.badgeIcon}>{"📅"}</Text>
@@ -1363,6 +1364,65 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                   )}
                 </View>
               )}
+
+              {/* Turnir Rangi (Color Palette Picker) */}
+              <View style={{ marginTop: 12, marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={[s.fieldLabel, { color: colors.textSecondary, marginBottom: 0 }]}>Turnir rangi</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: formColor || '#38BDF8' }} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textPrimary, fontFamily: 'monospace' }}>
+                      {(formColor || '#38BDF8').toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                
+                {/* Preset Circles */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                  {DEFAULT_TOURNAMENT_COLORS.map((c) => {
+                    const isSelected = formColor?.toLowerCase() === c.hex.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={c.hex}
+                        onPress={() => setFormColor(c.hex)}
+                        activeOpacity={0.7}
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 16,
+                          backgroundColor: c.hex,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderWidth: isSelected ? 2.5 : 1,
+                          borderColor: isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.2)',
+                          transform: [{ scale: isSelected ? 1.15 : 1.0 }],
+                        }}
+                      >
+                        {isSelected && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Custom HEX Input */}
+                <TextInput
+                  style={[
+                    s.input,
+                    {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated,
+                      color: colors.textPrimary,
+                      borderColor: colors.border,
+                      paddingVertical: 8,
+                      fontSize: 13,
+                    }
+                  ]}
+                  value={formColor}
+                  onChangeText={(val) => setFormColor(val)}
+                  placeholder="#38BDF8"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="characters"
+                />
+              </View>
 
               {/* Match Duration & Status Row */}
               <View style={[s.rowFields, { alignItems: 'flex-start', marginTop: 8 }]}>
@@ -2436,5 +2496,25 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     maxWidth: 100,
+  },
+  badgeTournColor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  colorDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  badgeTournColorText: {
+    fontSize: 10,
+    fontWeight: '800',
+    fontFamily: 'monospace',
   },
 });

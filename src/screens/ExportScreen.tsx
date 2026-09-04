@@ -22,7 +22,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
-import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
+import { getStageDisplayTitle, getActiveOrgTournaments, parseTournamentTier } from '../utils/tournamentUtils';
 
 // Pleyoff (knockout) bosqichlari — guruh bosqichidan farqli, raqamli tur emas, bitta bosqich
 const KNOCKOUT_STAGES = ['round_of_32', 'round_of_16', 'quarterfinal', 'semifinal', 'final'];
@@ -1021,22 +1021,68 @@ export const ExportScreen: React.FC = () => {
       // 2. O'yinlar — bevosita tournament_id bo'yicha (server tomonida, scale-safe)
       const allTournamentMatches = matchesRes?.data || [];
 
-      // 3. Jamoalarni to'g'ridan-to'g'ri shu o'yinlar ishtirokchilaridan aniqlaymiz
-      const teamIdSet = new Set<any>();
-      allTournamentMatches.forEach((m: any) => {
-        if (m.home_team_id) teamIdSet.add(m.home_team_id);
-        if (m.away_team_id) teamIdSet.add(m.away_team_id);
-      });
-      const targetTeamIds = Array.from(teamIdSet);
+      // 3. Jamoalarni yuklaymiz:
+      // Turnirga biriktirilgan barcha ligalarni aniqlaymiz (jadvalda barcha 40 ta jamoa chiqishi uchun)
+      let tournLeagues: any[] = [];
+      if (tournamentId) {
+        const { data: tlData } = await dbClient
+          .from('tournament_leagues')
+          .select('*, league:league_id(*)')
+          .eq('tournament_id', tournamentId);
+        tournLeagues = (tlData || []).map((tl: any) => tl.league).filter(Boolean);
 
-      let targetTeams: any[] = [];
-      if (targetTeamIds.length > 0) {
-        const { data: teamsData } = await dbClient
+        // 2-darajali turnir bo'lsa va liga belgilanmagan bo'lsa, ota turnir ligalaridan olamiz
+        if (tournLeagues.length === 0 && tournamentObj?.description?.includes('PARENT:')) {
+          const pMatch = tournamentObj.description.match(/PARENT:(\d+)/);
+          if (pMatch?.[1]) {
+            const { data: parentLeaguesData } = await dbClient
+              .from('tournament_leagues')
+              .select('*, league:league_id(*)')
+              .eq('tournament_id', pMatch[1]);
+            tournLeagues = (parentLeaguesData || []).map((tl: any) => tl.league).filter(Boolean);
+          }
+        }
+      }
+
+      let allTournTeams: any[] = [];
+      if (tournLeagues.length > 0) {
+        const lIds = tournLeagues.map((l: any) => l.id);
+        const { data: lTeams } = await dbClient
           .from('teams')
           .select('*')
-          .in('id', targetTeamIds);
-        targetTeams = teamsData || [];
+          .in('league_id', lIds);
+        allTournTeams = lTeams || [];
       }
+
+      // O'yinlar ishtirokchilarini ham jamoalar ro'yxatiga qo'shamiz (hech qanday jamoa tushib qolmasligi uchun)
+      const matchTeamIdSet = new Set<any>();
+      allTournamentMatches.forEach((m: any) => {
+        if (m.home_team_id) matchTeamIdSet.add(m.home_team_id);
+        if (m.away_team_id) matchTeamIdSet.add(m.away_team_id);
+      });
+
+      const existingTeamIds = new Set(allTournTeams.map((t: any) => t.id));
+      const missingMatchTeamIds = Array.from(matchTeamIdSet).filter((id) => !existingTeamIds.has(id));
+      if (missingMatchTeamIds.length > 0) {
+        const { data: extraTeams } = await dbClient
+          .from('teams')
+          .select('*')
+          .in('id', missingMatchTeamIds);
+        if (extraTeams) {
+          allTournTeams = [...allTournTeams, ...extraTeams];
+        }
+      }
+
+      // Agar hali ligalar ham, o'yinlar ham topilmasa, tashkilotning barcha jamoalarini yuklaymiz
+      if (allTournTeams.length === 0 && orgId) {
+        const { data: orgTeams } = await dbClient
+          .from('teams')
+          .select('*')
+          .eq('organization_id', orgId);
+        allTournTeams = orgTeams || [];
+      }
+
+      const targetTeams = allTournTeams;
 
       // 4. Bosqichlar ro'yxati: guruh turlari (1..N) + mavjud pleyoff bosqichlari
       let maxGroupRound = 0;
@@ -1152,6 +1198,7 @@ export const ExportScreen: React.FC = () => {
       setMatches(enrichedMatches);
 
       // 6. Voqealar (gol/pas/kartochka) — team_id bo'yicha, pagination bilan (scale-safe)
+      const targetTeamIds = targetTeams.map((t: any) => t.id);
       let eventsData: any[] = [];
       if (targetTeamIds.length > 0) {
         let page = 0;
@@ -1677,6 +1724,8 @@ export const ExportScreen: React.FC = () => {
 
   const orgName = (orgData?.name || 'AMATORA').toUpperCase();
   const tournName = (selectedTournament?.name || 'TURNIR').toUpperCase();
+  const parsedTourn = parseTournamentTier(selectedTournament);
+  const tournColor = parsedTourn.color || '#38BDF8';
 
   // Theme check for graphics (matching Standings.jsx)
   const isCollab = isTournament ? (selectedTournament?.isCollab || !!collabInfo) : (selectedLeague?.isCollab || !!collabInfo);
@@ -2170,7 +2219,7 @@ export const ExportScreen: React.FC = () => {
                             gap: 14,
                           }}
                         >
-                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#94a3b8', letterSpacing: 3 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: tournColor, letterSpacing: 3 }}>
                             {`${orgName} ${tournName}`}
                           </Text>
                           <Text style={{ fontSize: 28, fontWeight: '900', color: '#ffffff', letterSpacing: 4 }}>
@@ -2227,7 +2276,7 @@ export const ExportScreen: React.FC = () => {
                               let borderBottomColor = 'rgba(255, 255, 255, 0.04)';
                               let borderBottomWidth = 1;
                               if (isZone1End && rank < teamCount) {
-                                borderBottomColor = '#22c55e';
+                                borderBottomColor = tournColor;
                                 borderBottomWidth = 2.5;
                               } else if (isZone2End && rank < teamCount) {
                                 borderBottomColor = '#ef4444';
@@ -2235,7 +2284,7 @@ export const ExportScreen: React.FC = () => {
                               }
 
                               let rowBg = idx % 2 === 0 ? 'rgba(255, 255, 255, 0.015)' : 'transparent';
-                              if (inZone1) rowBg = 'rgba(34, 197, 94, 0.04)';
+                              if (inZone1) rowBg = `${tournColor}14`;
                               else if (inZone2) rowBg = 'rgba(56, 189, 248, 0.03)';
 
                               return (
@@ -2257,7 +2306,7 @@ export const ExportScreen: React.FC = () => {
                                       textAlign: 'center',
                                       fontWeight: '900',
                                       fontSize: tFontSize,
-                                      color: inZone1 ? '#22c55e' : (inZone2 ? '#38bdf8' : '#cbd5e1'),
+                                      color: inZone1 ? tournColor : (inZone2 ? '#38bdf8' : '#cbd5e1'),
                                     }}
                                   >
                                     {rank}
@@ -2324,15 +2373,15 @@ export const ExportScreen: React.FC = () => {
                             flex: Math.min(zone1Limit, teamCount),
                             justifyContent: 'center',
                             alignItems: 'center',
-                            backgroundColor: 'rgba(34, 197, 94, 0.08)',
+                            backgroundColor: `${tournColor}18`,
                             borderBottomWidth: teamCount > zone1Limit ? 2 : 0,
-                            borderBottomColor: '#22c55e',
+                            borderBottomColor: tournColor,
                             position: 'relative',
                             overflow: 'hidden',
                           }}
                         >
                           <View style={{ width: 200, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 13, fontWeight: '900', color: '#22c55e', letterSpacing: 3 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '900', color: tournColor, letterSpacing: 3 }}>
                               {zone1Label}
                             </Text>
                           </View>
