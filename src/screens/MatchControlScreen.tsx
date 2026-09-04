@@ -827,6 +827,29 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       };
       setEvents((prev) => [...prev, optimisticEvent]);
 
+      // 1. Asosiy hisobni matches jadvalida yangilash
+      try {
+        const { error: updateErr } = await supabase.from('matches').update({
+          [isHome ? 'home_score' : 'away_score']: newScore,
+          updated_at: new Date().toISOString(),
+        }).eq('id', matchId);
+
+        if (updateErr) {
+          console.warn('adjustScore matches update error:', updateErr);
+          setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
+          setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
+          Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
+          return;
+        }
+      } catch (err) {
+        console.warn('adjustScore matches catch error:', err);
+        setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
+        setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
+        Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
+        return;
+      }
+
+      // 2. match_events ga muallifsiz jamoa goli sifatida saqlashga harakat qilish
       try {
         const { data: inserted, error: insertErr } = await supabase
           .from('match_events')
@@ -839,23 +862,15 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             minute: minVal,
           }])
           .select('*')
-          .single();
+          .maybeSingle();
 
-        if (insertErr) throw insertErr;
-
-        if (inserted?.id) {
+        if (insertErr) {
+          console.warn('adjustScore match_events insert warning (hisob matches jadvalida saqlandi):', insertErr);
+        } else if (inserted?.id) {
           setEvents((prev) => prev.map((e) => (e.id === optimisticId ? { ...optimisticEvent, id: inserted.id } : e)));
         }
-
-        await supabase.from('matches').update({
-          [isHome ? 'home_score' : 'away_score']: newScore,
-          updated_at: new Date().toISOString(),
-        }).eq('id', matchId);
       } catch (e) {
-        console.warn('adjustScore (jamoa goli) DB error:', e);
-        setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
-        setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
-        Alert.alert("Xatolik", "Jamoa golini saqlashda xatolik yuz berdi");
+        console.warn('adjustScore (jamoa goli) match_events error:', e);
       }
       return;
     }
