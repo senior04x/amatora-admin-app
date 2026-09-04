@@ -235,6 +235,42 @@ const tournSwipeStyles = StyleSheet.create({
   },
 });
 
+export const DURATION_PRESETS = [
+  { value: 20, label: "20 daqiqa (10x2)", tag: "Mini-futbol" },
+  { value: 30, label: "30 daqiqa (15x2)", tag: "Mini-futbol" },
+  { value: 40, label: "40 daqiqa (20x2)", tag: "Futzal / Mini" },
+  { value: 50, label: "50 daqiqa (25x2)", tag: "Havaskor" },
+  { value: 60, label: "60 daqiqa (30x2)", tag: "1 soatlik" },
+  { value: 70, label: "70 daqiqa (35x2)", tag: "O'rta format" },
+  { value: 80, label: "80 daqiqa (40x2)", tag: "O'rta format" },
+  { value: 90, label: "90 daqiqa (45x2)", tag: "Katta futbol (Standart)" },
+];
+
+export function parseTournamentTier(t: any): { tier: number; parentId: number | null; cleanDescription: string } {
+  let tier = t?.tier ? Number(t.tier) : 1;
+  let parentId = t?.parent_tournament_id ? Number(t.parent_tournament_id) : null;
+  let cleanDesc = t?.description || '';
+
+  if (cleanDesc && cleanDesc.includes('[TIER:')) {
+    const match = cleanDesc.match(/\[TIER:(\d+)(?:\|PARENT:(\d+|null)?)?\]\s*(.*)/s);
+    if (match) {
+      if (!t?.tier) tier = Number(match[1]) || 1;
+      if (!t?.parent_tournament_id && match[2] && match[2] !== 'null') {
+        parentId = Number(match[2]);
+      }
+      cleanDesc = match[3] || '';
+    }
+  }
+
+  return { tier, parentId, cleanDescription: cleanDesc };
+}
+
+export function formatTournamentDescription(tier: number, parentId: number | null, userDesc: string): string {
+  const meta = `[TIER:${tier}|PARENT:${parentId || ''}]`;
+  const trimmed = (userDesc || '').trim();
+  return trimmed ? `${meta}\n${trimmed}` : meta;
+}
+
 export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) => {
   const { orgId, userRole, showToast } = useOrg();
   const { colors, isDark } = useTheme();
@@ -259,6 +295,10 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
   const [formLogo, setFormLogo] = useState('');
   const [formBgImage, setFormBgImage] = useState('');
   const [formDuration, setFormDuration] = useState<number>(90);
+  const [formTier, setFormTier] = useState<number>(1);
+  const [formParentTournamentId, setFormParentTournamentId] = useState<number | null>(null);
+  const [isDurationDropdownOpen, setIsDurationDropdownOpen] = useState(false);
+  const [isParentTournDropdownOpen, setIsParentTournDropdownOpen] = useState(false);
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -382,6 +422,10 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     setFormLogo('');
     setFormBgImage('');
     setFormDuration(90);
+    setFormTier(1);
+    setFormParentTournamentId(null);
+    setIsDurationDropdownOpen(false);
+    setIsParentTournDropdownOpen(false);
     setFormStartDate('');
     setFormEndDate('');
     setFormDescription('');
@@ -391,14 +435,19 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
 
   const handleOpenEditModal = (t: any) => {
     if (isReadOnlyUser) return;
+    const parsed = parseTournamentTier(t);
     setEditingTournament(t);
     setFormName(t.name || '');
     setFormLogo(t.logo_url || '');
     setFormBgImage(t.export_bg_url || '');
     setFormDuration(t.match_duration || 90);
+    setFormTier(parsed.tier);
+    setFormParentTournamentId(parsed.parentId);
+    setIsDurationDropdownOpen(false);
+    setIsParentTournDropdownOpen(false);
     setFormStartDate(t.start_date || '');
     setFormEndDate(t.end_date || '');
-    setFormDescription(t.description || '');
+    setFormDescription(parsed.cleanDescription);
     setFormStatus(t.status || 'active');
     setShowModal(true);
   };
@@ -458,30 +507,57 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
         if (uploaded) finalBg = uploaded;
       }
 
-      const payload = {
+      const descToSave = formatTournamentDescription(formTier, formTier === 2 ? formParentTournamentId : null, formDescription);
+
+      const basePayload: any = {
         name: formName.trim(),
         logo_url: finalLogo.trim() || null,
         export_bg_url: finalBg.trim() || null,
         start_date: formStartDate.trim() || null,
         end_date: formEndDate.trim() || null,
-        description: formDescription.trim() || null,
+        description: descToSave || null,
         match_duration: Number(formDuration) || 90,
         status: formStatus,
+      };
+
+      const fullPayload: any = {
+        ...basePayload,
+        tier: Number(formTier) || 1,
+        parent_tournament_id: formTier === 2 ? formParentTournamentId : null,
       };
 
       if (editingTournament) {
         const { error } = await supabase
           .from('tournaments')
-          .update(payload)
+          .update(fullPayload)
           .eq('id', editingTournament.id);
-        if (error) throw error;
-        if (showToast) showToast({ message: 'Turnir muvaffaqiyatli yangilandi ✓', type: 'success' });
+
+        if (error && (error.code === '42703' || error.message?.includes('column'))) {
+          const retry = await supabase
+            .from('tournaments')
+            .update(basePayload)
+            .eq('id', editingTournament.id);
+          if (retry.error) throw retry.error;
+        } else if (error) {
+          throw error;
+        }
+
+        if (showToast) showToast({ message: "Turnir muvaffaqiyatli yangilandi ✓", type: 'success' });
       } else {
         const { error } = await supabase
           .from('tournaments')
-          .insert([{ ...payload, organization_id: orgId }]);
-        if (error) throw error;
-        if (showToast) showToast({ message: 'Turnir muvaffaqiyatli yaratildi ✓', type: 'success' });
+          .insert([{ ...fullPayload, organization_id: orgId }]);
+
+        if (error && (error.code === '42703' || error.message?.includes('column'))) {
+          const retry = await supabase
+            .from('tournaments')
+            .insert([{ ...basePayload, organization_id: orgId }]);
+          if (retry.error) throw retry.error;
+        } else if (error) {
+          throw error;
+        }
+
+        if (showToast) showToast({ message: "Turnir muvaffaqiyatli yaratildi ✓", type: 'success' });
       }
 
       setShowModal(false);
@@ -795,6 +871,10 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     const halfTime = Math.round(duration / 2);
     const isCollab = item.isCollab;
     const isActive = item.status !== 'archived' && item.status !== 'completed';
+    const parsedTier = parseTournamentTier(item);
+    const parentTourn = parsedTier.parentId
+      ? tournaments.find((t: any) => Number(t.id) === Number(parsedTier.parentId))
+      : null;
 
     return (
       <View style={[s.card, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
@@ -872,6 +952,21 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
               <Text style={s.cardTitle} numberOfLines={2}>{item.name}</Text>
 
               <View style={s.badgesRow}>
+                {parsedTier.tier === 1 ? (
+                  <View style={s.badgeTier1}>
+                    <Text style={s.badgeTier1Text}>{"🏆 1-DARAJALI"}</Text>
+                  </View>
+                ) : (
+                  <View style={s.badgeTier2}>
+                    <Text style={s.badgeTier2Text}>{"🥈 2-DARAJALI"}</Text>
+                  </View>
+                )}
+                {parsedTier.tier === 2 && parentTourn ? (
+                  <View style={s.badgeParentTourn}>
+                    <Ionicons name="link-outline" size={10} color="#C084FC" />
+                    <Text style={s.badgeParentTournText} numberOfLines={1}>{parentTourn.name}</Text>
+                  </View>
+                ) : null}
                 {item.start_date ? (
                   <View style={s.badgeSeason}>
                     <Text style={s.badgeIcon}>{"📅"}</Text>
@@ -1031,105 +1126,350 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
       )}
 
       {/* Create / Edit Tournament Modal */}
-      <Modal visible={showModal} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={s.modalContent}>
-            <View style={s.modalHeader}>
-              <Text style={s.modalTitle}>
-                {editingTournament ? "Turnirni tahrirlash" : "Yangi turnir yaratish"}
-              </Text>
+      <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
+        <View style={[s.modalOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.5)' }]}>
+          <View style={[s.modalContent, { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: isDark ? 1 : 0 }]}>
+            {/* Modal Header */}
+            <View style={[s.modalHeader, { borderBottomColor: colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="trophy-outline" size={20} color="#00FF66" />
+                <Text style={[s.modalTitle, { color: colors.textPrimary }]}>
+                  {editingTournament ? "Turnirni tahrirlash" : "Yangi turnir yaratish"}
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setShowModal(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Ionicons name="close" size={22} color="#FFFFFF" />
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
-              <Text style={s.fieldLabel}>Turnir nomi *</Text>
+              {/* Turnir Nomi */}
+              <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Turnir nomi *</Text>
               <TextInput
-                style={s.input}
+                style={[s.input, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                 value={formName}
                 onChangeText={setFormName}
                 placeholder="Masalan: Chempionlar Kubogi 2026"
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'}
               />
 
-              <View style={s.rowFields}>
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={s.fieldLabel}>O'yin davomiyligi (daq)</Text>
-                  <TextInput
-                    style={s.input}
-                    value={String(formDuration)}
-                    onChangeText={(val) => setFormDuration(Number(val) || 90)}
-                    keyboardType="numeric"
-                    placeholder="90"
-                    placeholderTextColor="rgba(255,255,255,0.3)"
-                  />
+              {/* Turnir Darajasi (Tier Selection: 1-darajali vs 2-darajali) */}
+              <Text style={[s.fieldLabel, { color: colors.textSecondary, marginTop: 4 }]}>Turnir darajasi *</Text>
+              <View style={s.tierSelectorRow}>
+                <TouchableOpacity
+                  style={[
+                    s.tierCardBtn,
+                    { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.bgCardElevated, borderColor: colors.border },
+                    formTier === 1 && s.tierCardBtnActive1,
+                  ]}
+                  onPress={() => {
+                    setFormTier(1);
+                    setFormParentTournamentId(null);
+                    setIsParentTournDropdownOpen(false);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 16 }}>🏆</Text>
+                    <Text style={[s.tierCardTitle, { color: colors.textPrimary }, formTier === 1 && { color: '#00FF66', fontWeight: '800' }]}>
+                      1-Darajali
+                    </Text>
+                  </View>
+                  <Text style={[s.tierCardSub, { color: colors.textMuted }]}>Asosiy (Chempionlar Ligasi)</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    s.tierCardBtn,
+                    { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : colors.bgCardElevated, borderColor: colors.border },
+                    formTier === 2 && s.tierCardBtnActive2,
+                  ]}
+                  onPress={() => {
+                    setFormTier(2);
+                    if (!formParentTournamentId) {
+                      const firstT1 = tournaments.find((t: any) => {
+                        if (editingTournament && t.id === editingTournament.id) return false;
+                        const p = parseTournamentTier(t);
+                        return p.tier === 1;
+                      });
+                      if (firstT1) setFormParentTournamentId(firstT1.id);
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 16 }}>🥈</Text>
+                    <Text style={[s.tierCardTitle, { color: colors.textPrimary }, formTier === 2 && { color: '#C084FC', fontWeight: '800' }]}>
+                      2-Darajali
+                    </Text>
+                  </View>
+                  <Text style={[s.tierCardSub, { color: colors.textMuted }]}>Quyi (Europa Ligasi)</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* If 2-Darajali: Parent 1-Darajali Tournament Selection */}
+              {formTier === 2 && (
+                <View style={[s.parentTournBox, { backgroundColor: isDark ? 'rgba(192, 132, 252, 0.08)' : 'rgba(192, 132, 252, 0.12)', borderColor: 'rgba(192, 132, 252, 0.3)' }]}>
+                  <Text style={[s.fieldLabel, { color: isDark ? '#E9D5FF' : '#7E22CE', marginBottom: 4 }]}>
+                    Bog'langan 1-darajali (asosiy) turnir *
+                  </Text>
+                  <Text style={[s.helperText, { color: colors.textMuted, marginBottom: 8 }]}>
+                    Ushbu 2-darajali turnirga tanlangan asosiy turnirning 1/4 finaliga o'tolmagan jamoalari biriktiriladi.
+                  </Text>
+
+                  {/* Dropdown toggle button */}
+                  <TouchableOpacity
+                    style={[
+                      s.dropdownHeaderBtn,
+                      { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : colors.bgCard, borderColor: 'rgba(192, 132, 252, 0.4)' }
+                    ]}
+                    onPress={() => setIsParentTournDropdownOpen(!isParentTournDropdownOpen)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      {(() => {
+                        const sel = tournaments.find((t: any) => Number(t.id) === Number(formParentTournamentId));
+                        if (sel) {
+                          return (
+                            <>
+                              {sel.logo_url ? (
+                                <Image source={{ uri: sel.logo_url }} style={{ width: 22, height: 22, borderRadius: 11 }} resizeMode="contain" />
+                              ) : (
+                                <Ionicons name="trophy-outline" size={16} color="#C084FC" />
+                              )}
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }} numberOfLines={1}>
+                                {sel.name}
+                              </Text>
+                            </>
+                          );
+                        }
+                        return (
+                          <Text style={{ fontSize: 13, color: colors.textMuted }}>
+                            1-darajali turnirni tanlang...
+                          </Text>
+                        );
+                      })()}
+                    </View>
+                    <Ionicons
+                      name={isParentTournDropdownOpen ? "chevron-up" : "chevron-down"}
+                      size={18}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Dropdown Options List */}
+                  {isParentTournDropdownOpen && (
+                    <View style={[s.dropdownOptionsBox, { backgroundColor: isDark ? '#131D31' : colors.bgCard, borderColor: colors.border }]}>
+                      {tournaments
+                        .filter((t: any) => {
+                          if (editingTournament && t.id === editingTournament.id) return false;
+                          const p = parseTournamentTier(t);
+                          return p.tier === 1;
+                        })
+                        .map((t1: any) => {
+                          const isChosen = Number(t1.id) === Number(formParentTournamentId);
+                          return (
+                            <TouchableOpacity
+                              key={t1.id}
+                              style={[
+                                s.dropdownOptionItem,
+                                { borderBottomColor: colors.border },
+                                isChosen && { backgroundColor: isDark ? 'rgba(192, 132, 252, 0.15)' : 'rgba(192, 132, 252, 0.1)' }
+                              ]}
+                              onPress={() => {
+                                setFormParentTournamentId(t1.id);
+                                setIsParentTournDropdownOpen(false);
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                {t1.logo_url ? (
+                                  <Image source={{ uri: t1.logo_url }} style={{ width: 20, height: 20, borderRadius: 10 }} resizeMode="contain" />
+                                ) : (
+                                  <Ionicons name="trophy-outline" size={16} color="#FBBF24" />
+                                )}
+                                <Text style={[{ fontSize: 13, color: colors.textPrimary }, isChosen && { color: '#C084FC', fontWeight: '800' }]} numberOfLines={1}>
+                                  {t1.name}
+                                </Text>
+                              </View>
+                              {isChosen && <Ionicons name="checkmark-circle" size={18} color="#C084FC" />}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      {tournaments.filter((t: any) => {
+                        if (editingTournament && t.id === editingTournament.id) return false;
+                        const p = parseTournamentTier(t);
+                        return p.tier === 1;
+                      }).length === 0 && (
+                        <View style={{ padding: 12 }}>
+                          <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: 'center' }}>
+                            Mavjud 1-darajali turnirlar topilmadi. Avval asosiy turnir yarating.
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
+              )}
+
+              {/* Match Duration & Status Row */}
+              <View style={[s.rowFields, { alignItems: 'flex-start', marginTop: 8 }]}>
+                {/* O'yin Davomiyligi (Ochilib-yopiladigan Select) */}
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>O'yin davomiyligi</Text>
+                  
+                  {/* Duration Trigger Button */}
+                  <TouchableOpacity
+                    style={[
+                      s.durationSelectBtn,
+                      { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border },
+                      isDurationDropdownOpen && { borderColor: '#00FF66' }
+                    ]}
+                    onPress={() => setIsDurationDropdownOpen(!isDurationDropdownOpen)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="time-outline" size={16} color="#00FF66" />
+                      <Text style={[s.durationSelectBtnText, { color: colors.textPrimary }]}>
+                        {`${formDuration} daq`}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={isDurationDropdownOpen ? "chevron-up" : "chevron-down"}
+                      size={16}
+                      color={colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Status Toggle (Faol / Arxiv) */}
                 <View style={{ flex: 1, marginLeft: 8 }}>
-                  <Text style={s.fieldLabel}>Holat</Text>
-                  <View style={s.statusToggleRow}>
+                  <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Holat</Text>
+                  <View style={[s.statusToggleRow, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, borderWidth: 1 }]}>
                     <TouchableOpacity
                       style={[s.statusToggleBtn, formStatus === 'active' && s.statusToggleBtnActive]}
                       onPress={() => setFormStatus('active')}
                     >
-                      <Text style={[s.statusToggleText, formStatus === 'active' && s.statusToggleTextActive]}>Faol</Text>
+                      <Text style={[s.statusToggleText, { color: colors.textSecondary }, formStatus === 'active' && s.statusToggleTextActive]}>Faol</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[s.statusToggleBtn, formStatus === 'archived' && s.statusToggleBtnArchived]}
                       onPress={() => setFormStatus('archived')}
                     >
-                      <Text style={[s.statusToggleText, formStatus === 'archived' && s.statusToggleTextActive]}>Arxiv</Text>
+                      <Text style={[s.statusToggleText, { color: colors.textSecondary }, formStatus === 'archived' && s.statusToggleTextActive]}>Arxiv</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               </View>
 
-              <View style={s.rowFields}>
+              {/* Collapsible Duration Dropdown Options Box */}
+              {isDurationDropdownOpen && (
+                <View style={[s.durationDropdownPanel, { backgroundColor: isDark ? '#111927' : colors.bgCard, borderColor: colors.border }]}>
+                  <Text style={[s.helperText, { color: colors.textMuted, marginBottom: 8 }]}>
+                    Standart futbol davomiyligini tanlang:
+                  </Text>
+                  <View style={s.durationChipsGrid}>
+                    {DURATION_PRESETS.map((preset) => {
+                      const isSelected = formDuration === preset.value;
+                      return (
+                        <TouchableOpacity
+                          key={preset.value}
+                          style={[
+                            s.durationChip,
+                            { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.bgCardElevated, borderColor: colors.border },
+                            isSelected && s.durationChipActive,
+                          ]}
+                          onPress={() => {
+                            setFormDuration(preset.value);
+                            setIsDurationDropdownOpen(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[s.durationChipTitle, { color: colors.textPrimary }, isSelected && s.durationChipTitleActive]}>
+                            {`${preset.value} daq`}
+                          </Text>
+                          <Text style={[s.durationChipTag, { color: colors.textMuted }, isSelected && { color: '#00FF66' }]}>
+                            {preset.tag}
+                          </Text>
+                          {isSelected && (
+                            <View style={s.durationChipCheck}>
+                              <Ionicons name="checkmark" size={10} color="#000000" />
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {/* Manual input row */}
+                  <View style={[s.customDurationRow, { borderTopColor: colors.border }]}>
+                    <Text style={{ fontSize: 12, color: colors.textSecondary }}>Boshqa daqiqa:</Text>
+                    <TextInput
+                      style={[s.customDurationInput, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
+                      value={String(formDuration)}
+                      onChangeText={(val) => setFormDuration(Number(val) || 90)}
+                      keyboardType="numeric"
+                      placeholder="90"
+                      placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'}
+                    />
+                    <Text style={{ fontSize: 12, color: colors.textSecondary }}>daqiqa</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Sanalar (Boshlanish va Tugash sanasi) */}
+              <View style={[s.rowFields, { marginTop: 6 }]}>
                 <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={s.fieldLabel}>Boshlanish sanasi</Text>
+                  <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Boshlanish sanasi</Text>
                   <TextInput
-                    style={s.input}
+                    style={[s.input, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                     value={formStartDate}
                     onChangeText={setFormStartDate}
                     placeholder="YYYY-MM-DD"
-                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'}
                   />
                 </View>
                 <View style={{ flex: 1, marginLeft: 8 }}>
-                  <Text style={s.fieldLabel}>Tugash sanasi</Text>
+                  <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Tugash sanasi</Text>
                   <TextInput
-                    style={s.input}
+                    style={[s.input, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                     value={formEndDate}
                     onChangeText={setFormEndDate}
                     placeholder="YYYY-MM-DD"
-                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'}
                   />
                 </View>
               </View>
 
-              <Text style={s.fieldLabel}>Tavsif</Text>
+              {/* Tavsif */}
+              <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Tavsif</Text>
               <TextInput
-                style={[s.input, s.textArea]}
+                style={[s.input, s.textArea, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                 value={formDescription}
                 onChangeText={setFormDescription}
                 placeholder="Turnir haqida qisqacha ma'lumot..."
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'}
                 multiline
                 numberOfLines={3}
               />
 
               {/* Logo & Background Pickers */}
               <View style={s.imagePickersRow}>
-                <TouchableOpacity style={s.imagePickerBtn} onPress={handlePickLogo}>
+                <TouchableOpacity
+                  style={[s.imagePickerBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border }]}
+                  onPress={handlePickLogo}
+                >
                   <Ionicons name="image-outline" size={20} color="#38BDF8" />
-                  <Text style={s.imagePickerText} numberOfLines={1}>
+                  <Text style={[s.imagePickerText, { color: colors.textPrimary }]} numberOfLines={1}>
                     {formLogo ? 'Logo tanlandi ✓' : 'Logo yuklash'}
                   </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={s.imagePickerBtn} onPress={handlePickBgImage}>
+                <TouchableOpacity
+                  style={[s.imagePickerBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border }]}
+                  onPress={handlePickBgImage}
+                >
                   <Ionicons name="color-palette-outline" size={20} color="#F472B6" />
-                  <Text style={s.imagePickerText} numberOfLines={1}>
+                  <Text style={[s.imagePickerText, { color: colors.textPrimary }]} numberOfLines={1}>
                     {formBgImage ? 'Fon tanlandi ✓' : 'Fon rasmi'}
                   </Text>
                 </TouchableOpacity>
@@ -1156,21 +1496,21 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
       </Modal>
 
       {/* Attach Leagues Modal */}
-      <Modal visible={showLeaguesModal} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={s.modalContent}>
-            <View style={s.modalHeader}>
+      <Modal visible={showLeaguesModal} transparent animationType="slide" onRequestClose={() => setShowLeaguesModal(false)}>
+        <View style={[s.modalOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.5)' }]}>
+          <View style={[s.modalContent, { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: isDark ? 1 : 0 }]}>
+            <View style={[s.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
-                <Text style={s.modalTitle}>Ligalarni biriktirish</Text>
+                <Text style={[s.modalTitle, { color: colors.textPrimary }]}>Ligalarni biriktirish</Text>
                 <Text style={s.modalSubtitle}>{selectedTournForLeagues?.name}</Text>
               </View>
               <TouchableOpacity onPress={() => setShowLeaguesModal(false)}>
-                <Ionicons name="close" size={22} color="#FFFFFF" />
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
-              <Text style={[s.fieldLabel, { marginBottom: 12 }]}>
+              <Text style={[s.fieldLabel, { color: colors.textSecondary, marginBottom: 12 }]}>
                 Ushbu turnirda qatnashadigan ligalarni tanlang:
               </Text>
               {allLeagues.map((league: any) => {
@@ -1178,7 +1518,11 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                 return (
                   <TouchableOpacity
                     key={league.id}
-                    style={[s.leagueSelectItem, isSelected && s.leagueSelectItemActive]}
+                    style={[
+                      s.leagueSelectItem,
+                      { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.bgCardElevated, borderColor: colors.border },
+                      isSelected && s.leagueSelectItemActive
+                    ]}
                     onPress={() => toggleLeagueId(Number(league.id))}
                     activeOpacity={0.7}
                   >
@@ -1188,14 +1532,14 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                       ) : (
                         <Ionicons name="trophy-outline" size={18} color="#FBBF24" style={{ marginRight: 10 }} />
                       )}
-                      <Text style={[s.selectLeagueName, isSelected && s.selectLeagueNameActive]}>
+                      <Text style={[s.selectLeagueName, { color: colors.textPrimary }, isSelected && s.selectLeagueNameActive]}>
                         {league.name}
                       </Text>
                     </View>
                     <Ionicons
                       name={isSelected ? "checkbox" : "square-outline"}
                       size={22}
-                      color={isSelected ? "#00FF66" : "rgba(255,255,255,0.4)"}
+                      color={isSelected ? "#00FF66" : colors.textMuted}
                     />
                   </TouchableOpacity>
                 );
@@ -1220,27 +1564,27 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
       </Modal>
 
       {/* Co-host Modal */}
-      <Modal visible={showCollabModal} transparent animationType="slide">
-        <View style={s.modalOverlay}>
-          <View style={s.modalContent}>
-            <View style={s.modalHeader}>
+      <Modal visible={showCollabModal} transparent animationType="slide" onRequestClose={() => setShowCollabModal(false)}>
+        <View style={[s.modalOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.5)' }]}>
+          <View style={[s.modalContent, { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: isDark ? 1 : 0 }]}>
+            <View style={[s.modalHeader, { borderBottomColor: colors.border }]}>
               <View>
-                <Text style={s.modalTitle}>Turnirda sherikchilik (Co-host)</Text>
+                <Text style={[s.modalTitle, { color: colors.textPrimary }]}>Turnirda sherikchilik (Co-host)</Text>
                 <Text style={s.modalSubtitle}>{selectedTournForCollab?.name}</Text>
               </View>
               <TouchableOpacity onPress={() => setShowCollabModal(false)}>
-                <Ionicons name="close" size={22} color="#FFFFFF" />
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
-              <Text style={s.fieldLabel}>Sherik tashkilot admin email manzili</Text>
+              <Text style={[s.fieldLabel, { color: colors.textSecondary }]}>Sherik tashkilot admin email manzili</Text>
               <TextInput
-                style={s.input}
+                style={[s.input, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                 value={targetOrgEmail}
                 onChangeText={setTargetOrgEmail}
                 placeholder="admin@sherik-tashkilot.uz"
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor={isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.35)'}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
@@ -1257,7 +1601,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                 )}
               </TouchableOpacity>
 
-              <Text style={[s.fieldLabel, { marginTop: 24, marginBottom: 8 }]}>
+              <Text style={[s.fieldLabel, { color: colors.textSecondary, marginTop: 24, marginBottom: 8 }]}>
                 Mavjud hamkorlar
               </Text>
               {tournCollabsList
@@ -1266,8 +1610,8 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                   const partner =
                     Number(c.sender_org_id) === Number(orgId) ? c.receiver_org : c.sender_org;
                   return (
-                    <View key={c.id} style={s.cohostItem}>
-                      <Text style={s.cohostName}>{partner?.name || 'Tashkilot'}</Text>
+                    <View key={c.id} style={[s.cohostItem, { borderBottomColor: colors.border }]}>
+                      <Text style={[s.cohostName, { color: colors.textPrimary }]}>{partner?.name || 'Tashkilot'}</Text>
                       <View
                         style={[
                           s.cohostStatusBadge,
@@ -1859,5 +2203,185 @@ const s = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  tierSelectorRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  tierCardBtn: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  tierCardBtnActive1: {
+    borderColor: '#00FF66',
+    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+  },
+  tierCardBtnActive2: {
+    borderColor: '#C084FC',
+    backgroundColor: 'rgba(192, 132, 252, 0.12)',
+  },
+  tierCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  tierCardSub: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  parentTournBox: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  helperText: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  dropdownHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  dropdownOptionsBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  dropdownOptionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  durationSelectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  durationSelectBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  durationDropdownPanel: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  durationChipsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  durationChip: {
+    width: '48%',
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    position: 'relative',
+  },
+  durationChipActive: {
+    borderColor: '#00FF66',
+    backgroundColor: 'rgba(0, 255, 102, 0.1)',
+  },
+  durationChipTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  durationChipTitleActive: {
+    color: '#00FF66',
+    fontWeight: '800',
+  },
+  durationChipTag: {
+    fontSize: 10,
+    marginTop: 2,
+  },
+  durationChipCheck: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#00FF66',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customDurationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
+  customDurationInput: {
+    width: 55,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  badgeTier1: {
+    backgroundColor: 'rgba(0, 255, 102, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 102, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  badgeTier1Text: {
+    color: '#00FF66',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  badgeTier2: {
+    backgroundColor: 'rgba(192, 132, 252, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(192, 132, 252, 0.35)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  badgeTier2Text: {
+    color: '#C084FC',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  badgeParentTourn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(192, 132, 252, 0.25)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  badgeParentTournText: {
+    color: '#E9D5FF',
+    fontSize: 10,
+    fontWeight: '700',
+    maxWidth: 100,
   },
 });
