@@ -24,6 +24,7 @@ import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { BlurView } from '../components/SafeBlurView';
+import { ColorPicker } from '@darthrapid/react-native-color-picker';
 import { getTournamentTeams, parseTournamentTier, formatTournamentDescription, DEFAULT_TOURNAMENT_COLORS } from '../utils/tournamentUtils';
 
 const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
@@ -1365,63 +1366,32 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
                 </View>
               )}
 
-              {/* Turnir Rangi (Color Palette Picker) */}
-              <View style={{ marginTop: 12, marginBottom: 6 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={[s.fieldLabel, { color: colors.textSecondary, marginBottom: 0 }]}>Turnir rangi</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: formColor || '#38BDF8' }} />
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textPrimary, fontFamily: 'monospace' }}>
-                      {(formColor || '#38BDF8').toUpperCase()}
-                    </Text>
-                  </View>
+              {/* Turnir Rangi (ColorPicker matching AccountScreen 1-to-1) */}
+              <View style={{ marginTop: 12, marginBottom: 4 }}>
+                <Text style={[s.fieldLabel, { color: colors.textSecondary, marginBottom: 8 }]}>Turnir rangi *</Text>
+                <View style={s.colorEditRow}>
+                  <ColorPicker
+                    value={formColor || '#38BDF8'}
+                    onChange={(color: string) => setFormColor(color)}
+                    tabs={['picker', 'palettes']}
+                  />
+                  <TextInput
+                    style={[
+                      s.colorHexInput,
+                      {
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated,
+                        borderColor: colors.border,
+                        color: colors.textPrimary,
+                      }
+                    ]}
+                    value={formColor}
+                    onChangeText={(val) => setFormColor(val)}
+                    placeholder="#HEX"
+                    placeholderTextColor={colors.textMuted}
+                    autoCapitalize="characters"
+                    maxLength={7}
+                  />
                 </View>
-                
-                {/* Preset Circles */}
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-                  {DEFAULT_TOURNAMENT_COLORS.map((c) => {
-                    const isSelected = formColor?.toLowerCase() === c.hex.toLowerCase();
-                    return (
-                      <TouchableOpacity
-                        key={c.hex}
-                        onPress={() => setFormColor(c.hex)}
-                        activeOpacity={0.7}
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 16,
-                          backgroundColor: c.hex,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderWidth: isSelected ? 2.5 : 1,
-                          borderColor: isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.2)',
-                          transform: [{ scale: isSelected ? 1.15 : 1.0 }],
-                        }}
-                      >
-                        {isSelected && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {/* Custom HEX Input */}
-                <TextInput
-                  style={[
-                    s.input,
-                    {
-                      backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : colors.bgCardElevated,
-                      color: colors.textPrimary,
-                      borderColor: colors.border,
-                      paddingVertical: 8,
-                      fontSize: 13,
-                    }
-                  ]}
-                  value={formColor}
-                  onChangeText={(val) => setFormColor(val)}
-                  placeholder="#38BDF8"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="characters"
-                />
               </View>
 
               {/* Match Duration & Status Row */}
@@ -2516,5 +2486,20 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     fontFamily: 'monospace',
+  },
+  colorEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  colorHexInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'monospace',
+    height: 38,
   },
 });
