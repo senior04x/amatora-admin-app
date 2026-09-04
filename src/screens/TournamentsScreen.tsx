@@ -84,6 +84,18 @@ const uriToArrayBuffer = async (uri: string): Promise<ArrayBuffer> => {
   }
 };
 
+const isLocalDeviceUri = (uri?: string | null): boolean => {
+  if (!uri || typeof uri !== 'string') return false;
+  const lower = uri.toLowerCase();
+  return (
+    lower.startsWith('file:') ||
+    lower.startsWith('content:') ||
+    lower.startsWith('ph:') ||
+    lower.startsWith('assets-library:') ||
+    lower.startsWith('blob:')
+  );
+};
+
 const uploadFileToSupabase = async (
   bucket: string,
   filePath: string,
@@ -91,8 +103,9 @@ const uploadFileToSupabase = async (
   mimeType: string
 ): Promise<string | null> => {
   try {
-    if (!localUri || (!localUri.startsWith('file:') && !localUri.startsWith('content:') && !localUri.startsWith('ph:'))) {
-      return localUri;
+    if (!localUri) return null;
+    if (!isLocalDeviceUri(localUri)) {
+      return localUri.startsWith('http://') || localUri.startsWith('https://') ? localUri : null;
     }
 
     const arrayBuffer = await uriToArrayBuffer(localUri);
@@ -492,20 +505,40 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
 
     try {
       let finalLogo = formLogo;
-      if (formLogo && (formLogo.startsWith('file:') || formLogo.startsWith('content:'))) {
-        const fileExt = formLogo.split('.').pop() || 'png';
+      if (isLocalDeviceUri(formLogo)) {
+        const cleanUri = formLogo.split('?')[0];
+        const rawExt = cleanUri.split('.').pop()?.toLowerCase() || 'png';
+        const fileExt = (rawExt === 'heic' || rawExt === 'heif') ? 'png' : rawExt;
         const fileName = `tourn_logo_${Date.now()}.${fileExt}`;
-        const uploaded = await uploadFileToSupabase('player-photos', `tournaments/${fileName}`, formLogo, 'image/png');
-        if (uploaded) finalLogo = uploaded;
+        const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
+        const uploaded = await uploadFileToSupabase('player-photos', `tournaments/${fileName}`, formLogo, mimeType);
+        if (!uploaded) {
+          Alert.alert('Xatolik', "Turnir logotipini serverga yuklab bo'lmadi. Iltimos internet aloqasini tekshiring va qaytadan urinib ko'ring.");
+          setSavingTournament(false);
+          return;
+        }
+        finalLogo = uploaded;
       }
 
       let finalBg = formBgImage;
-      if (formBgImage && (formBgImage.startsWith('file:') || formBgImage.startsWith('content:'))) {
-        const fileExt = formBgImage.split('.').pop() || 'jpg';
+      if (isLocalDeviceUri(formBgImage)) {
+        const cleanUri = formBgImage.split('?')[0];
+        const rawExt = cleanUri.split('.').pop()?.toLowerCase() || 'jpg';
+        const fileExt = (rawExt === 'heic' || rawExt === 'heif') ? 'jpg' : rawExt;
         const fileName = `tourn_bg_${Date.now()}.${fileExt}`;
-        const uploaded = await uploadFileToSupabase('player-photos', `tournaments/${fileName}`, formBgImage, 'image/jpeg');
-        if (uploaded) finalBg = uploaded;
+        const mimeType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
+        const uploaded = await uploadFileToSupabase('player-photos', `tournaments/${fileName}`, formBgImage, mimeType);
+        if (!uploaded) {
+          Alert.alert('Xatolik', "Turnir fon rasmini serverga yuklab bo'lmadi. Iltimos internet aloqasini tekshiring va qaytadan urinib ko'ring.");
+          setSavingTournament(false);
+          return;
+        }
+        finalBg = uploaded;
       }
+
+      // Xavfsizlik: Hech qachon lokal qurilma URI-sini bazaga yozmaymiz!
+      if (isLocalDeviceUri(finalLogo)) finalLogo = '';
+      if (isLocalDeviceUri(finalBg)) finalBg = '';
 
       const descToSave = formatTournamentDescription(formTier, formTier === 2 ? formParentTournamentId : null, formDescription);
 
@@ -743,6 +776,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
 
         if (!result.canceled && result.assets[0]) {
           const uri = result.assets[0].uri;
+          const prevLogo = tourn.logo_url;
           setUploadingLogoTournId(tourn.id);
           setTournaments((prev: any[]) =>
             prev.map((t: any) => (t.id === tourn.id ? { ...t, logo_url: uri } : t))
@@ -759,11 +793,20 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
           const publicUrl = await uploadFileToSupabase('player-photos', filePath, uri, mimeType);
           if (publicUrl) {
             await supabase.from('tournaments').update({ logo_url: publicUrl }).eq('id', tourn.id);
+            setTournaments((prev: any[]) =>
+              prev.map((t: any) => (t.id === tourn.id ? { ...t, logo_url: publicUrl } : t))
+            );
             if (showToast) showToast({ message: `"${tourn.name}" logosi saqlandi ✓`, type: 'success', duration: 2500 });
+          } else {
+            setTournaments((prev: any[]) =>
+              prev.map((t: any) => (t.id === tourn.id ? { ...t, logo_url: prevLogo } : t))
+            );
+            Alert.alert('Xatolik', "Logotipni serverga yuklab bo'lmadi. Internet aloqasini tekshiring.");
           }
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error('handleDirectUploadLogo error:', e);
+        Alert.alert('Xatolik', e?.message || "Logotipni yuklashda xatolik yuz berdi");
       } finally {
         setUploadingLogoTournId(null);
       }
@@ -783,6 +826,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
 
         if (!result.canceled && result.assets[0]) {
           const uri = result.assets[0].uri;
+          const prevBg = tourn.export_bg_url;
           setUploadingBgTournId(tourn.id);
           setTournaments((prev: any[]) =>
             prev.map((t: any) => (t.id === tourn.id ? { ...t, export_bg_url: uri } : t))
@@ -799,11 +843,20 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
           const publicUrl = await uploadFileToSupabase('player-photos', filePath, uri, mimeType);
           if (publicUrl) {
             await supabase.from('tournaments').update({ export_bg_url: publicUrl }).eq('id', tourn.id);
+            setTournaments((prev: any[]) =>
+              prev.map((t: any) => (t.id === tourn.id ? { ...t, export_bg_url: publicUrl } : t))
+            );
             if (showToast) showToast({ message: `"${tourn.name}" fon rasmi saqlandi ✓`, type: 'success', duration: 2500 });
+          } else {
+            setTournaments((prev: any[]) =>
+              prev.map((t: any) => (t.id === tourn.id ? { ...t, export_bg_url: prevBg } : t))
+            );
+            Alert.alert('Xatolik', "Fon rasmini serverga yuklab bo'lmadi. Internet aloqasini tekshiring.");
           }
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error('handleDirectUploadBg error:', e);
+        Alert.alert('Xatolik', e?.message || "Fon rasmini yuklashda xatolik yuz berdi");
       } finally {
         setUploadingBgTournId(null);
       }
