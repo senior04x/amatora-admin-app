@@ -113,6 +113,26 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   const [selectedRound, setSelectedRound] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'live' | 'scheduled'>('all');
 
+  // Tournament / Musobaqa Filter State (Top Full-width expandable filter)
+  const [tournaments, setTournaments] = useState<any[]>([]);
+  const [selectedTournament, setSelectedTournament] = useState<string>('all'); // 'all' | 'leagues' | 'tournaments_all' | tournamentId
+
+  useEffect(() => {
+    if (orgId) {
+      getActiveOrgTournaments(orgId)
+        .then((data) => setTournaments(data || []))
+        .catch((err) => console.warn('Error loading tournaments in MatchesScreen:', err));
+    }
+  }, [orgId]);
+
+  const getTournamentFilterLabel = () => {
+    if (selectedTournament === 'all') return "Barcha o'yinlar (Liga & Turnir)";
+    if (selectedTournament === 'leagues') return "Faqat Liga o'yinlari";
+    if (selectedTournament === 'tournaments_all') return "Barcha Turnirlar";
+    const found = tournaments.find((t) => String(t.id) === String(selectedTournament));
+    return found ? `Turnir: ${found.name}` : "Turnir";
+  };
+
   // React Query Hooks
   const {
     data: matches = [],
@@ -127,7 +147,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   const [refreshing, setRefreshing] = useState(false);
 
   // Dropdown open states
-  const [activeDropdown, setActiveDropdown] = useState<'none' | 'league' | 'round' | 'status'>('none');
+  const [activeDropdown, setActiveDropdown] = useState<'none' | 'tournament' | 'league' | 'round' | 'status'>('none');
 
   // Active Control Match Object State (0ms instant transition without blocking spinner)
   const [activeControlMatch, setActiveControlMatch] = useState<Match | null>(null);
@@ -468,6 +488,15 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     // 1. NEVER show finished matches in this screen
     if (m.status === 'finished' || m.status === 'FINISHED' || m.status === 'tugagan' || m.status === 'yakunlangan') return false;
 
+    // 2. Tournament / Musobaqa filtri
+    if (selectedTournament === 'leagues') {
+      if (m.tournament_id) return false;
+    } else if (selectedTournament === 'tournaments_all') {
+      if (!m.tournament_id) return false;
+    } else if (selectedTournament !== 'all') {
+      if (String(m.tournament_id) !== String(selectedTournament)) return false;
+    }
+
     if (selectedLeague !== 'all') {
       const matchLeague = (m.league || '').trim().toLowerCase();
       const selLeague = (selectedLeague || '').trim().toLowerCase();
@@ -563,6 +592,55 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         </View>
       </View>
 
+      {/* Top Full-Width Tournament / Competition Filter Trigger */}
+      <View style={styles.tournamentFilterBarContainer}>
+        <TouchableOpacity
+          style={[
+            styles.tournamentFilterBtn,
+            activeDropdown === 'tournament' && styles.tournamentFilterBtnActive,
+            Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border },
+            selectedTournament !== 'all' && styles.tournamentFilterBtnSelected,
+          ]}
+          onPress={() => setActiveDropdown(activeDropdown === 'tournament' ? 'none' : 'tournament')}
+          activeOpacity={0.8}
+        >
+          {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <View style={styles.tournamentFilterBtnContent}>
+            <View style={styles.tournamentFilterLeft}>
+              <Ionicons
+                name={selectedTournament === 'all' ? 'globe-outline' : selectedTournament === 'leagues' ? 'trophy-outline' : 'ribbon-outline'}
+                size={16}
+                color={selectedTournament === 'all' ? '#38BDF8' : selectedTournament === 'leagues' ? '#F59E0B' : '#EC4899'}
+              />
+              <Text
+                style={[
+                  styles.tournamentFilterText,
+                  Platform.OS === 'android' && { color: colors.textPrimary },
+                  selectedTournament !== 'all' && { color: selectedTournament === 'leagues' ? '#F59E0B' : '#EC4899', fontWeight: '800' },
+                ]}
+                numberOfLines={1}
+              >
+                {getTournamentFilterLabel()}
+              </Text>
+            </View>
+            <View style={styles.tournamentFilterRight}>
+              {selectedTournament !== 'all' && (
+                <View style={[styles.activeFilterPill, selectedTournament === 'leagues' && { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(245, 158, 11, 0.4)' }]}>
+                  <Text style={[styles.activeFilterPillText, selectedTournament === 'leagues' && { color: '#F59E0B' }]}>
+                    {selectedTournament === 'leagues' ? 'Liga' : 'Turnir'}
+                  </Text>
+                </View>
+              )}
+              <Ionicons
+                name={activeDropdown === 'tournament' ? 'chevron-up' : 'chevron-down'}
+                size={15}
+                color={Platform.OS === 'android' ? colors.textMuted : 'rgba(255,255,255,0.6)'}
+              />
+            </View>
+          </View>
+        </TouchableOpacity>
+      </View>
+
       {/* 3 Select Filter Triggers Bar */}
       <View style={styles.filterBarContainer}>
         {/* 1. Liga Select Dropdown */}
@@ -608,6 +686,99 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
           <Ionicons name="chevron-down" size={14} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.5)"} />
         </TouchableOpacity>
       </View>
+
+      {/* Expandable Dropdown Options Container */}
+      {activeDropdown === 'tournament' && (
+        <View style={[styles.dropdownMenuCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
+            {/* 1. All Competitions */}
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setSelectedTournament('all');
+                setActiveDropdown('none');
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="globe-outline" size={16} color="#38BDF8" style={{ marginRight: 8 }} />
+                <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedTournament === 'all' && { color: '#38BDF8', fontWeight: '900' }]}>
+                  {"Barcha o'yinlar (Liga & Turnir)"}
+                </Text>
+                {selectedTournament === 'all' && <Ionicons name="checkmark" size={16} color="#38BDF8" style={{ marginLeft: 'auto' }} />}
+              </View>
+            </TouchableOpacity>
+
+            {/* 2. Leagues Only */}
+            <TouchableOpacity
+              style={styles.dropdownMenuItem}
+              onPress={() => {
+                setSelectedTournament('leagues');
+                setActiveDropdown('none');
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="trophy-outline" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
+                <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedTournament === 'leagues' && { color: '#F59E0B', fontWeight: '900' }]}>
+                  {"Faqat Liga o'yinlari"}
+                </Text>
+                {selectedTournament === 'leagues' && <Ionicons name="checkmark" size={16} color="#F59E0B" style={{ marginLeft: 'auto' }} />}
+              </View>
+            </TouchableOpacity>
+
+            {/* Turnirlar Bo'limi */}
+            {tournaments.length > 0 && (
+              <>
+                <View style={styles.dropdownSectionHeader}>
+                  <Text style={[styles.dropdownSectionTitle, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                    TURNIRLAR
+                  </Text>
+                </View>
+
+                {tournaments.length > 1 && (
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      setSelectedTournament('tournaments_all');
+                      setActiveDropdown('none');
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="ribbon-outline" size={16} color="#EC4899" style={{ marginRight: 8 }} />
+                      <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, selectedTournament === 'tournaments_all' && { color: '#EC4899', fontWeight: '900' }]}>
+                        {"Barcha Turnirlar"}
+                      </Text>
+                      {selectedTournament === 'tournaments_all' && <Ionicons name="checkmark" size={16} color="#EC4899" style={{ marginLeft: 'auto' }} />}
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+                {tournaments.map((t) => {
+                  const isSel = String(selectedTournament) === String(t.id);
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={styles.dropdownMenuItem}
+                      onPress={() => {
+                        setSelectedTournament(String(t.id));
+                        setActiveDropdown('none');
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="ribbon-outline" size={16} color="#EC4899" style={{ marginRight: 8 }} />
+                        <Text style={[styles.dropdownMenuText, Platform.OS === 'android' && { color: colors.textSecondary }, isSel && { color: '#EC4899', fontWeight: '900' }]}>
+                          {t.name}
+                        </Text>
+                        {isSel && <Ionicons name="checkmark" size={16} color="#EC4899" style={{ marginLeft: 'auto' }} />}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Expandable Dropdown Options Container */}
       {activeDropdown === 'league' && (
@@ -809,10 +980,19 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
                   {/* Match Top Info Bar */}
                   <View style={styles.cardTopRow}>
-                    <View style={styles.leagueTag}>
-                      <Text style={[styles.leagueTagText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{item.league || 'LIGA'}</Text>
+                    <View style={[styles.leagueTag, item.tournament_id && { backgroundColor: isDark ? 'rgba(236, 72, 153, 0.12)' : 'rgba(236, 72, 153, 0.08)', borderColor: 'rgba(236, 72, 153, 0.3)' }]}>
+                      {item.tournament_id ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name="ribbon-outline" size={12} color="#EC4899" />
+                          <Text style={[styles.leagueTagText, { color: '#EC4899' }]}>
+                            {tournaments.find((t) => String(t.id) === String(item.tournament_id))?.name || 'TURNIR'}
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={[styles.leagueTagText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{item.league || 'LIGA'}</Text>
+                      )}
                       {item.stage && item.stage !== 'group' ? (
-                        <Text style={[styles.roundTagText, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                        <Text style={[styles.roundTagText, item.tournament_id ? { color: '#F472B6' } : (Platform.OS === 'android' && { color: colors.textMuted })]}>
                           {` • ${getStageDisplayTitle(item.stage, item.round)}`}
                         </Text>
                       ) : (
@@ -1364,6 +1544,73 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
     overflow: 'hidden',
+  },
+  tournamentFilterBarContainer: {
+    marginBottom: 8,
+  },
+  tournamentFilterBtn: {
+    width: '100%',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(30, 41, 59, 0.65)' : '#1E293B',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  tournamentFilterBtnActive: {
+    borderColor: '#EC4899',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(22, 34, 50, 0.75)' : '#162232',
+  },
+  tournamentFilterBtnSelected: {
+    borderColor: 'rgba(236, 72, 153, 0.45)',
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(236, 72, 153, 0.08)' : 'rgba(236, 72, 153, 0.06)',
+  },
+  tournamentFilterBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tournamentFilterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  tournamentFilterRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tournamentFilterText: {
+    color: '#FFFFFF',
+    fontSize: 12.5,
+    fontWeight: '700',
+    flex: 1,
+  },
+  activeFilterPill: {
+    backgroundColor: 'rgba(236, 72, 153, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(236, 72, 153, 0.4)',
+  },
+  activeFilterPillText: {
+    color: '#EC4899',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  dropdownSectionHeader: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  dropdownSectionTitle: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: 'rgba(255, 255, 255, 0.4)',
+    letterSpacing: 0.8,
   },
   filterBarContainer: {
     flexDirection: 'row',
