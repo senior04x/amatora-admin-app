@@ -792,10 +792,12 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   //      videoni ANIQ shu event id'siga avtomatik biriktiradi — avval bu
   //      mumkin emas edi, chunki hech qanday event/id yaratilmagan, video
   //      esa jamoaning HECH NARSASIGA bog'lanmay "etim" bo'lib qolardi.
-  // delta<=0 (kamaytirish) holatida xatti-harakat O'ZGARISHSIZ qoladi —
-  // bu faqat qo'lda xato tuzatish uchun, hech qanday event
-  // yaratilmaydi/o'chirilmaydi (qaysi eventni o'chirish noaniq bo'lgani
-  // uchun).
+  // Quick Score Adjuster (+1 / -1).
+  // Tepadagi tablo tugmalari (+ / -) faqat match hisobini (home_score / away_score)
+  // to'g'ridan-to'g'ri o'zgartirish uchun mo'ljallangan.
+  // match_events jadvaliga muallifsiz bo'sh qator yozilmaydi (chunki player_id NOT NULL
+  // va statistikaga xalaqit bermasligi kerak). Haqiqiy gol o'yinchilar ro'yxatidagi
+  // yoki "Voqea qo'shish" tugmasi orqali kiritiladi.
   const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
     if (!match || isReadOnlyMode) return;
     const isHome = teamType === 'home';
@@ -808,79 +810,27 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       [isHome ? 'home_score' : 'away_score']: newScore,
     }));
 
-    if (delta > 0) {
-      const teamId = isHome ? match?.home_team_id : match?.away_team_id;
-      const minVal = getCurrentMinute();
-      const optimisticId = 'team-goal-' + Date.now();
-      const optimisticEvent: any = {
-        id: optimisticId,
-        match_id: matchId,
-        team_id: teamId,
-        player_id: null,
-        event_type: 'goal',
-        type: 'goal',
-        minute: minVal,
-        replay_video_url: null,
-        created_at: new Date().toISOString(),
-        player: null,
-        team: isHome ? homeTeam : awayTeam,
-      };
-      setEvents((prev) => [...prev, optimisticEvent]);
+    // Asosiy hisobni matches jadvalida yangilash
+    const updatePayload = {
+      [isHome ? 'home_score' : 'away_score']: newScore,
+      updated_at: new Date().toISOString(),
+    };
 
-      // 1. Asosiy hisobni matches jadvalida yangilash
-      try {
-        const { error: updateErr } = await supabase.from('matches').update({
-          [isHome ? 'home_score' : 'away_score']: newScore,
-          updated_at: new Date().toISOString(),
-        }).eq('id', matchId);
-
-        if (updateErr) {
-          console.warn('adjustScore matches update error:', updateErr);
-          setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
-          setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
-          Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
-          return;
-        }
-      } catch (err) {
-        console.warn('adjustScore matches catch error:', err);
-        setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
-        setEvents((prev) => prev.filter((ev) => ev.id !== optimisticId));
-        Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
-        return;
-      }
-
-      // 2. match_events ga muallifsiz jamoa goli sifatida saqlashga harakat qilish
-      try {
-        const { data: inserted, error: insertErr } = await supabase
-          .from('match_events')
-          .insert([{
-            match_id: matchId,
-            team_id: teamId,
-            player_id: null,
-            event_type: 'goal',
-            type: 'goal',
-            minute: minVal,
-          }])
-          .select('*')
-          .maybeSingle();
-
-        if (insertErr) {
-          console.warn('adjustScore match_events insert warning (hisob matches jadvalida saqlandi):', insertErr);
-        } else if (inserted?.id) {
-          setEvents((prev) => prev.map((e) => (e.id === optimisticId ? { ...optimisticEvent, id: inserted.id } : e)));
-        }
-      } catch (e) {
-        console.warn('adjustScore (jamoa goli) match_events error:', e);
-      }
-      return;
-    }
-
-    // delta <= 0: faqat hisobni tuzatish (event yaratilmaydi/o'chirilmaydi)
-    const updatePayload = isHome ? { home_score: newScore } : { away_score: newScore };
     try {
-      await supabase.from('matches').update(updatePayload).eq('id', matchId);
-    } catch (e) {
-      console.warn('adjustScore DB update error:', e);
+      const { error: updateErr } = await supabase
+        .from('matches')
+        .update(updatePayload)
+        .eq('id', matchId);
+
+      if (updateErr) {
+        console.warn('adjustScore matches update error:', updateErr);
+        setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
+        Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
+      }
+    } catch (err) {
+      console.warn('adjustScore matches catch error:', err);
+      setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
+      Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
     }
   };
 
