@@ -304,7 +304,6 @@ export const ExportScreen: React.FC = () => {
 
   useEffect(() => {
     fetchLeagues();
-    fetchAllPDFData();
     fetchOrgData();
   }, [orgId]);
 
@@ -377,10 +376,13 @@ export const ExportScreen: React.FC = () => {
 
         setLeagues(merged);
         setSelectedLeague(merged[0]);
+      } else {
+        setLeagues([]);
+        setSelectedLeague(null);
+        setLoading(false);
       }
     } catch (e) {
       console.error(e);
-    } finally {
       setLoading(false);
     }
   };
@@ -389,7 +391,11 @@ export const ExportScreen: React.FC = () => {
     try {
       const dbClient = supabase;
 
-      let appQuery = dbClient.from('applications').select('*').order('created_at', { ascending: false });
+      let appQuery = dbClient
+        .from('applications')
+        .select('id, team_id, first_name, last_name, father_name, photo_url, passport_series, passport_number, birth_date, position, player_number')
+        .order('created_at', { ascending: false });
+
       if (orgId) {
         if (collabLeagueNames && collabLeagueNames.length > 0) {
           try {
@@ -448,104 +454,116 @@ export const ExportScreen: React.FC = () => {
     try {
       const dbClient = supabase;
 
-      // 0. Collab Info
-      if (leagueId) {
-        try {
-          const { data: cData } = await dbClient
-            .from('league_collabs')
-            .select('*, sender_org:organizations!sender_org_id(id, name, logo_url), receiver_org:organizations!receiver_org_id(id, name, logo_url)')
-            .eq('league_id', leagueId)
-            .eq('status', 'accepted')
-            .limit(1)
-            .maybeSingle();
+      // Parallel fetch of 4 independent queries: collabs, sponsors, teams, matches
+      const [collabRes, sponsorsRes, teamsRes, matchesRes] = await Promise.all([
+        leagueId
+          ? dbClient
+              .from('league_collabs')
+              .select('*, sender_org:organizations!sender_org_id(id, name, logo_url), receiver_org:organizations!receiver_org_id(id, name, logo_url)')
+              .eq('league_id', leagueId)
+              .eq('status', 'accepted')
+              .limit(1)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
 
-          setCollabInfo(cData || null);
-        } catch (e) {
-          setCollabInfo(null);
+        (() => {
+          let spQuery = dbClient
+            .from('sponsors')
+            .select('id, name, logo_url, is_main, organization_id')
+            .not('logo_url', 'is', null)
+            .order('created_at', { ascending: false });
+          if (orgId) {
+            spQuery = spQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+          }
+          return spQuery;
+        })(),
+
+        (() => {
+          let teamQuery = dbClient
+            .from('teams')
+            .select('*')
+            .in('status', ['approved', 'partially_approved']);
+          if (orgId) {
+            if (collabLeagueNames && collabLeagueNames.length > 0) {
+              const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+              teamQuery = teamQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+            } else {
+              teamQuery = teamQuery.eq('organization_id', orgId);
+            }
+          }
+          return teamQuery;
+        })(),
+
+        (() => {
+          let matchQuery = dbClient
+            .from('matches')
+            .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
+            .order('match_date', { ascending: true });
+          if (orgId) {
+            if (collabLeagueNames && collabLeagueNames.length > 0) {
+              const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
+              matchQuery = matchQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
+            } else {
+              matchQuery = matchQuery.eq('organization_id', orgId);
+            }
+          }
+          return matchQuery;
+        })()
+      ]);
+
+      // 0. Set Collab Info
+      setCollabInfo(collabRes?.data || null);
+
+      // 1. Process Sponsors and Overrides Map
+      const allSp = sponsorsRes?.data || [];
+      const overridesMap: Record<string, any> = {};
+      allSp.forEach((s: any) => {
+        if (s.name && s.name.startsWith('STANDINGS_OVERRIDE_')) {
+          const tId = s.name.replace('STANDINGS_OVERRIDE_', '');
+          try {
+            overridesMap[tId] = JSON.parse(s.logo_url);
+          } catch (e) {}
+        }
+      });
+
+      let showSponsorsForThisLeague = true;
+      if (typeof leagueObj === 'object' && leagueObj?.show_sponsors === false) {
+        showSponsorsForThisLeague = false;
+      }
+      if (allSp.length > 0 && leagueId) {
+        const leagueSettingKey = `LEAGUE_SHOW_SPONSORS_${leagueId}`;
+        const leagueSettingKeyByName = leagueName ? `LEAGUE_SHOW_SPONSORS_${leagueName}` : '';
+        const systemSetting = allSp.find(
+          (s: any) => s.name === leagueSettingKey || (leagueSettingKeyByName && s.name === leagueSettingKeyByName)
+        );
+        if (systemSetting) {
+          showSponsorsForThisLeague = systemSetting.logo_url === 'true';
         }
       }
 
-      // Fetch All Sponsors
-      try {
-        let spQuery = dbClient
-          .from('sponsors')
-          .select('id, name, logo_url, is_main, organization_id')
-          .not('logo_url', 'is', null)
-          .order('created_at', { ascending: false });
+      if (allSp.length > 0) {
+        const realSponsors = allSp.filter(isRealSponsor);
+        if (showSponsorsForThisLeague && realSponsors.length > 0) {
+          const main = realSponsors.find((s: any) => s.is_main === true);
+          const secondaries = realSponsors.filter((s: any) => s.id !== main?.id && s.is_selected !== false);
 
-        if (orgId) {
-          spQuery = spQuery.eq('organization_id', orgId);
-        }
-
-        const { data: allSp, error: spErr } = await spQuery;
-
-        if (spErr) {
-          console.error('Error querying sponsors in ExportScreen:', spErr);
-        }
-
-        // Check if sponsors are allowed for this specific league
-        let showSponsorsForThisLeague = true;
-
-        if (typeof leagueObj === 'object' && leagueObj?.show_sponsors === false) {
-          showSponsorsForThisLeague = false;
-        }
-
-        if (allSp && leagueId) {
-          const leagueSettingKey = `LEAGUE_SHOW_SPONSORS_${leagueId}`;
-          const leagueSettingKeyByName = leagueName ? `LEAGUE_SHOW_SPONSORS_${leagueName}` : '';
-          const systemSetting = allSp.find(
-            (s: any) => s.name === leagueSettingKey || (leagueSettingKeyByName && s.name === leagueSettingKeyByName)
-          );
-          if (systemSetting) {
-            showSponsorsForThisLeague = systemSetting.logo_url === 'true';
+          if (main?.logo_url) {
+            setMainSponsorLogo(main.logo_url);
+          } else if (realSponsors[0]?.logo_url) {
+            setMainSponsorLogo(realSponsors[0].logo_url);
           }
-        }
-
-        if (allSp && allSp.length > 0) {
-          // Filter real sponsors using isRealSponsor
-          const realSponsors = allSp.filter(isRealSponsor);
-
-          if (showSponsorsForThisLeague && realSponsors.length > 0) {
-            const main = realSponsors.find((s: any) => s.is_main === true);
-            const secondaries = realSponsors.filter((s: any) => s.id !== main?.id && s.is_selected !== false);
-
-            if (main?.logo_url) {
-              setMainSponsorLogo(main.logo_url);
-            } else if (realSponsors[0]?.logo_url) {
-              setMainSponsorLogo(realSponsors[0].logo_url);
-            }
-
-            setSecondarySponsors(secondaries.filter((s: any) => !!s.logo_url));
-          } else {
-            setMainSponsorLogo(null);
-            setSecondarySponsors([]);
-          }
+          setSecondarySponsors(secondaries.filter((s: any) => !!s.logo_url));
         } else {
           setMainSponsorLogo(null);
           setSecondarySponsors([]);
         }
-      } catch (e) {
-        console.error('Error fetching sponsors in ExportScreen:', e);
+      } else {
+        setMainSponsorLogo(null);
+        setSecondarySponsors([]);
       }
 
-      // 1. Fetch Teams (including Collab)
-      let teamQuery = dbClient
-        .from('teams')
-        .select('*')
-        .in('status', ['approved', 'partially_approved']);
-
-      if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-          teamQuery = teamQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          teamQuery = teamQuery.eq('organization_id', orgId);
-        }
-      }
-
-      const { data: allOrgTeams } = await teamQuery;
-      const teamsList = allOrgTeams || [];
-
+      // 2. Process Teams
+      const teamsList = teamsRes?.data || [];
       const filteredTeams = teamsList.filter((t: any) => {
         if (!leagueName && !leagueId) return true;
         if (leagueId && t.league_id && String(t.league_id) === String(leagueId)) return true;
@@ -558,27 +576,12 @@ export const ExportScreen: React.FC = () => {
       const targetTeams = filteredTeams.length > 0 ? filteredTeams : (
         teamsList.filter((t: any) => leagueId && String(t.league_id) === String(leagueId))
       );
-
       const teamIds = new Set(targetTeams.map((t: any) => t.id));
+      const targetTeamIds = Array.from(teamIds);
 
-      // 2. Fetch Matches (All matches: both finished and scheduled, including Collab)
-      let matchQuery = dbClient
-        .from('matches')
-        .select('*, home_team_data:teams!matches_home_team_id_fkey(name, logo_url), away_team_data:teams!matches_away_team_id_fkey(name, logo_url)')
-        .order('match_date', { ascending: true });
-
-      if (orgId) {
-        if (collabLeagueNames && collabLeagueNames.length > 0) {
-          const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-          matchQuery = matchQuery.or(`organization_id.eq.${orgId},league.in.(${escapedNames})`);
-        } else {
-          matchQuery = matchQuery.eq('organization_id', orgId);
-        }
-      }
-
-      const { data: allMatchesData } = await matchQuery;
-
-      const allLeagueMatches = (allMatchesData || []).filter((m: any) =>
+      // 3. Process Matches
+      const allMatchesData = matchesRes?.data || [];
+      const allLeagueMatches = allMatchesData.filter((m: any) =>
         teamIds.has(m.home_team_id) || teamIds.has(m.away_team_id) || (leagueId && String(m.league_id) === String(leagueId))
       );
 
@@ -596,27 +599,25 @@ export const ExportScreen: React.FC = () => {
       }
       setAvailableRounds(roundOpts);
 
-      // Default selected round for filters: find latest finished round or 1
       const finishedMatchesList = allLeagueMatches.filter((m: any) =>
         m.status === 'finished' || (m.home_score !== null && m.away_score !== null && m.home_score !== undefined && m.away_score !== undefined)
       );
-      const finishedRounds = finishedMatchesList.map((m: any) => Number(m.round || 1)).filter(r => !isNaN(r));
+      const finishedRounds = finishedMatchesList.map((m: any) => Number(m.round || 1)).filter((r: any) => !isNaN(r));
       const latestFinishedRound = finishedRounds.length > 0 ? Math.max(...finishedRounds) : 1;
       setSelectedRound(String(latestFinishedRound));
 
-      // 3. Compute Standings Table (using finished matches ONLY)
+      // 4. Compute Standings Table with Overrides applied
       const tableMap: any = {};
       targetTeams.forEach((t: any) => {
         tableMap[t.id] = {
           ...t,
-          played: 0,
-          won: 0,
-          drawn: 0,
-          lost: 0,
-          gf: 0,
-          ga: 0,
-          gd: 0,
-          points: t.penalty_points || 0,
+          raw_played: 0,
+          raw_won: 0,
+          raw_drawn: 0,
+          raw_lost: 0,
+          raw_gf: 0,
+          raw_ga: 0,
+          raw_pts: 0,
         };
       });
 
@@ -627,48 +628,67 @@ export const ExportScreen: React.FC = () => {
         const aScore = parseInt(m.away_score || 0);
 
         if (tableMap[hId]) {
-          tableMap[hId].played += 1;
-          tableMap[hId].gf += hScore;
-          tableMap[hId].ga += aScore;
+          tableMap[hId].raw_played += 1;
+          tableMap[hId].raw_gf += hScore;
+          tableMap[hId].raw_ga += aScore;
           if (hScore > aScore) {
-            tableMap[hId].won += 1;
-            tableMap[hId].points += 3;
+            tableMap[hId].raw_won += 1;
+            tableMap[hId].raw_pts += 3;
           } else if (hScore === aScore) {
-            tableMap[hId].drawn += 1;
-            tableMap[hId].points += 1;
+            tableMap[hId].raw_drawn += 1;
+            tableMap[hId].raw_pts += 1;
           } else {
-            tableMap[hId].lost += 1;
+            tableMap[hId].raw_lost += 1;
           }
         }
 
         if (tableMap[aId]) {
-          tableMap[aId].played += 1;
-          tableMap[aId].gf += aScore;
-          tableMap[aId].ga += hScore;
+          tableMap[aId].raw_played += 1;
+          tableMap[aId].raw_gf += aScore;
+          tableMap[aId].raw_ga += hScore;
           if (aScore > hScore) {
-            tableMap[aId].won += 1;
-            tableMap[aId].points += 3;
+            tableMap[aId].raw_won += 1;
+            tableMap[aId].raw_pts += 3;
           } else if (aScore === hScore) {
-            tableMap[aId].drawn += 1;
-            tableMap[aId].points += 1;
+            tableMap[aId].raw_drawn += 1;
+            tableMap[aId].raw_pts += 1;
           } else {
-            tableMap[aId].lost += 1;
+            tableMap[aId].raw_lost += 1;
           }
         }
       });
 
       const computedStandings = Object.values(tableMap)
+        .filter((t: any) => !t.is_archived)
         .map((t: any) => {
+          const ovr = overridesMap[String(t.id)] || {};
+          const played_offset = parseInt(ovr.played_offset || 0);
+          const won_offset = parseInt(ovr.won_offset || 0);
+          const draw_offset = parseInt(ovr.draw_offset || 0);
+          const lost_offset = parseInt(ovr.lost_offset || 0);
+          const gf_offset = parseInt(ovr.gf_offset || 0);
+          const ga_offset = parseInt(ovr.ga_offset || 0);
+          const pts_offset = parseInt(ovr.pts_offset || t.penalty_points || 0);
+
+          t.played = Math.max(0, t.raw_played + played_offset);
+          t.won = Math.max(0, t.raw_won + won_offset);
+          t.drawn = Math.max(0, t.raw_drawn + draw_offset);
+          t.lost = Math.max(0, t.raw_lost + lost_offset);
+          t.gf = Math.max(0, t.raw_gf + gf_offset);
+          t.ga = Math.max(0, t.raw_ga + ga_offset);
+          t.points = t.raw_pts + pts_offset;
           t.gd = t.gf - t.ga;
           return t;
         })
         .sort((a: any, b: any) => {
           if (b.points !== a.points) return b.points - a.points;
           if (b.gd !== a.gd) return b.gd - a.gd;
-          return b.gf - a.gf;
+          if (b.gf !== a.gf) return b.gf - a.gf;
+          return b.won - a.won;
         });
 
       setTeams(computedStandings);
+
       const enrichedMatches = allLeagueMatches.map((m: any) => ({
         ...m,
         home_team: m.home_team_data?.name || m.home_team || m.home_team_name || 'Jamoa 1',
@@ -679,11 +699,30 @@ export const ExportScreen: React.FC = () => {
       enrichedMatches.sort(compareMatches);
       setMatches(enrichedMatches);
 
-      // 4. Fetch Events
-      const { data: eventsData } = await dbClient
-        .from('match_events')
-        .select('*, player:applications(first_name, last_name, photo_url), team:teams(name, logo_url)')
-        .in('event_type', ['goal', 'assist', 'yellow_card', 'red_card']);
+      // 5. Fetch Events with targeted team_id filter, specific lightweight columns and pagination
+      let eventsData: any[] = [];
+      if (targetTeamIds.length > 0) {
+        let page = 0;
+        const PAGE_SIZE = 1000;
+        while (true) {
+          const { data: pageEvents, error: evErr } = await dbClient
+            .from('match_events')
+            .select('id, event_type, player_id, team_id, match_id, player:applications(first_name, last_name, photo_url), team:teams(name, logo_url)')
+            .in('team_id', targetTeamIds)
+            .in('event_type', ['goal', 'assist', 'yellow_card', 'red_card'])
+            .order('id', { ascending: true })
+            .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+          if (evErr) {
+            console.error('Error fetching match_events:', evErr);
+            break;
+          }
+          if (!pageEvents || pageEvents.length === 0) break;
+          eventsData = eventsData.concat(pageEvents);
+          if (pageEvents.length < PAGE_SIZE) break;
+          page++;
+        }
+      }
 
       if (eventsData && eventsData.length > 0) {
         const filteredEvents = eventsData.filter((e: any) => teamIds.has(e.team_id));
@@ -722,7 +761,7 @@ export const ExportScreen: React.FC = () => {
         setRawGoalEvents(goalEvents);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error in fetchLeagueData:', e);
     } finally {
       setLoading(false);
     }
@@ -2230,7 +2269,10 @@ export const ExportScreen: React.FC = () => {
               </View>
               <TouchableOpacity
                 style={[styles.downloadBtn, { backgroundColor: '#10B981', borderColor: '#10B981' }]}
-                onPress={() => setShowPDFModal(true)}
+                onPress={() => {
+                  setShowPDFModal(true);
+                  fetchAllPDFData();
+                }}
                 activeOpacity={0.8}
               >
                 <Ionicons name="document-text" size={16} color="#FFFFFF" />
