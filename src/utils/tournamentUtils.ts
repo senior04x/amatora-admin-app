@@ -240,21 +240,24 @@ export function parseTournamentTier(t: any): ParsedTournamentTier {
   let cleanDesc = t?.description || '';
 
   if (cleanDesc && cleanDesc.includes('[TIER:')) {
-    const match = cleanDesc.match(/\[TIER:(\d+)(?:\|PARENT:([^|\]]+))?(?:\|COLOR:([^|\]]+))?\]\s*(.*)/s);
-    if (match) {
-      if (!t?.tier) tier = Number(match[1]) || 1;
-      if (!t?.parent_tournament_id && match[2] && match[2] !== 'null') {
-        parentId = Number(match[2]);
-      }
-      if (match[3] && match[3] !== 'null' && match[3] !== '') {
-        color = match[3];
-      }
-      cleanDesc = match[4] || '';
+    const tierMatch = cleanDesc.match(/TIER:(\d+)/);
+    if (tierMatch && !t?.tier) tier = Number(tierMatch[1]) || 1;
+
+    const parentMatch = cleanDesc.match(/PARENT:([^|\]]*)/);
+    if (parentMatch && parentMatch[1] && parentMatch[1] !== 'null' && parentMatch[1].trim() !== '' && !t?.parent_tournament_id) {
+      parentId = Number(parentMatch[1]);
     }
+
+    const colorMatch = cleanDesc.match(/COLOR:([^|\]]*)/);
+    if (colorMatch && colorMatch[1] && colorMatch[1] !== 'null' && colorMatch[1].trim() !== '') {
+      color = colorMatch[1].trim();
+    }
+
+    cleanDesc = cleanDesc.replace(/\[TIER:[^\]]*\]\s*/g, '').trim();
   }
 
   if (!color || color === 'null') {
-    color = '#38BDF8';
+    color = tier === 2 ? '#38BDF8' : '#22C55E';
   }
 
   return { tier, parentId, color, cleanDescription: cleanDesc };

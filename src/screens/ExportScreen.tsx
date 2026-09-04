@@ -41,8 +41,10 @@ const ScaledCanvasPreview = ({
 }) => {
   const [containerWidth, setContainerWidth] = useState(0);
 
+  const containerHeight = containerWidth > 0 ? containerWidth * (height / width) : 0;
   const scale = containerWidth > 0 ? containerWidth / width : 0.33;
-  const shift = containerWidth > 0 ? -(width - containerWidth) / 2 : 0;
+  const shiftX = containerWidth > 0 ? -(width - containerWidth) / 2 : 0;
+  const shiftY = containerWidth > 0 ? -(height - containerHeight) / 2 : 0;
 
   return (
     <View
@@ -68,8 +70,8 @@ const ScaledCanvasPreview = ({
             width,
             height,
             transform: [
-              { translateX: shift },
-              { translateY: shift },
+              { translateX: shiftX },
+              { translateY: shiftY },
               { scale: scale },
             ],
           }}
@@ -1691,45 +1693,32 @@ export const ExportScreen: React.FC = () => {
     headerFontSize = 17.5;
   }
 
-  // Dynamic values for 9:16 Tournament Standings Poster (matching Standings.jsx)
-  let tournCanvasHeight = 1080;
-  if (teamCount > 30) tournCanvasHeight = 1920;
-  else if (teamCount > 22) tournCanvasHeight = 1680;
-  else if (teamCount > 15) tournCanvasHeight = 1440;
-  else if (teamCount > 10) tournCanvasHeight = 1260;
-  else tournCanvasHeight = 1080;
-
-  const availTableHeight = tournCanvasHeight - 270;
-  const computedTournRowHeight = Math.max(26, Math.min(52, Math.floor(availTableHeight / Math.max(1, teamCount))));
-  const tFontSize = teamCount > 35 ? 13 : teamCount > 24 ? 15 : teamCount > 16 ? 17 : 19;
+  // 9:16 Tournament Standings Poster (1080x1920 matching UEFA format)
+  const tournCanvasHeight = 1920;
+  const tFontSize = teamCount > 35 ? 13.5 : teamCount > 24 ? 15 : teamCount > 16 ? 16.5 : 18;
   const tLogoSize = teamCount > 35 ? 20 : teamCount > 24 ? 24 : teamCount > 16 ? 28 : 34;
 
-  let zone1Limit = 8;
-  let zone2Limit = 24;
-  let zone1Label = '1\\8 FINAL';
-  let zone2Label = '1\\16 FINAL';
-  let zone3Label = 'TURNIRNI TARK ETADIGANLAR';
-
-  if (teamCount < 16) {
-    zone1Limit = 4;
-    zone2Limit = 8;
-    zone1Label = '1\\4 FINAL';
-    zone2Label = 'PLEY-OFF';
-  } else if (teamCount < 24) {
-    zone1Limit = 4;
-    zone2Limit = 12;
-    zone1Label = '1\\4 FINAL';
-    zone2Label = '1\\8 FINAL';
-  }
+  const zone1Limit = 8;
+  const zone2Limit = 24;
+  const zone1Label = '1\\8 FINAL';
+  const zone2Label = '1\\16 FINAL';
+  const zone3Label = 'TURNIRNI TARK ETADIGANLAR';
 
   const orgName = (orgData?.name || 'AMATORA').toUpperCase();
   const tournName = (selectedTournament?.name || 'TURNIR').toUpperCase();
   const parsedTourn = parseTournamentTier(selectedTournament);
-  const tournColor = parsedTourn.color || '#38BDF8';
+  const tournColor = parsedTourn.color || (parsedTourn.tier === 2 ? '#38BDF8' : '#22C55E');
+  const tournRowHeight = teamCount > 35 ? 31 : teamCount > 24 ? 33 : teamCount > 16 ? 38 : 44;
+  const tournTableWidth = 710;
+  const tournStatsWidth = 184;
+  const tournBracketWidth = 54;
+  const tournLeftBlockWidth = tournTableWidth - tournStatsWidth - tournBracketWidth; // 472px
 
   // Theme check for graphics (matching Standings.jsx)
   const isCollab = isTournament ? (selectedTournament?.isCollab || !!collabInfo) : (selectedLeague?.isCollab || !!collabInfo);
-  const exportBgUrl = isTournament ? (selectedTournament?.bg_image || selectedLeague?.bg_image || null) : (selectedLeague?.bg_image || null);
+  const exportBgUrl = isTournament
+    ? (selectedTournament?.export_bg_url || selectedTournament?.bg_image || selectedTournament?.bg_url || selectedLeague?.export_bg_url || selectedLeague?.bg_image || null)
+    : (selectedLeague?.export_bg_url || selectedLeague?.bg_image || null);
 
   return (
     <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
@@ -2129,39 +2118,43 @@ export const ExportScreen: React.FC = () => {
               {isTournament ? (
                 <ImageBackground
                   source={exportBgUrl ? { uri: exportBgUrl } : undefined}
-                  style={{ width: 1080, height: tournCanvasHeight, backgroundColor: '#060a12' }}
+                  style={{ width: 1080, height: tournCanvasHeight, backgroundColor: '#030718' }}
                   resizeMode="cover"
                 >
                   <View
                     style={{
                       flex: 1,
-                      backgroundColor: 'rgba(6, 10, 18, 0.94)',
+                      backgroundColor: exportBgUrl ? 'rgba(3, 7, 24, 0.60)' : '#030718',
                       width: 1080,
                       height: tournCanvasHeight,
                       justifyContent: 'space-between',
-                      paddingHorizontal: 32,
+                      alignItems: 'center',
+                      paddingHorizontal: 28,
                       paddingVertical: 24,
                     }}
                   >
                     {/* Top Header */}
-                    <View style={{ height: 110, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10, width: 1080 - 64 }}>
+                    <View style={{ height: 115, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8, width: 1080 - 56 }}>
                       {/* Left Emblem */}
                       <View style={{ width: 220, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                         {isCollab ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             {selectedTournament?.org1?.logo_url || orgData?.logo_url ? (
-                              <Image source={{ uri: selectedTournament?.org1?.logo_url || orgData?.logo_url }} style={{ height: 65, width: 65, resizeMode: 'contain' }} />
+                              <Image source={{ uri: selectedTournament?.org1?.logo_url || orgData?.logo_url }} style={{ height: 70, width: 70, resizeMode: 'contain' }} />
                             ) : null}
                             <Text style={{ color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }}>✕</Text>
                             {selectedTournament?.org2?.logo_url ? (
-                              <Image source={{ uri: selectedTournament?.org2?.logo_url }} style={{ height: 55, width: 55, resizeMode: 'contain' }} />
+                              <Image source={{ uri: selectedTournament?.org2?.logo_url }} style={{ height: 60, width: 60, resizeMode: 'contain' }} />
                             ) : null}
                           </View>
                         ) : (
                           orgData?.logo_url ? (
-                            <Image source={{ uri: orgData.logo_url }} style={{ maxHeight: 75, maxWidth: 200, width: 180, height: 75, resizeMode: 'contain' }} />
+                            <Image source={{ uri: orgData.logo_url }} style={{ maxHeight: 85, maxWidth: 200, width: 180, height: 85, resizeMode: 'contain' }} />
                           ) : (
-                            <Text style={{ color: '#00FF66', fontSize: 28, fontWeight: '900', letterSpacing: 1.5 }}>{"AMATORA"}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Ionicons name="football" size={28} color="#FFFFFF" />
+                              <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: '900', letterSpacing: 1.5 }}>{"AMATORA"}</Text>
+                            </View>
                           )
                         )}
                       </View>
@@ -2169,11 +2162,11 @@ export const ExportScreen: React.FC = () => {
                       {/* Center: Tournament Logo / Title */}
                       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                         {selectedTournament?.logo_url ? (
-                          <Image source={{ uri: selectedTournament.logo_url }} style={{ maxHeight: 85, maxWidth: 420, width: 360, height: 85, resizeMode: 'contain' }} />
+                          <Image source={{ uri: selectedTournament.logo_url }} style={{ maxHeight: 90, maxWidth: 420, width: 360, height: 90, resizeMode: 'contain' }} />
                         ) : (
                           <View style={{ alignItems: 'center' }}>
-                            <Text style={{ fontSize: 13, color: '#94a3b8', fontWeight: '800', letterSpacing: 3 }}>{orgName}</Text>
-                            <Text style={{ fontSize: 28, color: '#ffffff', fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' }}>{tournName}</Text>
+                            <Text style={{ fontSize: 13, color: tournColor, fontWeight: '800', letterSpacing: 3 }}>{orgName}</Text>
+                            <Text style={{ fontSize: 26, color: '#ffffff', fontWeight: '900', letterSpacing: 2, textTransform: 'uppercase' }}>{tournName}</Text>
                           </View>
                         )}
                       </View>
@@ -2181,261 +2174,341 @@ export const ExportScreen: React.FC = () => {
                       {/* Right Brand / Media Logo */}
                       <View style={{ width: 220, alignItems: 'flex-end', justifyContent: 'center' }}>
                         {mainSponsorLogo ? (
-                          <Image source={{ uri: mainSponsorLogo }} style={{ maxHeight: 70, maxWidth: 200, width: 180, height: 70, resizeMode: 'contain' }} />
+                          <Image source={{ uri: mainSponsorLogo }} style={{ maxHeight: 75, maxWidth: 200, width: 180, height: 75, resizeMode: 'contain' }} />
                         ) : (
                           <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={{ fontSize: 18, fontWeight: '900', color: '#ffffff', letterSpacing: 1 }}>{orgName}</Text>
-                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#38bdf8', letterSpacing: 2 }}>{"MEDIA"}</Text>
+                            <Text style={{ fontSize: 19, fontWeight: '900', color: '#ffffff', letterSpacing: 1 }}>{orgName}</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: tournColor, letterSpacing: 2 }}>{"FUTBOL MEDIA"}</Text>
                           </View>
                         )}
                       </View>
                     </View>
 
-                    {/* Center Section: Left Rotated Title + Table + Right Zone Labels */}
-                    <View style={{ flex: 1, flexDirection: 'row', gap: 16, alignItems: 'stretch', minHeight: 0 }}>
-                      {/* Left Vertical Column with Rotated Title */}
+                    {/* Center Section: Left Rotated Title + Compact Table & Right Zone Column */}
+                    <View style={{ width: 1080 - 56, flexDirection: 'row', gap: 16, alignItems: 'flex-start', justifyContent: 'flex-start', paddingLeft: 20 }}>
+                      {/* Left Column with Rotated Title (Clean typography, side-by-side parallel lines) */}
                       <View
                         style={{
-                          width: 65,
-                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                          borderRadius: 14,
-                          borderWidth: 1,
-                          borderColor: 'rgba(255, 255, 255, 0.08)',
+                          width: 95,
+                          height: Math.min(zone2Limit, teamCount) * tournRowHeight,
                           justifyContent: 'center',
                           alignItems: 'center',
-                          overflow: 'hidden',
                           position: 'relative',
                         }}
                       >
                         <View
                           style={{
-                            width: Math.min(availTableHeight, 700),
-                            height: 65,
+                            width: Math.min(640, (Math.min(zone2Limit, teamCount) * tournRowHeight) - 10),
+                            height: 95,
                             position: 'absolute',
                             transform: [{ rotate: '-90deg' }],
-                            flexDirection: 'row',
-                            alignItems: 'center',
+                            flexDirection: 'column',
                             justifyContent: 'center',
-                            gap: 14,
+                            alignItems: 'center',
+                            gap: 8,
                           }}
                         >
-                          <Text style={{ fontSize: 12, fontWeight: '800', color: tournColor, letterSpacing: 3 }}>
-                            {`${orgName} ${tournName}`}
+                          <Text
+                            style={{
+                              fontSize: 16.5,
+                              fontWeight: '800',
+                              color: tournColor,
+                              letterSpacing: 7.5,
+                              textTransform: 'uppercase',
+                              textAlign: 'center',
+                            }}
+                            numberOfLines={1}
+                          >
+                            {`${orgName} ${tournName.includes('LIGA') ? tournName : `${tournName} LIGASI`}`}
                           </Text>
-                          <Text style={{ fontSize: 28, fontWeight: '900', color: '#ffffff', letterSpacing: 4 }}>
+                          <Text
+                            style={{
+                              fontSize: 56,
+                              fontWeight: '900',
+                              color: '#FFFFFF',
+                              letterSpacing: 4.5,
+                              textTransform: 'uppercase',
+                              textAlign: 'center',
+                            }}
+                            numberOfLines={1}
+                          >
                             {"TURNIR JADVALI"}
                           </Text>
                         </View>
                       </View>
 
-                      {/* Center Table Container */}
+                      {/* Unified Table + Bracket Container (Width: tournTableWidth = 710px) */}
                       <View
                         style={{
-                          flex: 1,
-                          backgroundColor: 'rgba(255, 255, 255, 0.035)',
-                          borderRadius: 16,
-                          borderWidth: 1,
-                          borderColor: 'rgba(255, 255, 255, 0.1)',
-                          overflow: 'hidden',
+                          width: tournTableWidth,
                           flexDirection: 'column',
+                          overflow: 'hidden',
+                          borderRadius: 4,
                         }}
                       >
-                        {/* Table Header */}
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: 'rgba(255, 255, 255, 0.07)',
-                            paddingVertical: 10,
-                            paddingHorizontal: 14,
-                            borderBottomWidth: 2,
-                            borderBottomColor: 'rgba(255, 255, 255, 0.15)',
-                          }}
-                        >
-                          <Text style={{ width: 44, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"#"}</Text>
-                          <Text style={{ flex: 1, paddingLeft: 12, color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"JAMOALAR"}</Text>
-                          <Text style={{ width: 72, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"O'YIN"}</Text>
-                          <Text style={{ width: 72, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"T/N"}</Text>
-                          <Text style={{ width: 80, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"OCHKO"}</Text>
-                        </View>
+                        <View style={{ width: tournTableWidth, flexDirection: 'row' }}>
+                          {/* Table Container (Width: tournTableWidth - tournBracketWidth = 656px) */}
+                          <View
+                            style={{
+                              width: tournTableWidth - tournBracketWidth,
+                              flexDirection: 'column',
+                            }}
+                          >
+                            {/* Table Header (Height: 38) */}
+                            <View
+                              style={{
+                                height: 38,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                borderBottomWidth: 1,
+                                borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+                              }}
+                            >
+                              {/* Left Header (# & JAMOALAR) */}
+                              <View
+                                style={{
+                                  width: tournLeftBlockWidth,
+                                  height: '100%',
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  paddingHorizontal: 10,
+                                  backgroundColor: exportBgUrl ? 'rgba(7, 18, 48, 0.95)' : '#07153B',
+                                }}
+                              >
+                                <Text style={{ width: 38, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"#"}</Text>
+                                <Text style={{ flex: 1, paddingLeft: 8, color: '#ffffff', fontWeight: '900', fontSize: tFontSize, letterSpacing: 1 }}>{"JAMOALAR"}</Text>
+                              </View>
 
-                        {/* Table Body */}
-                        <View style={{ flex: 1, flexDirection: 'column', justifyContent: 'space-between' }}>
-                          {teams.length === 0 ? (
-                            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                              <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, fontWeight: '700' }}>{"JAMOALAR MAVJUD EMAS"}</Text>
+                              {/* Right Header (O'YIN, T/N, OCHKO: width: 184) */}
+                              <View
+                                style={{
+                                  width: tournStatsWidth,
+                                  height: '100%',
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  backgroundColor: exportBgUrl ? 'rgba(23, 63, 181, 0.95)' : '#173FB5',
+                                }}
+                              >
+                                <Text style={{ width: 56, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"O'YIN"}</Text>
+                                <Text style={{ width: 56, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"T/N"}</Text>
+                                <Text style={{ width: 72, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>{"OCHKO"}</Text>
+                              </View>
                             </View>
-                          ) : (
-                            teams.map((t: any, idx: number) => {
-                              const rank = idx + 1;
-                              const isZone1End = rank === zone1Limit;
-                              const isZone2End = rank === zone2Limit;
-                              const inZone1 = rank <= zone1Limit;
-                              const inZone2 = rank > zone1Limit && rank <= zone2Limit;
 
-                              let borderBottomColor = 'rgba(255, 255, 255, 0.04)';
-                              let borderBottomWidth = 1;
-                              if (isZone1End && rank < teamCount) {
-                                borderBottomColor = tournColor;
-                                borderBottomWidth = 2.5;
-                              } else if (isZone2End && rank < teamCount) {
-                                borderBottomColor = '#ef4444';
-                                borderBottomWidth = 2.5;
-                              }
+                            {/* Table Body */}
+                            <View style={{ width: tournTableWidth - tournBracketWidth, flexDirection: 'column' }}>
+                              {teams.length === 0 ? (
+                                <View style={{ height: 120, alignItems: 'center', justifyContent: 'center' }}>
+                                  <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, fontWeight: '700' }}>{"JAMOALAR MAVJUD EMAS"}</Text>
+                                </View>
+                              ) : (
+                                teams.map((t: any, idx: number) => {
+                                  const rank = idx + 1;
+                                  const inZone1 = rank <= zone1Limit;
+                                  const inZone2 = rank > zone1Limit && rank <= zone2Limit;
+                                  const inZone3 = rank > zone2Limit;
 
-                              let rowBg = idx % 2 === 0 ? 'rgba(255, 255, 255, 0.015)' : 'transparent';
-                              if (inZone1) rowBg = `${tournColor}14`;
-                              else if (inZone2) rowBg = 'rgba(56, 189, 248, 0.03)';
+                                  const isZone1End = rank === zone1Limit;
+                                  const isZone2End = rank === zone2Limit;
 
-                              return (
-                                <View
-                                  key={t.id || idx}
-                                  style={{
-                                    height: computedTournRowHeight,
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    paddingHorizontal: 14,
-                                    backgroundColor: rowBg,
-                                    borderBottomWidth,
-                                    borderBottomColor,
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      width: 44,
-                                      textAlign: 'center',
-                                      fontWeight: '900',
-                                      fontSize: tFontSize,
-                                      color: inZone1 ? tournColor : (inZone2 ? '#38bdf8' : '#cbd5e1'),
-                                    }}
-                                  >
-                                    {rank}
-                                  </Text>
+                                  let borderBottomColor = 'rgba(255, 255, 255, 0.05)';
+                                  let borderBottomWidth = 1;
+                                  if (isZone1End && rank < teamCount) {
+                                    borderBottomColor = tournColor;
+                                    borderBottomWidth = 3.5;
+                                  } else if (isZone2End && rank < teamCount) {
+                                    borderBottomColor = '#EF4444';
+                                    borderBottomWidth = 3.5;
+                                  }
 
-                                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', paddingLeft: 12, gap: 10 }}>
-                                    {t.logo_url ? (
-                                      <Image
-                                        source={{ uri: t.logo_url }}
-                                        style={{ width: tLogoSize, height: tLogoSize, borderRadius: tLogoSize / 2, resizeMode: 'cover', backgroundColor: 'rgba(255,255,255,0.08)' }}
-                                      />
-                                    ) : (
-                                      <View style={{ width: tLogoSize, height: tLogoSize, borderRadius: tLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-                                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>{(t.name || '?')[0]}</Text>
-                                      </View>
-                                    )}
-                                    <Text
+                                  const leftBg = inZone3
+                                    ? (exportBgUrl ? 'rgba(19, 67, 223, 0.90)' : '#1343DF')
+                                    : (exportBgUrl ? 'rgba(7, 18, 48, 0.90)' : '#07153B');
+
+                                  const rightBg = inZone3
+                                    ? (exportBgUrl ? 'rgba(19, 67, 223, 0.90)' : '#1343DF')
+                                    : (exportBgUrl ? 'rgba(23, 63, 181, 0.92)' : '#173FB5');
+
+                                  return (
+                                    <View
+                                      key={t.id || idx}
                                       style={{
-                                        flex: 1,
-                                        color: '#ffffff',
-                                        fontSize: tFontSize,
-                                        fontWeight: '800',
-                                        textTransform: 'uppercase',
-                                        letterSpacing: 0.3,
+                                        width: tournTableWidth - tournBracketWidth,
+                                        height: tournRowHeight,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        borderBottomWidth,
+                                        borderBottomColor,
                                       }}
-                                      numberOfLines={1}
                                     >
-                                      {t.name}
-                                    </Text>
-                                  </View>
+                                      {/* Left Team Info Section */}
+                                      <View
+                                        style={{
+                                          width: tournLeftBlockWidth,
+                                          height: '100%',
+                                          flexDirection: 'row',
+                                          alignItems: 'center',
+                                          paddingHorizontal: 10,
+                                          backgroundColor: leftBg,
+                                        }}
+                                      >
+                                        <Text
+                                          style={{
+                                            width: 38,
+                                            textAlign: 'center',
+                                            fontWeight: '900',
+                                            fontSize: tFontSize,
+                                            color: '#FFFFFF',
+                                          }}
+                                        >
+                                          {rank}
+                                        </Text>
 
-                                  <Text style={{ width: 72, textAlign: 'center', color: '#e2e8f0', fontWeight: '700', fontSize: tFontSize }}>
-                                    {t.played ?? 0}
-                                  </Text>
-                                  <Text style={{ width: 72, textAlign: 'center', color: (t.gd > 0 ? '#38bdf8' : t.gd < 0 ? '#f87171' : '#cbd5e1'), fontWeight: '800', fontSize: tFontSize }}>
-                                    {t.gd ?? 0}
-                                  </Text>
-                                  <Text style={{ width: 80, textAlign: 'center', color: '#ffffff', fontWeight: '900', fontSize: tFontSize }}>
-                                    {t.points ?? 0}
+                                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', paddingLeft: 8, gap: 8 }}>
+                                          {t.logo_url ? (
+                                            <Image
+                                              source={{ uri: t.logo_url }}
+                                              style={{ width: tLogoSize, height: tLogoSize, borderRadius: tLogoSize / 2, resizeMode: 'cover', backgroundColor: 'rgba(255,255,255,0.08)' }}
+                                            />
+                                          ) : (
+                                            <View style={{ width: tLogoSize, height: tLogoSize, borderRadius: tLogoSize / 2, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                                              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '900' }}>{(t.name || '?')[0]}</Text>
+                                            </View>
+                                          )}
+                                          <Text
+                                            style={{
+                                              flex: 1,
+                                              color: '#FFFFFF',
+                                              fontSize: tFontSize,
+                                              fontWeight: '800',
+                                              textTransform: 'uppercase',
+                                              letterSpacing: 0.3,
+                                            }}
+                                            numberOfLines={1}
+                                          >
+                                            {t.name}
+                                          </Text>
+                                        </View>
+                                      </View>
+
+                                      {/* Right Stats Section (Royal Blue Block) */}
+                                      <View
+                                        style={{
+                                          width: tournStatsWidth,
+                                          height: '100%',
+                                          flexDirection: 'row',
+                                          alignItems: 'center',
+                                          backgroundColor: rightBg,
+                                        }}
+                                      >
+                                        <Text style={{ width: 56, textAlign: 'center', color: '#FFFFFF', fontWeight: '700', fontSize: tFontSize }}>
+                                          {t.played ?? 0}
+                                        </Text>
+                                        <Text style={{ width: 56, textAlign: 'center', color: '#FFFFFF', fontWeight: '800', fontSize: tFontSize }}>
+                                          {t.gd ?? 0}
+                                        </Text>
+                                        <Text style={{ width: 72, textAlign: 'center', color: '#FFFFFF', fontWeight: '900', fontSize: tFontSize }}>
+                                          {t.points ?? 0}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                  );
+                                })
+                              )}
+                            </View>
+                          </View>
+
+                          {/* Right Bracket Column (flush next to table, matching row heights) */}
+                          <View
+                            style={{
+                              width: tournBracketWidth,
+                              flexDirection: 'column',
+                              backgroundColor: exportBgUrl ? 'rgba(23, 63, 181, 0.92)' : '#173FB5',
+                            }}
+                          >
+                            {/* Top spacer matching header */}
+                            <View style={{ height: 38, backgroundColor: exportBgUrl ? 'rgba(23, 63, 181, 0.95)' : '#173FB5', borderBottomWidth: 1, borderBottomColor: 'rgba(255, 255, 255, 0.1)' }} />
+
+                            {/* Zone 1 (1\8 FINAL) */}
+                            <View
+                              style={{
+                                height: Math.min(zone1Limit, teamCount) * tournRowHeight,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                backgroundColor: exportBgUrl ? 'rgba(23, 63, 181, 0.92)' : '#173FB5',
+                                borderBottomWidth: teamCount > zone1Limit ? 3.5 : 0,
+                                borderBottomColor: tournColor,
+                                position: 'relative',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <View style={{ width: 220, height: tournBracketWidth, position: 'absolute', transform: [{ rotate: '90deg' }], justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 13, fontWeight: '900', color: '#FFFFFF', letterSpacing: 2 }}>
+                                  {zone1Label}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Zone 2 (1\16 FINAL) */}
+                            {teamCount > zone1Limit && (
+                              <View
+                                style={{
+                                  height: Math.min(zone2Limit - zone1Limit, Math.max(0, teamCount - zone1Limit)) * tournRowHeight,
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  backgroundColor: exportBgUrl ? 'rgba(23, 63, 181, 0.92)' : '#173FB5',
+                                  borderBottomWidth: teamCount > zone2Limit ? 3.5 : 0,
+                                  borderBottomColor: '#EF4444',
+                                  position: 'relative',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                <View style={{ width: 260, height: tournBracketWidth, position: 'absolute', transform: [{ rotate: '90deg' }], justifyContent: 'center', alignItems: 'center' }}>
+                                  <Text style={{ fontSize: 13, fontWeight: '900', color: '#FFFFFF', letterSpacing: 2 }}>
+                                    {zone2Label}
                                   </Text>
                                 </View>
-                              );
-                            })
-                          )}
-                        </View>
-                      </View>
+                              </View>
+                            )}
 
-                      {/* Right Side Column with Bracket Zone Labels */}
-                      <View
-                        style={{
-                          width: 46,
-                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                          borderRadius: 14,
-                          borderWidth: 1,
-                          borderColor: 'rgba(255, 255, 255, 0.08)',
-                          overflow: 'hidden',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                        }}
-                      >
-                        {/* Zone 1 Label: 1\8 FINAL */}
+                            {/* Zone 3 (TURNIRNI TARK ETADIGANLAR) */}
+                            {teamCount > zone2Limit && (
+                              <View
+                                style={{
+                                  height: Math.max(0, teamCount - zone2Limit) * tournRowHeight,
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  backgroundColor: exportBgUrl ? 'rgba(19, 67, 223, 0.90)' : '#1343DF',
+                                  position: 'relative',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                <View style={{ width: 340, height: tournBracketWidth, position: 'absolute', transform: [{ rotate: '90deg' }], justifyContent: 'center', alignItems: 'center' }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '900', color: '#FFFFFF', letterSpacing: 3 }} numberOfLines={1}>
+                                    {zone3Label}
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+
+                        {/* Bottom Accent Bar matching reference image */}
                         <View
                           style={{
-                            flex: Math.min(zone1Limit, teamCount),
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            backgroundColor: `${tournColor}18`,
-                            borderBottomWidth: teamCount > zone1Limit ? 2 : 0,
-                            borderBottomColor: tournColor,
-                            position: 'relative',
-                            overflow: 'hidden',
+                            width: tournTableWidth,
+                            height: 22,
+                            backgroundColor: exportBgUrl ? 'rgba(19, 67, 223, 0.90)' : '#1343DF',
                           }}
-                        >
-                          <View style={{ width: 200, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 13, fontWeight: '900', color: tournColor, letterSpacing: 3 }}>
-                              {zone1Label}
-                            </Text>
-                          </View>
-                        </View>
-
-                        {/* Zone 2 Label: 1\16 FINAL */}
-                        {teamCount > zone1Limit && (
-                          <View
-                            style={{
-                              flex: Math.min(zone2Limit - zone1Limit, Math.max(0, teamCount - zone1Limit)),
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              backgroundColor: 'rgba(56, 189, 248, 0.06)',
-                              borderBottomWidth: teamCount > zone2Limit ? 2 : 0,
-                              borderBottomColor: '#ef4444',
-                              position: 'relative',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <View style={{ width: 200, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
-                              <Text style={{ fontSize: 13, fontWeight: '900', color: '#38bdf8', letterSpacing: 3 }}>
-                                {zone2Label}
-                              </Text>
-                            </View>
-                          </View>
-                        )}
-
-                        {/* Zone 3 Label: TURNIRNI TARK ETADIGANLAR */}
-                        {teamCount > zone2Limit && (
-                          <View
-                            style={{
-                              flex: Math.max(0, teamCount - zone2Limit),
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                              backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                              position: 'relative',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <View style={{ width: 280, height: 46, position: 'absolute', transform: [{ rotate: '-90deg' }], justifyContent: 'center', alignItems: 'center' }}>
-                              <Text style={{ fontSize: 11, fontWeight: '900', color: '#ef4444', letterSpacing: 3 }} numberOfLines={1}>
-                                {zone3Label}
-                              </Text>
-                            </View>
-                          </View>
-                        )}
+                        />
                       </View>
                     </View>
 
                     {/* Bottom Social Handle */}
-                    <View style={{ height: 42, alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
-                      <View style={{ paddingVertical: 6, paddingHorizontal: 20, borderRadius: 20, backgroundColor: 'rgba(255, 255, 255, 0.06)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.12)' }}>
-                        <Text style={{ color: '#cbd5e1', fontSize: 13.5, fontWeight: '800', letterSpacing: 1 }}>
-                          {`@${(orgData?.name || selectedTournament?.name || 'amatora').toLowerCase().replace(/\s+/g, '_')}`}
+                    <View style={{ height: 44, alignItems: 'center', justifyContent: 'center', marginTop: 8 }}>
+                      <View style={{ paddingVertical: 6, paddingHorizontal: 26, borderRadius: 22, backgroundColor: 'rgba(5, 12, 35, 0.85)', borderWidth: 1.2, borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800', letterSpacing: 1.2 }}>
+                          {`@${(orgData?.slug || orgData?.name || selectedTournament?.name || 'havas_football').toLowerCase().replace(/[^a-z0-9]/g, '_')}`}
                         </Text>
                       </View>
                     </View>
