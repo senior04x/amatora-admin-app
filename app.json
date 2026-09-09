@@ -1,20 +1,39 @@
 {
   "expo": {
-    "name": "Amatora Admin Mobile",
+    "name": "Amatora admin",
     "slug": "amatora-admin",
     "version": "1.0.0",
-    "scheme": "com.amatora.adminapp",
+    "scheme": "com.amatora.admin",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.amatora.adminapp",
+      "bundleIdentifier": "com.amatora.admin",
       "infoPlist": {
         "NSFaceIDUsageDescription": "AMATORA Admin ilovasiga kirish uchun Face ID dan foydalaniladi."
       }
     },
     "android": {
-      "package": "com.amatora.adminapp"
+      "package": "com.amatora.admin",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "runtimeVersion": "1.0.0",
     "updates": {

@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.amatora.adminapp'
+    namespace 'com.amatora.admin'
     defaultConfig {
-        applicationId 'com.amatora.adminapp'
+        applicationId 'com.amatora.admin'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

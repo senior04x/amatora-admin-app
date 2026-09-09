@@ -1,4 +1,4 @@
-package com.amatora.adminapp
+package com.amatora.admin
 
 import android.app.Application
 import android.content.res.Configuration
