@@ -10,19 +10,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
-
-import * as Notifications from 'expo-notifications';
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  } as any),
-});
 import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
@@ -245,78 +232,9 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     };
   }, [currentOrg?.id]);
 
-  // 🔔 Register Admin Push Token & Deep Link Listener
-  useEffect(() => {
-    const setupAdminPush = async () => {
-      try {
-        if (Platform.OS === 'web') return;
-
-        // In Expo SDK 53+, remote push token is unsupported inside Expo Go on Android
-        const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
-        if (isExpoGo && Platform.OS === 'android') {
-          // Expo Go on Android: Local and in-app notifications still fully functional
-          return;
-        }
-
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-        if (existingStatus !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
-        if (finalStatus !== 'granted') return;
-
-        const tokenData = await Notifications.getExpoPushTokenAsync({
-          projectId: '14fddb89-af52-47b3-90ab-f437d786254b',
-        });
-        const token = tokenData?.data;
-
-        if (token) {
-          const orgIdVal = currentOrg?.id || 1;
-          await fetch('https://web-production-eaa31.up.railway.app/api/notifications/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              token,
-              userId: `admin_${orgIdVal}`,
-              role: 'admin',
-              organizationId: orgIdVal,
-              platform: Platform.OS,
-            }),
-          });
-          console.log('✅ Admin Push Token registered:', `admin_${orgIdVal}`);
-        }
-      } catch (err) {
-        // Silent catch to prevent red box in development
-      }
-    };
-
-    setupAdminPush();
-
-    // Deep linking on Notification tap
-    let responseListener: any;
-    try {
-      if (Platform.OS !== 'web') {
-        responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
-          const data = response?.notification?.request?.content?.data;
-          console.log('👆 Admin Tapped Push:', data);
-          if (!data) return;
-
-          if (data.type === 'new_application') {
-            setActiveTab('applications');
-          } else if (data.type === 'profile_update') {
-            setActiveTab('updates');
-          } else if (data.type === 'new_transfer') {
-            setActiveTab('transfers');
-          }
-        });
-      }
-    } catch (e) {}
-
-    return () => {
-      if (responseListener) responseListener.remove();
-    };
-  }, [currentOrg?.id]);
+  // 🔔 Push notifications vaqtincha o'chirilgan (EAS build uchun Firebase FCM V1
+  // service account key sozlangach qayta qo'shiladi). Ichki NotificationsScreen
+  // backend'dan to'g'ridan-to'g'ri o'qigani uchun bundan ta'sirlanmaydi.
 
   useEffect(() => {
     if (hasGradient) {
