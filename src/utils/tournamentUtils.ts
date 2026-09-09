@@ -152,7 +152,14 @@ export async function getActiveOrgTournaments(orgId: string | number) {
       }
     });
 
-    return Array.from(map.values());
+    const isTournActive = (t: any) =>
+      t &&
+      t.status !== 'archived' &&
+      t.status !== 'completed' &&
+      t.status !== 'inactive' &&
+      t.is_active !== false;
+
+    return Array.from(map.values()).filter(isTournActive);
   } catch (err) {
     console.error('Error fetching org tournaments:', err);
     return [];

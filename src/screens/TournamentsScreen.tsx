@@ -224,14 +224,19 @@ const tournSwipeStyles = StyleSheet.create({
     position: 'relative',
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#FF3B30',
+    marginBottom: 16,
+    backgroundColor: 'transparent',
   },
   deleteBack: {
     position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 90,
+    right: 1,
+    top: 1,
+    bottom: 1,
+    width: 88,
+    borderTopRightRadius: 17,
+    borderBottomRightRadius: 17,
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
     backgroundColor: '#FF3B30',
     alignItems: 'center',
     justifyContent: 'center',
@@ -246,6 +251,7 @@ const tournSwipeStyles = StyleSheet.create({
   foreground: {
     zIndex: 2,
     borderRadius: 18,
+    overflow: 'hidden',
   },
 });
 
@@ -360,6 +366,13 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
         })
         .filter((t: any) => t && Number(t.organization_id) !== Number(orgId));
 
+      const isTournActive = (t: any) =>
+        t &&
+        t.status !== 'archived' &&
+        t.status !== 'completed' &&
+        t.status !== 'inactive' &&
+        t.is_active !== false;
+
       const allTournMap = new Map();
       (ownTourns || []).forEach((t: any) => allTournMap.set(t.id, { ...t, isOwn: true }));
       collabTournaments.forEach((t: any) => {
@@ -367,7 +380,8 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
           allTournMap.set(t.id, { ...t, isOwn: false, isCollab: true });
         }
       });
-      setTournaments(Array.from(allTournMap.values()));
+      const activeTournaments = Array.from(allTournMap.values()).filter(isTournActive);
+      setTournaments(activeTournaments);
 
       // 3. Fetch tournament leagues
       const { data: tLeagues } = await supabase
@@ -881,18 +895,23 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
   // Toggle Tournament Status (Faol / Nofaol)
   const handleToggleStatus = async (tourn: any) => {
     if (isReadOnlyUser) return;
-    const isCurrentlyActive = tourn.status !== 'archived' && tourn.status !== 'completed';
+    const isCurrentlyActive = tourn.status !== 'archived' && tourn.status !== 'completed' && tourn.status !== 'inactive' && tourn.is_active !== false;
     const nextStatus = isCurrentlyActive ? 'archived' : 'active';
 
-    setTournaments((prev: any[]) =>
-      prev.map((t: any) => (t.id === tourn.id ? { ...t, status: nextStatus } : t))
-    );
+    if (nextStatus === 'archived') {
+      // Nofaol bo'lganda amatora-admin-app ro'yxatidan darhol o'chiriladi
+      setTournaments((prev: any[]) => prev.filter((t: any) => t.id !== tourn.id));
+    } else {
+      setTournaments((prev: any[]) =>
+        prev.map((t: any) => (t.id === tourn.id ? { ...t, status: nextStatus, is_active: true } : t))
+      );
+    }
 
     try {
-      await supabase.from('tournaments').update({ status: nextStatus }).eq('id', tourn.id);
+      await supabase.from('tournaments').update({ status: nextStatus, is_active: nextStatus === 'active' }).eq('id', tourn.id);
       if (showToast) {
         showToast({
-          message: nextStatus === 'active' ? `"${tourn.name}" faollashtirildi ✓` : `"${tourn.name}" arxivlandi`,
+          message: nextStatus === 'active' ? `"${tourn.name}" faollashtirildi ✓` : `"${tourn.name}" nofaol qilindi va yashirildi`,
           type: nextStatus === 'active' ? 'success' : 'info',
         });
       }
@@ -1074,7 +1093,11 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
   // Render each item wrapped in SwipeableTournamentCard (swipe left to reveal delete — 1:1 with LeaguesScreen)
   const renderTournamentCard = ({ item }: { item: any }) => {
     if (isReadOnlyUser || item.isCollab) {
-      return renderTournamentCardContent(item);
+      return (
+        <View style={{ marginBottom: 16 }}>
+          {renderTournamentCardContent(item)}
+        </View>
+      );
     }
     return (
       <SwipeableTournamentCard
@@ -1794,7 +1817,6 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
-    marginBottom: 16,
   },
   cardFullBg: {
     width: '100%',
