@@ -366,13 +366,6 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
         })
         .filter((t: any) => t && Number(t.organization_id) !== Number(orgId));
 
-      const isTournActive = (t: any) =>
-        t &&
-        t.status !== 'archived' &&
-        t.status !== 'completed' &&
-        t.status !== 'inactive' &&
-        t.is_active !== false;
-
       const allTournMap = new Map();
       (ownTourns || []).forEach((t: any) => allTournMap.set(t.id, { ...t, isOwn: true }));
       collabTournaments.forEach((t: any) => {
@@ -380,8 +373,8 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
           allTournMap.set(t.id, { ...t, isOwn: false, isCollab: true });
         }
       });
-      const activeTournaments = Array.from(allTournMap.values()).filter(isTournActive);
-      setTournaments(activeTournaments);
+      const allTournaments = Array.from(allTournMap.values());
+      setTournaments(allTournaments);
 
       // 3. Fetch tournament leagues
       const { data: tLeagues } = await supabase
@@ -897,21 +890,17 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     if (isReadOnlyUser) return;
     const isCurrentlyActive = tourn.status !== 'archived' && tourn.status !== 'completed' && tourn.status !== 'inactive' && tourn.is_active !== false;
     const nextStatus = isCurrentlyActive ? 'archived' : 'active';
+    const nextIsActive = nextStatus === 'active';
 
-    if (nextStatus === 'archived') {
-      // Nofaol bo'lganda amatora-admin-app ro'yxatidan darhol o'chiriladi
-      setTournaments((prev: any[]) => prev.filter((t: any) => t.id !== tourn.id));
-    } else {
-      setTournaments((prev: any[]) =>
-        prev.map((t: any) => (t.id === tourn.id ? { ...t, status: nextStatus, is_active: true } : t))
-      );
-    }
+    setTournaments((prev: any[]) =>
+      prev.map((t: any) => (t.id === tourn.id ? { ...t, status: nextStatus, is_active: nextIsActive } : t))
+    );
 
     try {
-      await supabase.from('tournaments').update({ status: nextStatus, is_active: nextStatus === 'active' }).eq('id', tourn.id);
+      await supabase.from('tournaments').update({ status: nextStatus, is_active: nextIsActive }).eq('id', tourn.id);
       if (showToast) {
         showToast({
-          message: nextStatus === 'active' ? `"${tourn.name}" faollashtirildi ✓` : `"${tourn.name}" nofaol qilindi va yashirildi`,
+          message: nextStatus === 'active' ? `"${tourn.name}" faollashtirildi ✓` : `"${tourn.name}" nofaol qilindi (Foydalanuvchilardan yashirildi)`,
           type: nextStatus === 'active' ? 'success' : 'info',
         });
       }
@@ -938,7 +927,7 @@ export const TournamentsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBac
     const duration = item.match_duration || 90;
     const halfTime = Math.round(duration / 2);
     const isCollab = item.isCollab;
-    const isActive = item.status !== 'archived' && item.status !== 'completed';
+    const isActive = item.status !== 'archived' && item.status !== 'completed' && item.status !== 'inactive' && item.is_active !== false;
     const parsedTier = parseTournamentTier(item);
     const parentTourn = parsedTier.parentId
       ? tournaments.find((t: any) => Number(t.id) === Number(parsedTier.parentId))
