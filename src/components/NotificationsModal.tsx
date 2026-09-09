@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { BlurView } from './SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
@@ -280,17 +279,9 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
               duration: 4000,
             });
 
-            try {
-              Notifications.scheduleNotificationAsync({
-                content: {
-                  title: "Yangi O'yinchi Arizasi! ⚽",
-                  body: `${pName}${team} ro'yxatdan o'tish arizasini yubordi.`,
-                  sound: 'default',
-                  data: { type: 'new_application', id: newApp?.id },
-                },
-                trigger: null,
-              });
-            } catch (e) {}
+            // Mahalliy (local) bildirishnoma expo-notifications bilan birga
+            // vaqtincha o'chirilgan — yuqoridagi showToast() foydalanuvchini
+            // baribir xabardor qiladi.
           }
         }
       )
@@ -307,17 +298,9 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
               duration: 4000,
             });
 
-            try {
-              Notifications.scheduleNotificationAsync({
-                content: {
-                  title: "Yangi Jamoa Arizasi! 🛡️",
-                  body: `"${newTeam?.name || 'Jamoa'}" arizasi tasdiqlash uchun kutmoqda.`,
-                  sound: 'default',
-                  data: { type: 'new_application', id: newTeam?.id },
-                },
-                trigger: null,
-              });
-            } catch (e) {}
+            // Mahalliy (local) bildirishnoma expo-notifications bilan birga
+            // vaqtincha o'chirilgan — yuqoridagi showToast() foydalanuvchini
+            // baribir xabardor qiladi.
           }
         }
       )

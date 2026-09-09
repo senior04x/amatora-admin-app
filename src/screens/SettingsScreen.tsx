@@ -4,10 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from '../components/SafeBlurView';
 import * as LocalAuthentication from 'expo-local-authentication';
-import * as Notifications from 'expo-notifications';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
-import { supabase } from '../supabaseClient';
 import { hasSecurePin, deleteSecurePin } from '../utils/securePin';
 import pkg from '../../package.json';
 
@@ -59,12 +57,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
 
   const loadNotificationsStatus = async () => {
     const notif = await AsyncStorage.getItem('@amatora_notifications_enabled');
-    if (notif !== null) {
-      setNotificationsEnabled(notif === 'true');
-    } else {
-      const { status } = await Notifications.getPermissionsAsync();
-      setNotificationsEnabled(status === 'granted');
-    }
+    setNotificationsEnabled(notif === 'true');
   };
 
   const toggleBiometrics = async (val: boolean) => {
@@ -123,46 +116,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   };
 
   const toggleNotifications = async (val: boolean) => {
-    if (val) {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-
-      if (finalStatus !== 'granted') {
-        Alert.alert(
-          'Bildirishnomalar rad etildi',
-          'Push-bildirishnomalardan foydalanish uchun telefon sozlamalaridan ruxsat bering.'
-        );
-        setNotificationsEnabled(false);
-        await AsyncStorage.setItem('@amatora_notifications_enabled', 'false');
-        return;
-      }
-
-      setNotificationsEnabled(true);
-      await AsyncStorage.setItem('@amatora_notifications_enabled', 'true');
-
-      // Request and store push token if available
-      try {
-        const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
-        if (tokenData?.data) {
-          await AsyncStorage.setItem('@amatora_push_token', tokenData.data);
-          if (currentOrg?.id) {
-            await supabase
-              .from('organizations')
-              .update({ push_token: tokenData.data })
-              .eq('id', currentOrg.id);
-          }
-        }
-      } catch (err) {
-        console.log('Push token fetch error:', err);
-      }
-    } else {
-      setNotificationsEnabled(false);
-      await AsyncStorage.setItem('@amatora_notifications_enabled', 'false');
-    }
+    // Push-bildirishnoma (expo-notifications) vaqtincha o'chirilgan — Firebase
+    // FCM V1 service account key sozlangach qayta yoqiladi. Hozircha bu faqat
+    // lokal (qurilmadagi) sozlama sifatida saqlanadi.
+    setNotificationsEnabled(val);
+    await AsyncStorage.setItem('@amatora_notifications_enabled', val ? 'true' : 'false');
   };
 
   const handleSetOrEditPin = () => {
