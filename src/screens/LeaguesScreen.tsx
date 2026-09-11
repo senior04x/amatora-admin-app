@@ -333,6 +333,7 @@ export const LeaguesScreen: React.FC = () => {
   const [formStartDate, setFormStartDate] = useState('');
   const [formEndDate, setFormEndDate] = useState('');
   const [formStatus, setFormStatus] = useState<'active' | 'archived'>('active');
+  const [formTier, setFormTier] = useState<1 | 2 | null>(null);
   const [formSaving, setFormSaving] = useState(false);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
@@ -725,9 +726,13 @@ export const LeaguesScreen: React.FC = () => {
 
   // Create / Update League (1-to-1 Match with Admin Panel DB Logic)
   const handleSaveLeague = async () => {
-    if (isReadOnlyUser) return;
+    if (isReadOnlyUser || formSaving) return;
     if (!formName.trim()) {
       Alert.alert('Xatolik', 'Liga nomini kiriting');
+      return;
+    }
+    if (formTier !== 1 && formTier !== 2) {
+      Alert.alert('Liga darajasi', 'Liga darajasini tanlang.');
       return;
     }
     setFormSaving(true);
@@ -758,6 +763,7 @@ export const LeaguesScreen: React.FC = () => {
 
       const safePayload: any = {
         name: formName.trim(),
+        tier: formTier,
         logo_url: finalLogoUrl || null,
         export_bg_url: finalBgUrl || null,
       };
@@ -780,10 +786,12 @@ export const LeaguesScreen: React.FC = () => {
       if (editingLeague) {
         // Try update fullPayload, fallback to safePayload
         try {
-          const { error: updateErr } = await dbClient.from('leagues').update(fullPayload).eq('id', targetId);
+          const { error: updateErr } = await dbClient.from('leagues').update(fullPayload).eq('id', targetId).select('id').single();
           if (updateErr) throw updateErr;
-        } catch (e) {
-          await dbClient.from('leagues').update(safePayload).eq('id', targetId);
+        } catch (e: any) {
+          if (!['42703', 'PGRST204'].includes(e.code)) throw e;
+          const { error: baseErr } = await dbClient.from('leagues').update(safePayload).eq('id', targetId).select('id').single();
+          if (baseErr) throw baseErr;
         }
       } else {
         // Try insert fullPayload, fallback to safePayload
@@ -791,8 +799,10 @@ export const LeaguesScreen: React.FC = () => {
           const { data: newL, error: insErr } = await dbClient.from('leagues').insert(fullPayload).select().single();
           if (insErr) throw insErr;
           if (newL) targetId = newL.id;
-        } catch (e) {
-          const { data: newL } = await dbClient.from('leagues').insert(safePayload).select().single();
+        } catch (e: any) {
+          if (!['42703', 'PGRST204'].includes(e.code)) throw e;
+          const { data: newL, error: baseErr } = await dbClient.from('leagues').insert(safePayload).select().single();
+          if (baseErr) throw baseErr;
           if (newL) targetId = newL.id;
         }
       }
@@ -855,7 +865,7 @@ export const LeaguesScreen: React.FC = () => {
       await fetchLeagues();
     } catch (e: any) {
       console.error(e);
-      Alert.alert('Xatolik', 'Ligani saqlashda xatolik yuz berdi: ' + (e.message || ''));
+      Alert.alert('Xatolik', 'Liga saqlanmadi. Ulanishni tekshiring va qayta urinib ko‘ring.');
     } finally {
       setFormSaving(false);
     }
@@ -1164,6 +1174,7 @@ export const LeaguesScreen: React.FC = () => {
     setFormStartDate(league.start_date || '');
     setFormEndDate(league.end_date || '');
     setFormStatus(league.status || 'active');
+    setFormTier(Number(league.tier) === 1 ? 1 : Number(league.tier) === 2 ? 2 : null);
     setShowModal(true);
   };
 
@@ -1185,6 +1196,7 @@ export const LeaguesScreen: React.FC = () => {
     setFormStartDate('');
     setFormEndDate('');
     setFormStatus('active');
+    setFormTier(null);
   };
 
   // Upload Background Image (Instant local preview + silent background upload, NO modal alert)
@@ -1467,6 +1479,9 @@ export const LeaguesScreen: React.FC = () => {
                 </TouchableOpacity>
               )}
               <Text style={s.cardTitle} numberOfLines={2}>{item.name}</Text>
+              <Text style={s.inputLabel}>
+                {[1, 2].includes(Number(item.tier)) ? `${item.tier}-darajali` : 'Daraja belgilanmagan'}
+              </Text>
               <View style={s.badgesRow}>
                 <View style={s.badgeSeason}>
                   <Text style={s.badgeIcon}>{"📅"}</Text>
@@ -1837,6 +1852,22 @@ export const LeaguesScreen: React.FC = () => {
             </View>
 
             <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
+              <Text style={s.inputLabel}>LIGA DARAJASI</Text>
+              <View style={s.formRow}>
+                {([1, 2] as const).map(tier => (
+                  <TouchableOpacity
+                    key={tier}
+                    style={[s.formHalf, s.dropdownItem, formTier === tier && s.dropdownItemActive]}
+                    onPress={() => setFormTier(tier)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: formTier === tier }}
+                    accessibilityLabel={`${tier}-darajali`}
+                    disabled={formSaving}
+                  >
+                    <Text style={[s.dropdownItemText, formTier === tier && s.dropdownItemTextActive]}>{tier}-darajali</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               {/* Row 1: Liga Nomi & Liga Logosi */}
               <View style={s.formRow}>
                 <View style={s.formHalf}>
