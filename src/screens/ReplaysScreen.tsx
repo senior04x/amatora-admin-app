@@ -743,28 +743,6 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                           <Text style={styles.noVideoText}>Video biriktirilmagan</Text>
                         </View>
                       )}
-
-                      {/* Top Badges */}
-                      <View style={styles.videoBadgeTopLeft}>
-                        <Text style={styles.minuteBadgeText}>
-                          {ev.minute ? `${ev.minute}'` : `Gol #${idx + 1}`}
-                        </Text>
-                        <View
-                          style={[
-                            styles.eventTypeBadge,
-                            ev.event_type === 'penalty_goal' && styles.badgePenalty,
-                            ev.event_type === 'own_goal' && styles.badgeOwnGoal,
-                          ]}
-                        >
-                          <Text style={styles.eventTypeText}>
-                            {ev.event_type === 'penalty_goal'
-                              ? '⚽ Penalti'
-                              : ev.event_type === 'own_goal'
-                              ? '❌ Avtogol'
-                              : '⚽ Gol'}
-                          </Text>
-                        </View>
-                      </View>
                     </View>
 
                     {/* Author (Player & Team Details) */}
@@ -781,10 +759,27 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                         )}
 
                         <View style={styles.authorTextInfo}>
-                          <Text style={[styles.authorName, { color: isDark ? '#fff' : '#0f172a' }]}>
-                            {player ? `${player.first_name} ${player.last_name}` : 'Muallif noma\'lum'}
-                            {player?.player_number ? ` #${player.player_number}` : ''}
-                          </Text>
+                          <View style={styles.authorNameRow}>
+                            <Text style={[styles.authorName, { color: isDark ? '#fff' : '#0f172a' }]}>
+                              {player ? `${player.first_name} ${player.last_name}` : 'Muallif noma\'lum'}
+                              {player?.player_number ? ` #${player.player_number}` : ''}
+                            </Text>
+                            {ev.minute && (
+                              <View style={styles.minuteTag}>
+                                <Text style={styles.minuteTagText}>{ev.minute}'</Text>
+                              </View>
+                            )}
+                            {ev.event_type === 'penalty_goal' && (
+                              <View style={[styles.typeTag, styles.typeTagPenalty]}>
+                                <Text style={styles.typeTagPenaltyText}>Penalti</Text>
+                              </View>
+                            )}
+                            {ev.event_type === 'own_goal' && (
+                              <View style={[styles.typeTag, styles.typeTagOwnGoal]}>
+                                <Text style={styles.typeTagOwnGoalText}>Avtogol</Text>
+                              </View>
+                            )}
+                          </View>
                           <Text style={styles.authorTeamSub}>{team?.name || 'Jamoa'}</Text>
                         </View>
                       </View>
@@ -1499,38 +1494,48 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 12,
   },
-  videoBadgeTopLeft: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
+  authorNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
   },
-  minuteBadgeText: {
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-    color: '#fff',
+  minuteTag: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  minuteTagText: {
+    color: '#10b981',
     fontSize: 11,
     fontWeight: '800',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
   },
-  eventTypeBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.9)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+  typeTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 5,
   },
-  badgePenalty: {
-    backgroundColor: 'rgba(245, 158, 11, 0.9)',
+  typeTagPenalty: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
   },
-  badgeOwnGoal: {
-    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+  typeTagPenaltyText: {
+    color: '#f59e0b',
+    fontSize: 10,
+    fontWeight: '700',
   },
-  eventTypeText: {
-    color: '#fff',
-    fontSize: 11,
+  typeTagOwnGoal: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  typeTagOwnGoalText: {
+    color: '#ef4444',
+    fontSize: 10,
     fontWeight: '700',
   },
   replayMetaBox: {
