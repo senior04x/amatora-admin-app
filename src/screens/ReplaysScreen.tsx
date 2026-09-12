@@ -185,8 +185,8 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
           minute,
           replay_video_url,
           created_at,
+          assist_player_id,
           player:player_id (id, first_name, last_name, player_number, photo_url),
-          assist_player:assist_player_id (id, first_name, last_name, player_number),
           team:team_id (id, name, logo_url)
         `)
         .eq('match_id', match.id)
@@ -200,7 +200,6 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
         .map((e: any) => ({
           ...e,
           player: Array.isArray(e.player) ? e.player[0] : e.player,
-          assist_player: Array.isArray(e.assist_player) ? e.assist_player[0] : e.assist_player,
           team: Array.isArray(e.team) ? e.team[0] : e.team,
         })) as unknown as MatchEventItem[];
 
