@@ -19,7 +19,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 interface Props {
   onNavigate: (
-    tab: 'dashboard' | 'players' | 'matches' | 'finished-matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news' | 'cards',
+    tab: 'dashboard' | 'players' | 'matches' | 'finished-matches' | 'transfers' | 'settings' | 'leagues' | 'create-match' | 'export' | 'applications' | 'standings' | 'account' | 'updates' | 'sponsors' | 'news' | 'cards' | 'replays',
     subTab?: 'players' | 'teams'
   ) => void;
   isEditingOrder?: boolean;
@@ -515,6 +515,14 @@ export const DashboardScreen: React.FC<Props> = ({
       icon: 'calendar-outline',
       color: '#FB7185',
       action: () => onNavigate('matches'),
+      adminOnly: false,
+    },
+    {
+      id: 'replays',
+      title: 'Replaylar',
+      icon: 'videocam-outline',
+      color: '#10B981',
+      action: () => onNavigate && onNavigate('replays'),
       adminOnly: false,
     },
     {

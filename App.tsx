@@ -46,6 +46,7 @@ import { FinishedMatchesScreen } from './src/screens/FinishedMatchesScreen';
 import { NotificationsScreen } from './src/screens/NotificationsScreen';
 import { CardsScreen } from './src/screens/CardsScreen';
 import { TournamentsScreen } from './src/screens/TournamentsScreen';
+import { ReplaysScreen } from './src/screens/ReplaysScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
 import { hasSecurePin } from './src/utils/securePin';
 import { SafeBlurView as BlurView } from './src/components/SafeBlurView';
@@ -78,14 +79,14 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards'
+    'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards' | 'replays'
   >('dashboard');
   const [playersSubTab, setPlayersSubTab] = useState<'players' | 'teams'>('players');
   const [navigationHistory, setNavigationHistory] = useState<string[]>(['dashboard']);
   const lastBackPressRef = useRef<number>(0);
 
   const handleNavigate = (
-    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards',
+    tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards' | 'replays',
     subTab?: 'players' | 'teams'
   ) => {
     if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers', 'cards'].includes(tab)) {
@@ -302,6 +303,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'tournaments'}><TournamentsScreen onGoBack={handleGoBack} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'replays'}><ReplaysScreen onBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={handleGoBack} /></LazyScreen>
       </View>
 
