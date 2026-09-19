@@ -903,6 +903,16 @@ export const ExportScreen: React.FC = () => {
         }
       }
 
+      // Count all team games, including matches without a player event.
+      const teamPlayedCounts = new Map<string, number>();
+      finishedMatchesList.forEach((match: any) => {
+        [match.home_team_id, match.away_team_id].forEach(teamId => {
+          if (teamId == null) return;
+          const key = String(teamId);
+          teamPlayedCounts.set(key, (teamPlayedCounts.get(key) ?? 0) + 1);
+        });
+      });
+
       if (eventsData && eventsData.length > 0) {
         const filteredEvents = eventsData.filter((e: any) => teamIds.has(e.team_id));
         const goalMap: any = {};
@@ -916,11 +926,11 @@ export const ExportScreen: React.FC = () => {
           const pPhoto = ev.player?.photo_url || ev.player_photo || ev.team?.logo_url;
 
           if (ev.event_type === 'goal') {
-            if (!goalMap[pId]) goalMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, goals: 0, played: 1 };
+            if (!goalMap[pId]) goalMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, goals: 0, played: teamPlayedCounts.get(String(ev.team_id)) ?? 0 };
             goalMap[pId].goals += 1;
           }
           if (ev.event_type === 'assist') {
-            if (!assistMap[pId]) assistMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, assists: 0, played: 1 };
+            if (!assistMap[pId]) assistMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, assists: 0, played: teamPlayedCounts.get(String(ev.team_id)) ?? 0 };
             assistMap[pId].assists += 1;
           }
           if (ev.event_type === 'yellow_card' || ev.event_type === 'red_card') {
@@ -1225,6 +1235,16 @@ export const ExportScreen: React.FC = () => {
         }
       }
 
+      // Count all team games, including matches without a player event.
+      const teamPlayedCounts = new Map<string, number>();
+      finishedMatchesList.forEach((match: any) => {
+        [match.home_team_id, match.away_team_id].forEach(teamId => {
+          if (teamId == null) return;
+          const key = String(teamId);
+          teamPlayedCounts.set(key, (teamPlayedCounts.get(key) ?? 0) + 1);
+        });
+      });
+
       if (eventsData && eventsData.length > 0) {
         const matchIdsInTournament = new Set(allTournamentMatches.map((m: any) => m.id));
         const filteredEvents = eventsData.filter((e: any) => matchIdsInTournament.has(e.match_id));
@@ -1239,11 +1259,11 @@ export const ExportScreen: React.FC = () => {
           const pPhoto = ev.player?.photo_url || ev.player_photo || ev.team?.logo_url;
 
           if (ev.event_type === 'goal') {
-            if (!goalMap[pId]) goalMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, goals: 0, played: 1 };
+            if (!goalMap[pId]) goalMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, goals: 0, played: teamPlayedCounts.get(String(ev.team_id)) ?? 0 };
             goalMap[pId].goals += 1;
           }
           if (ev.event_type === 'assist') {
-            if (!assistMap[pId]) assistMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, assists: 0, played: 1 };
+            if (!assistMap[pId]) assistMap[pId] = { id: pId, name: pName, team: pTeam, avatar: pPhoto, assists: 0, played: teamPlayedCounts.get(String(ev.team_id)) ?? 0 };
             assistMap[pId].assists += 1;
           }
           if (ev.event_type === 'yellow_card' || ev.event_type === 'red_card') {
@@ -2761,7 +2781,7 @@ export const ExportScreen: React.FC = () => {
                                     </View>
                                   )}
                                   <Text style={{ flex: 1, color: '#ffffff', fontSize: 15.5, fontWeight: '800', textTransform: 'uppercase' }} numberOfLines={1}>{p.name}</Text>
-                                  <Text style={{ width: 30, textAlign: 'center', color: '#ffffff', fontSize: 16, fontWeight: '800' }}>{p.played || 1}</Text>
+                                  <Text style={{ width: 30, textAlign: 'center', color: '#ffffff', fontSize: 16, fontWeight: '800' }}>{p.played ?? 0}</Text>
                                   <Text style={{ width: 30, textAlign: 'center', color: '#ffffff', fontSize: 17.5, fontWeight: '900' }}>{p.goals}</Text>
                                 </View>
                               ))
@@ -2792,7 +2812,7 @@ export const ExportScreen: React.FC = () => {
                                     </View>
                                   )}
                                   <Text style={{ flex: 1, color: '#ffffff', fontSize: 15.5, fontWeight: '800', textTransform: 'uppercase' }} numberOfLines={1}>{p.name}</Text>
-                                  <Text style={{ width: 30, textAlign: 'center', color: '#ffffff', fontSize: 16, fontWeight: '800' }}>{p.played || 1}</Text>
+                                  <Text style={{ width: 30, textAlign: 'center', color: '#ffffff', fontSize: 16, fontWeight: '800' }}>{p.played ?? 0}</Text>
                                   <Text style={{ width: 30, textAlign: 'center', color: '#ffffff', fontSize: 17.5, fontWeight: '900' }}>{p.assists}</Text>
                                 </View>
                               ))
