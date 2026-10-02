@@ -1,4 +1,5 @@
 import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
+import { validatedAdminOrganization } from '../utils/adminMembership';
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { AppState, ActivityIndicator, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -140,7 +141,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
     try {
       const dbClient = supabase;
 
-      // 1. Immediately read stored role & orgId from AsyncStorage (Primary Authority)
+      // Legacy organizer path is pending migration; admin cache is never authority.
       const storedRole = await AsyncStorage.getItem('@amatora_user_role');
       const storedOrgId = await AsyncStorage.getItem('@amatora_org_id');
 
@@ -150,23 +151,14 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
         setUserRole('user');
         await fetchCurrentUser();
       } else {
+        const { data: identity, error: identityError } = await supabase.auth.getUser();
+        if (identityError || !identity.user?.id) throw new Error('Admin session unavailable');
+        const { data: membership, error: membershipError } = await dbClient.from('admin_users')
+          .select('id,role,organization_id').eq('id', identity.user.id).maybeSingle();
+        if (membershipError) throw new Error('Admin membership unavailable');
+        targetOrgId = validatedAdminOrganization(identity.user.id, membership);
         setUserRole('org_admin');
-      }
-
-      // 2. If org_admin and no stored orgId, get user session to find their true organization
-      if (!targetOrgId && storedRole !== 'user') {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.email) {
-          const { data: userOrg } = await dbClient
-            .from('organizations')
-            .select('id')
-            .eq('admin_email', session.user.email)
-            .maybeSingle();
-          
-          if (userOrg?.id) {
-            targetOrgId = userOrg.id;
-          }
-        }
+        setCurrentUser(null);
       }
 
       // Fail closed: no customer is a default organization.

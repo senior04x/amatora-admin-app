@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
+import { validatedAdminOrganization } from '../utils/adminMembership';
 import { logUserLoginWithLocation } from '../utils/locationLogger';
 
 interface LoginScreenProps {
@@ -81,15 +82,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       });
 
       if (!authError && authData?.user) {
-        // Verify if user is org_admin
-        const { data: orgData } = await dbClient
-          .from('organizations')
-          .select('id')
-          .eq('admin_email', loginEmail)
-          .limit(1);
+        // Query authority by the authenticated UID, never by a public email.
+        const { data: adminRecord, error: membershipError } = await dbClient
+          .from('admin_users').select('id,role,organization_id')
+          .eq('id', authData.user.id).maybeSingle();
+        if (membershipError) throw new Error('Administrator huquqini tekshirib bo‘lmadi. Qayta urinib ko‘ring.');
 
-        if (orgData && orgData.length > 0) {
-          const targetOrgId = orgData[0].id;
+        if (adminRecord) {
+          const targetOrgId = validatedAdminOrganization(authData.user.id, adminRecord);
           await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
           await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
           await AsyncStorage.setItem('@amatora_user_email', loginEmail);

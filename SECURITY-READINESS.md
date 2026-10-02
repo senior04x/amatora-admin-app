@@ -74,3 +74,13 @@ Read-only catalog queries executed in BEGIN READ ONLY transactions with a 5-seco
 - Existing mobile organizer creation writes organization_users.password directly and does not create a corresponding Auth identity. Therefore deleting fallback login alone would lock these accounts out.
 
 Coordinated migration order: first implement a server-authorized organizer provisioning endpoint and immutable Auth UID membership; migrate existing organizers using a deliberate activation/reset flow without copying passwords; update mobile/web identity resolution; verify isolated authorization tests; then remove broad database policies and legacy password paths in one controlled release.
+
+## Verified mobile administrator organization (local, undeployed)
+
+LoginScreen Auth-success admin branch now queries admin_users by authenticated user ID rather than organizations.admin_email. OrgContext admin branch calls Auth getUser, reads id/role/organization_id by verified UID and ignores cached organization for authority. A missing/invalid mapping fails closed; customer one is a valid exact mapping, never a fallback. Four offline helper/ID tests and TypeScript check pass. No login, location notification, account or production operation was invoked during tests.
+
+Release prerequisites: inventory legitimate Auth administrators and their admin_users UID mappings before deployment; administrators without mappings will be blocked. admin_users still permits client writes in production, so verified lookup alone is not secure until its grants/policies are repaired. Legacy organizer role=user path still relies on cache/email/password and must be migrated; local role switching to that path is not yet a secure boundary. Existing direct-password fallbacks remain undeployed migration work. Do not claim production readiness or release this partial migration.
+
+Correction to earlier web notes: separate organization repository commits removed web identity fallback and prepared server creation/edit code. Its Organizations.jsx is currently not routed. Those findings do not mean mobile organizers or live database policies are fixed.
+
+Manual UI verification after coordinated migration: npx expo start from amatora-admin-app; use isolated fixture accounts only. Confirm valid admin restores its exact organization, missing membership blocks data, and altered cached organization cannot change the admin's organization. Device UI verification has not been performed.
