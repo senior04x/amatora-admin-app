@@ -285,7 +285,7 @@ export const AccountScreen: React.FC<{
 
       const { data, error } = await dbClient
         .from('organization_users')
-        .select('*')
+        .select('id,organization_id,full_name,email,role,created_at,avatar_url')
         .eq('organization_id', targetOrgId)
         .order('id', { ascending: false });
 
@@ -1467,7 +1467,6 @@ export const AccountScreen: React.FC<{
                     <View style={{ flex: 1 }}>
                       <Text style={[{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }, Platform.OS === 'android' && { color: colors.textPrimary }]}>{item.full_name || 'Organizator'}</Text>
                       <Text style={[{ color: '#94A3B8', fontSize: 12, marginTop: 2 }, Platform.OS === 'android' && { color: colors.textMuted }]}>{item.email}</Text>
-                      <Text style={[{ color: '#64748B', fontSize: 11, marginTop: 1 }, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Parol: ${item.password}`}</Text>
                     </View>
 
                     <TouchableOpacity onPress={() => handleDeleteOrganizer(item.id)} style={{ padding: 6 }}>

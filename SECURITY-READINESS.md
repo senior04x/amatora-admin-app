@@ -65,3 +65,12 @@ Read-only catalog queries executed in BEGIN READ ONLY transactions with a 5-seco
 3. Replace direct password queries with authenticated login and derive organization/role from trusted server identity. Existing organizer accounts need a planned migration; never copy plaintext passwords to new app code or logs.
 4. Prepare scoped policies and removal of broad overlapping policies together with tests: anonymous credential/membership read denial, anonymous mutation denial, cross-organization mutation denial, valid own-organization admin operations and intended public football reads.
 5. Verify recovery backup and rollback before a coordinated rollout. No production policy change has been made in this audit stage.
+
+## Client password-list containment and login inventory
+
+- Mobile organizer lists and OrgContext current-user loading now select explicit profile fields without password. Password values are no longer displayed in the two organizer lists. This reduces exposure in the normal UI but does not repair database permissions. Login fallback queries and explicit credential-edit paths remain pending coordinated migration.
+- Web admin Login.jsx uses Supabase Auth. Organizations.jsx invokes auth.admin.createUser from client code and then inserts admin_users; creation must move behind server authorization. No actual account was created during this audit.
+- Web OrgContext.jsx trusts user_metadata role/organization as a fallback and defaults to organization 1. This separate web path remains unfixed; mobile changes do not protect it. It must be addressed in its repository as the next bounded code task.
+- Existing mobile organizer creation writes organization_users.password directly and does not create a corresponding Auth identity. Therefore deleting fallback login alone would lock these accounts out.
+
+Coordinated migration order: first implement a server-authorized organizer provisioning endpoint and immutable Auth UID membership; migrate existing organizers using a deliberate activation/reset flow without copying passwords; update mobile/web identity resolution; verify isolated authorization tests; then remove broad database policies and legacy password paths in one controlled release.

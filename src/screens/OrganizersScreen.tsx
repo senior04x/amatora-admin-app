@@ -48,7 +48,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
 
       const { data, error } = await dbClient
         .from('organization_users')
-        .select('*')
+        .select('id,organization_id,full_name,email,role,created_at,avatar_url')
         .eq('organization_id', targetOrgId)
         .order('id', { ascending: false });
 
@@ -460,7 +460,6 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.userName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{item.full_name || 'Organizator'}</Text>
                     <Text style={[styles.userEmail, Platform.OS === 'android' && { color: colors.textSecondary }]}>{item.email}</Text>
-                    <Text style={[styles.userPassword, Platform.OS === 'android' && { color: colors.textMuted }]}>{`Parol: ${item.password}`}</Text>
                   </View>
 
                   <TouchableOpacity

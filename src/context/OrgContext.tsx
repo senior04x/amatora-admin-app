@@ -123,7 +123,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
       if (sessionEmail) {
         const { data: uRec } = await dbClient
           .from('organization_users')
-          .select('*')
+          .select('id,organization_id,full_name,email,role,created_at,avatar_url')
           .ilike('email', sessionEmail)
           .maybeSingle();
 
