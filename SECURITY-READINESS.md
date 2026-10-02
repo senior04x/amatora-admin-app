@@ -47,3 +47,21 @@ These definitions are verified live, but actual API exposure also depends on tab
 The mobile LoginScreen and WelcomeScreen still query password fields directly in organization_users/admin_users as a fallback. Removing public access before replacing those fallback paths can lock out existing administrators. Existing organization-scoped permissive policies must be assessed together with broad permissive policies; adding another scoped permissive policy is not sufficient to narrow a broader one.
 
 Next bounded stage: read only pg_policies, table/column privileges, RLS flags, identity mapping columns and relevant SECURITY DEFINER function definitions. Then prepare an isolated two-organization authorization test and login migration/rollback plan before production policy changes. Do not export passwords, tokens, emails or personal customer rows.
+
+## Live grants and identity metadata — 2026-10-02
+
+Read-only catalog queries executed in BEGIN READ ONLY transactions with a 5-second statement timeout. No business-table rows or credential values were selected.
+
+- admin_users, organization_users and matches: RLS enabled, not forced; anon and authenticated have table SELECT/INSERT/UPDATE/DELETE grants. Grants alone do not bypass RLS.
+- organization_users.password: anon and authenticated both have column SELECT privilege. Combined with its public ALL/true permissive policy and absence of restrictive policies, this table is not protected from those roles at the database authorization layer. No password values were read.
+- admin_users: no password column exists in the live schema; the app's fallback password query against this table is incompatible with the live schema. Its two policies allow public reads and unrestricted authenticated management.
+- All policies on these three tables are PERMISSIVE. Broad access remains effective alongside narrower organization policies.
+- get_user_org_id() is STABLE SECURITY DEFINER, search_path public/pg_temp. It maps JWT email to organization_users.email with LIMIT 1, then falls back to organizations.admin_email. Since organization_users is publicly writable, this mapping source is not trustworthy. Email uniqueness and authentication ownership still need verification.
+
+## Required next implementation stage
+
+1. Inventory web/admin-app account creation and login dependencies. Do not silently disable working login fallbacks.
+2. Prepare server-verified admin identity tied to an immutable auth user ID; ordinary clients must not create or modify authoritative organization/role mappings. Organizer invitations/creation must be authorized server-side.
+3. Replace direct password queries with authenticated login and derive organization/role from trusted server identity. Existing organizer accounts need a planned migration; never copy plaintext passwords to new app code or logs.
+4. Prepare scoped policies and removal of broad overlapping policies together with tests: anonymous credential/membership read denial, anonymous mutation denial, cross-organization mutation denial, valid own-organization admin operations and intended public football reads.
+5. Verify recovery backup and rollback before a coordinated rollout. No production policy change has been made in this audit stage.
