@@ -368,7 +368,7 @@ export const AccountScreen: React.FC<{
   const [editName, setEditName] = useState(currentOrg?.name || '');
   const [editSlug, setEditSlug] = useState(currentOrg?.slug || '');
   const [editEmail, setEditEmail] = useState(currentOrg?.admin_email || currentOrg?.email || '');
-  const [editPassword, setEditPassword] = useState(currentOrg?.admin_password || currentOrg?.password || '');
+  const [editPassword, setEditPassword] = useState('');
   // Phone suffix only (without +998 prefix)
   const rawPhone = (v: string) => v.replace(/^\+998\s?/, '').replace(/^\+998/, '');
   const [editPhoneSuffix, setEditPhoneSuffix] = useState(rawPhone(currentOrg?.contact_phone || currentOrg?.phone || ''));
@@ -377,6 +377,12 @@ export const AccountScreen: React.FC<{
     Array.isArray(currentOrg?.brand_colors) ? currentOrg.brand_colors : ['#00FF87']
   );
   const [isSavingInfo, setIsSavingInfo] = useState(false);
+  useEffect(() => {
+    if (!isEditingInfo) {
+      setEditPassword('');
+      setShowPassword(false);
+    }
+  }, [isEditingInfo]);
 
   const handleAddBrandColor = () => {
     setEditBrandColors((prev) => [...prev, '#38BDF8']);
@@ -409,14 +415,14 @@ export const AccountScreen: React.FC<{
           if (sessionEmail) {
             const { data: userRec } = await dbClient
               .from('organization_users')
-              .select('*')
+              .select('id,organization_id,full_name,email,avatar_url')
+              .eq('organization_id', requireOrganizationId(orgId || currentOrg?.id))
               .ilike('email', sessionEmail)
               .maybeSingle();
 
             if (userRec) {
               setEditName(userRec.full_name || 'Organizator');
               setEditEmail(userRec.email || sessionEmail);
-              setEditPassword(userRec.password || '');
               setUserAvatarUrl(userRec.avatar_url || null);
               return;
             }
@@ -430,7 +436,6 @@ export const AccountScreen: React.FC<{
         setEditName(currentOrg.name || '');
         setEditSlug(currentOrg.slug || '');
         setEditEmail(currentOrg.admin_email || currentOrg.email || '');
-        setEditPassword(currentOrg.admin_password || currentOrg.password || '');
         const phoneVal = currentOrg.contact_phone || currentOrg.phone || '';
         setEditPhoneSuffix(rawPhone(phoneVal));
         setEditBrandColors(Array.isArray(currentOrg.brand_colors) ? currentOrg.brand_colors : ['#00FF87']);
@@ -985,14 +990,14 @@ export const AccountScreen: React.FC<{
             {/* 4. Password Input with Eye Toggle */}
             <View style={styles.inlineInputGroup}>
               <Text style={[styles.inlineInputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>
-                {userRole === 'user' ? "KIRISH PAROLI *" : "ADMIN PAROLI *"}
+                {userRole === 'user' ? "YANGI KIRISH PAROLI (IXTIYORIY)" : "YANGI ADMIN PAROLI (IXTIYORIY)"}
               </Text>
               <View style={[styles.passwordInputWrapper, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}>
                 <TextInput
                   style={[styles.textInput, { flex: 1, borderWidth: 0, backgroundColor: 'transparent' }, Platform.OS === 'android' && { color: colors.textPrimary }]}
                   value={editPassword}
                   onChangeText={setEditPassword}
-                  placeholder="Yangi parol..."
+                  placeholder="O‘zgartirmaslik uchun bo‘sh qoldiring"
                   placeholderTextColor={colors.textMuted}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"

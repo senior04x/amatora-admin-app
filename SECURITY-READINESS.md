@@ -84,3 +84,9 @@ Release prerequisites: inventory legitimate Auth administrators and their admin_
 Correction to earlier web notes: separate organization repository commits removed web identity fallback and prepared server creation/edit code. Its Organizations.jsx is currently not routed. Those findings do not mean mobile organizers or live database policies are fixed.
 
 Manual UI verification after coordinated migration: npx expo start from amatora-admin-app; use isolated fixture accounts only. Confirm valid admin restores its exact organization, missing membership blocks data, and altered cached organization cannot change the admin's organization. Device UI verification has not been performed.
+
+## Active account editor no longer fetches/prefills stored passwords
+
+AccountScreen initializes password input empty and clears it plus visibility when editing closes. Account profile query now selects id/organization_id/full_name/email/avatar_url and filters the current organization; it does not retrieve stored credentials. The UI labels the new-password field optional and explains leaving it blank retains the existing password. This does not change or remove existing login credentials. TypeScript and the four existing ID/membership tests pass (those tests do not verify device UI). No test account or production data was created, updated or deleted.
+
+Legacy credential writes and plaintext organizer creation still exist and remain release blockers. This is exposure containment only, not completed Auth migration. Manual local verification: npx expo start, open Account edit with an isolated fixture, confirm password is empty, close/reopen after typing without saving and confirm input/eye reset. Do not save production credential changes as a test.
