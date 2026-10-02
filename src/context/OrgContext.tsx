@@ -1,10 +1,12 @@
+import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { AppState, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
+import { AppState, ActivityIndicator, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
 import { triggerIosCrescendoHaptic } from '../utils/haptics';
+import { useTheme } from './ThemeContext';
 
 interface ToastOptions {
   message: string;
@@ -48,7 +50,8 @@ export const useOrg = () => {
   return ctx;
 };
 
-export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => void }> = ({ children, onLogout }) => {
+  const { colors } = useTheme();
   const [orgId, setOrgId] = useState<number | null>(null);
   const [currentOrg, setCurrentOrg] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -141,13 +144,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const storedRole = await AsyncStorage.getItem('@amatora_user_role');
       const storedOrgId = await AsyncStorage.getItem('@amatora_org_id');
 
-      let targetOrgId: number | null = null;
-      if (storedOrgId) {
-        const parsedId = parseInt(storedOrgId, 10);
-        if (!isNaN(parsedId) && parsedId > 0) {
-          targetOrgId = parsedId;
-        }
-      }
+      let targetOrgId = parseOrganizationId(storedOrgId);
 
       if (storedRole === 'user') {
         setUserRole('user');
@@ -172,19 +169,20 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      // 3. Fallback only if no org could be determined
-      if (!targetOrgId) {
-        targetOrgId = 1;
-      }
-
-      setOrgId(targetOrgId);
+      // Fail closed: no customer is a default organization.
+      if (!targetOrgId) throw new Error('Organization not resolved');
 
       // 4. Fetch organization record
-      const { data } = await dbClient
+      const { data, error } = await dbClient
         .from('organizations')
         .select('*')
         .eq('id', targetOrgId)
         .maybeSingle();
+
+      if (error || !data || parseOrganizationId(data.id) !== targetOrgId) {
+        throw new Error('Organization unavailable');
+      }
+      setOrgId(targetOrgId);
 
       if (data) {
         // Merge data
@@ -203,7 +201,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       // 3. Fetch registration status from sponsors KV table for this specific org
-      const currentOrgId = targetOrgId || 1;
+      const currentOrgId = targetOrgId;
       const { data: spReg } = await dbClient
         .from('sponsors')
         .select('logo_url')
@@ -248,18 +246,27 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error('Collab leagues error:', err);
       }
     } catch (err) {
-      console.error('Org load error:', err);
+      setOrgId(null);
+      setCurrentOrg(null);
+      setCurrentUser(null);
+      setUserRole('user');
+      setCollabLeagueIds([]);
+      setCollabLeagueNames([]);
+      setUnreadNotificationsCount(0);
+      setTransferWindowOpen(false);
+      setIsRegistrationOpen(false);
     } finally {
       setLoading(false);
     }
   };
 
   const toggleTransferWindow = async (val: boolean) => {
+    if (!orgId) return;
     const prev = transferWindowOpen;
     setTransferWindowOpen(val);
     try {
       const dbClient = supabase;
-      const { error } = await dbClient.from('organizations').update({ transfer_window_open: val }).eq('id', orgId || 1);
+      const { error } = await dbClient.from('organizations').update({ transfer_window_open: val }).eq('id', requireOrganizationId(orgId));
       if (error) throw error;
 
       showToast({
@@ -277,9 +284,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleRegistrationStatus = async (val: boolean) => {
+    if (!orgId) return;
     const prev = isRegistrationOpen;
     setIsRegistrationOpen(val);
-    const currentOrgId = orgId || 1;
+    const currentOrgId = requireOrganizationId(orgId);
 
     try {
       const dbClient = supabase;
@@ -318,8 +326,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     fetchOrg();
 
+    if (!orgId) return;
+
     // Single fluent chain for Realtime listeners
-    const targetOrgId = orgId || 1;
+    const targetOrgId = requireOrganizationId(orgId);
     const channel = supabase
       .channel(`app_rt_status_${targetOrgId}_${Date.now()}`)
       .on(
@@ -373,9 +383,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Load cached read notification state on mount & listen to changes
   useEffect(() => {
+    if (!orgId) return;
     fetchLiveUnreadCount();
 
-    const targetOrgId = currentOrg?.id || orgId || 1;
+    const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
     const channel = supabase
       .channel(`org_notif_channel_${targetOrgId}_${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
@@ -394,9 +405,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [orgId, currentOrg?.id]);
 
   const fetchLiveUnreadCount = async () => {
+    if (!orgId) return;
     try {
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
       // Read persisted state directly from AsyncStorage
       const rawIds = await AsyncStorage.getItem('@amatora_read_notif_ids');
@@ -499,8 +511,9 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const markAllNotificationsAsRead = async (allIds: string[]) => {
+    if (!orgId) return;
     try {
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
       const now = Date.now();
 
       // Save timestamp so ANY application created before now is considered read forever on this device
@@ -553,7 +566,22 @@ export const OrgProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshNotificationsCount: fetchLiveUnreadCount,
       }}
     >
-      {children}
+      {orgId && currentOrg ? children : (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: colors.bgPrimary }}>
+          {loading ? <ActivityIndicator color={colors.textPrimary} size="large" /> : (
+            <>
+              <Text style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '700', textAlign: 'center' }}>Tashkilotingiz aniqlanmadi</Text>
+              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginVertical: 16 }}>Tashkilot ma’lumotlariga kirish to‘xtatildi. Qayta urinib ko‘ring yoki hisobingizga qayta kiring.</Text>
+              <TouchableOpacity accessibilityRole="button" onPress={() => { setLoading(true); fetchOrg(); }} style={{ padding: 16 }}>
+                <Text style={{ color: colors.accentBlue }}>Qayta urinish</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" onPress={onLogout} style={{ padding: 16 }}>
+                <Text style={{ color: colors.textPrimary }}>Hisobdan chiqish</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      )}
 
       {/* Floating Top Toast Banner */}
       {toast.visible && (

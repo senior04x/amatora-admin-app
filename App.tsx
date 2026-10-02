@@ -631,7 +631,7 @@ function AppContent() {
           onReset={handleLogoutApp}
         />
       ) : (
-        <OrgProvider>
+        <OrgProvider onLogout={handleLogoutApp}>
           <MainAppContent onLogout={handleLogoutApp} />
         </OrgProvider>
       )}

@@ -1,8 +1,9 @@
+import { requireOrganizationId } from '../utils/organizationId';
 /**
  * Grouped Query Key factories for deterministic cache management & invalidation.
  */
 export const queryKeys = {
-  dashboard: (orgId: any) => ['dashboard', Number(orgId) || 1] as const,
+  dashboard: (orgId: any) => ['dashboard', requireOrganizationId(orgId)] as const,
   
   players: (
     orgId: any,
@@ -15,7 +16,7 @@ export const queryKeys = {
     collabLeagueNames: string[] = []
   ) => [
     'players',
-    Number(orgId) || 1,
+    requireOrganizationId(orgId),
     search.trim(),
     page,
     pageSize,
@@ -26,7 +27,7 @@ export const queryKeys = {
   ] as const,
   
   teams: (orgId: any, collabLeagueNames: string[] = []) => 
-    ['teams', Number(orgId) || 1, (collabLeagueNames || []).sort().join(',')] as const,
+    ['teams', requireOrganizationId(orgId), (collabLeagueNames || []).sort().join(',')] as const,
 
   paginatedTeams: (
     orgId: any,
@@ -38,7 +39,7 @@ export const queryKeys = {
   ) =>
     [
       'paginatedTeams',
-      Number(orgId) || 1,
+      requireOrganizationId(orgId),
       search.trim(),
       page,
       pageSize,
@@ -55,7 +56,7 @@ export const queryKeys = {
     pageSize: number = 15
   ) => [
     'applications',
-    Number(orgId) || 1,
+    requireOrganizationId(orgId),
     tab,
     status,
     league,
@@ -64,29 +65,29 @@ export const queryKeys = {
   ] as const,
 
   applicationsCounts: (orgId: any, tab: 'players' | 'teams' = 'players') =>
-    ['applicationsCounts', Number(orgId) || 1, tab] as const,
+    ['applicationsCounts', requireOrganizationId(orgId), tab] as const,
 
   teamRoster: (orgId: any, teamId: any) =>
-    ['teamRoster', Number(orgId) || 1, String(teamId)] as const,
+    ['teamRoster', requireOrganizationId(orgId), String(teamId)] as const,
   
   matches: (orgId: any, leagueName: string = 'all', collabLeagueNames: string[] = []) => 
-    ['matches', Number(orgId) || 1, leagueName, (collabLeagueNames || []).sort().join(',')] as const,
+    ['matches', requireOrganizationId(orgId), leagueName, (collabLeagueNames || []).sort().join(',')] as const,
   
   finishedMatches: (orgId: any, leagueName: string = 'all', page: number = 0, pageSize: number = 15, collabLeagueNames: string[] = [], tournamentFilter: string = 'all') =>
-    ['finishedMatches', Number(orgId) || 1, leagueName, page, pageSize, (collabLeagueNames || []).sort().join(','), tournamentFilter] as const,
+    ['finishedMatches', requireOrganizationId(orgId), leagueName, page, pageSize, (collabLeagueNames || []).sort().join(','), tournamentFilter] as const,
   
   transfers: (orgId: any, status: string = 'all', page: number = 0, pageSize: number = 15) => 
-    ['transfers', Number(orgId) || 1, status, page, pageSize] as const,
+    ['transfers', requireOrganizationId(orgId), status, page, pageSize] as const,
   
   leagues: (orgId: any, collabLeagueIds: number[] = []) => 
-    ['leagues', Number(orgId) || 1, (collabLeagueIds || []).sort().join(',')] as const,
+    ['leagues', requireOrganizationId(orgId), (collabLeagueIds || []).sort().join(',')] as const,
   
   news: (orgId: any) => 
-    ['news', Number(orgId) || 1] as const,
+    ['news', requireOrganizationId(orgId)] as const,
   
   sponsors: (orgId: any) => 
-    ['sponsors', Number(orgId) || 1] as const,
+    ['sponsors', requireOrganizationId(orgId)] as const,
   
   auditLogs: (orgId: any) => 
-    ['auditLogs', Number(orgId) || 1] as const,
+    ['auditLogs', requireOrganizationId(orgId)] as const,
 };

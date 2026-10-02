@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Animated, RefreshControl, Platform, PanResponder, Easing, LayoutAnimation, UIManager, useWindowDimensions } from 'react-native';
 import { BlurView } from '../components/SafeBlurView';
@@ -733,21 +734,21 @@ export const DashboardScreen: React.FC<Props> = ({
     const channel = supabase
       .channel('dashboard_realtime_channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leagues' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['leagues', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['leagues', requireOrganizationId(orgId)] });
       })
       .subscribe();
 
@@ -853,8 +854,8 @@ export const DashboardScreen: React.FC<Props> = ({
         matchId={activeControlMatchId}
         onBack={() => {
           setActiveControlMatchId(null);
-          queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
-          queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+          queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
         }}
       />
     );

@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabaseClient';
 import { queryKeys } from './queryKeys';
@@ -12,7 +13,7 @@ import { getTournamentRoundOptions } from '../utils/tournamentUtils';
  */
 export async function getLeagueNamesForTournamentFilter(orgId: any, tournamentFilter: string): Promise<string[] | null> {
   if (!tournamentFilter || tournamentFilter === 'all' || tournamentFilter === 'leagues') return null;
-  const targetOrgId = Number(orgId) || 1;
+  const targetOrgId = requireOrganizationId(orgId);
   try {
     if (tournamentFilter === 'tournaments_all') {
       const { data, error } = await supabase
@@ -196,7 +197,7 @@ export const useLeaguesData = (orgId: any, collabLeagueIds: number[] = []) => {
   return useQuery({
     queryKey: queryKeys.leagues(orgId, collabLeagueIds),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       let query = supabase
         .from('leagues')
         .select('*')
@@ -223,7 +224,7 @@ export const useNewsData = (orgId: any) => {
   return useQuery({
     queryKey: queryKeys.news(orgId),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const { data, error } = await supabase
         .from('news')
         .select('*')
@@ -244,7 +245,7 @@ export const useSponsorsData = (orgId: any) => {
   return useQuery({
     queryKey: queryKeys.sponsors(orgId),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const { data, error } = await supabase
         .from('sponsors')
         .select('*')
@@ -275,7 +276,7 @@ export const usePlayersData = (
   return useQuery({
     queryKey: [...queryKeys.players(orgId, search, page, pageSize, archived, league, String(teamId), collabLeagueNames), tournamentFilter],
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const from = page * pageSize;
       const to = from + pageSize; // Fetch 26 records for hasMore check
 
@@ -411,7 +412,7 @@ export const useTeamsPaginatedData = (
   return useQuery({
     queryKey: [...queryKeys.paginatedTeams(orgId, search, page, pageSize, league, collabLeagueNames), tournamentFilter],
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const from = page * pageSize;
       const to = from + pageSize; // 11 records
 
@@ -484,7 +485,7 @@ export const useApplicationsData = (
   return useQuery({
     queryKey: [...queryKeys.applications(orgId, tab, status, league, page, pageSize), tournamentFilter],
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const from = page * pageSize;
       const to = from + pageSize; // 15 + 1
       const isPlayerTab = tab === 'players';
@@ -647,7 +648,7 @@ export const useApplicationsCountsData = (
   return useQuery({
     queryKey: queryKeys.applicationsCounts(orgId, tab),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const isPlayerTab = tab === 'players';
       const table = isPlayerTab ? 'applications' : 'teams';
 
@@ -723,7 +724,7 @@ export const useTeamsData = (orgId: any, collabLeagueNames: string[] = []) => {
   return useQuery({
     queryKey: queryKeys.teams(orgId),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       let query = supabase
         .from('teams')
         .select('id, name, logo_url, league, organization_id, status, is_archived')
@@ -758,7 +759,7 @@ export const useTransfersData = (
   return useQuery({
     queryKey: queryKeys.transfers(orgId, status, page, pageSize),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const { data, error } = await supabase.rpc('get_organization_transfers', {
         p_org_id: targetOrgId,
         p_status: status,
@@ -793,7 +794,7 @@ export const useMatchesData = (
   return useQuery({
     queryKey: queryKeys.matches(orgId, leagueName, collabLeagueNames),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
 
       let query = supabase
         .from('matches')
@@ -929,7 +930,7 @@ export const useFinishedMatchesData = (
   return useQuery({
     queryKey: queryKeys.finishedMatches(orgId, leagueName, page, pageSize, collabLeagueNames, tournamentFilter),
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const from = page * pageSize;
       const to = from + pageSize - 1;
 
@@ -1047,9 +1048,9 @@ export const useLeagueRoundsData = (
   collabLeagueNames: string[] = []
 ) => {
   return useQuery({
-    queryKey: ['leagueRounds', Number(orgId) || 1, leagueName, (collabLeagueNames || []).sort().join(',')],
+    queryKey: ['leagueRounds', requireOrganizationId(orgId), leagueName, (collabLeagueNames || []).sort().join(',')],
     queryFn: async () => {
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       let query = supabase.from('matches').select('round');
 
       if (leagueName && leagueName !== 'all') {

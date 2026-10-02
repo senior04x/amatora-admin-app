@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -296,16 +297,16 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
     const channel = supabase
       .channel('applications_realtime_channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       })
       .subscribe();
 
@@ -521,7 +522,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
     try {
       const dbClient = supabase;
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
       const isPlayerTab = activeTab === 'players';
       const currentPageSize = isPlayerTab ? PLAYER_PAGE_SIZE : TEAM_PAGE_SIZE;
 
@@ -751,8 +752,8 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
 
       if (teamId) {
         await dbClient.from('teams').update({ status: newStatus }).eq('id', teamId);
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
       }
     } catch (e) {
       console.error(e);
@@ -806,7 +807,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                 birth_date: item.birth_date || null,
                 avatar_url: item.photo_url || item.avatar_url || null,
                 status: 'approved',
-                organization_id: orgId || item.organization_id || 1,
+                organization_id: requireOrganizationId(orgId || item.organization_id),
               },
             ]);
           }
@@ -828,10 +829,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           await syncTeamStatusFromPlayers(tId, tName);
         }
 
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       } catch (err: any) {
         console.error('Background set player status error:', err);
       }
@@ -861,10 +862,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           .update({ status: 'approved' })
           .or(`team_id.eq.${item.id},team_name.eq.${item.name}`);
 
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       } catch (err: any) {
         console.error('Background approve team app error:', err);
       }
@@ -886,10 +887,10 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
           .update({ status: 'rejected' })
           .or(`team_id.eq.${item.id},team_name.eq.${item.name}`);
 
-        queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['applicationsCounts', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       } catch (err: any) {
         console.error('Background reject team app error:', err);
       }
@@ -923,11 +924,11 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
               if (selectedDetailItem?.id === item.id) {
                 setSelectedDetailItem(null);
               }
-              queryClient.invalidateQueries({ queryKey: ['applications', Number(orgId) || 1] });
-              queryClient.invalidateQueries({ queryKey: ['applicationsCounts', Number(orgId) || 1] });
-              queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
-              queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-              queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+              queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
+              queryClient.invalidateQueries({ queryKey: ['applicationsCounts', requireOrganizationId(orgId)] });
+              queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
+              queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+              queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
             } catch (err) {
               console.error('Delete error:', err);
               showToast("O'chirishda xatolik yuz berdi");

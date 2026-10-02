@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -421,7 +422,7 @@ export const TransfersScreen: React.FC = () => {
       const { data, error } = await supabase
         .from('organizations')
         .select('transfer_window_open')
-        .eq('id', orgId || 1)
+        .eq('id', requireOrganizationId(orgId))
         .maybeSingle();
 
       if (error) throw error;
@@ -474,7 +475,7 @@ export const TransfersScreen: React.FC = () => {
       const { error } = await dbClient
         .from('organizations')
         .update({ transfer_window_open: val })
-        .eq('id', orgId || 1);
+        .eq('id', requireOrganizationId(orgId));
 
       if (error) throw error;
 
@@ -495,7 +496,7 @@ export const TransfersScreen: React.FC = () => {
       const { data: orgTeams } = await dbClient
         .from('teams')
         .select('id')
-        .eq('organization_id', orgId || 1);
+        .eq('organization_id', requireOrganizationId(orgId));
 
       if (!orgTeams || orgTeams.length === 0) return;
       const teamIds = orgTeams.map((t) => t.id);
@@ -592,8 +593,8 @@ export const TransfersScreen: React.FC = () => {
         status: newStatus,
       });
 
-      queryClient.invalidateQueries({ queryKey: ['transfers', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['transfers', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (err: any) {
       console.error('Error updating transfer status:', err);
       Alert.alert('Xatolik', err.message || "Statusni o'zgartirishda xatolik yuz berdi");
@@ -630,8 +631,8 @@ export const TransfersScreen: React.FC = () => {
       if (error) throw error;
 
       setTransferToDelete(null);
-      queryClient.invalidateQueries({ queryKey: ['transfers', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['transfers', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (err: any) {
       console.error('Error deleting transfer:', err);
       Alert.alert('Xatolik', "O'chirishda xatolik yuz berdi");
@@ -710,8 +711,8 @@ export const TransfersScreen: React.FC = () => {
       }
 
       setEditingTransfer(null);
-      queryClient.invalidateQueries({ queryKey: ['transfers', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['transfers', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (err: any) {
       console.error('Error saving transfer edit:', err);
       Alert.alert('Xatolik', 'Saqlashda xatolik yuz berdi: ' + (err.message || ''));

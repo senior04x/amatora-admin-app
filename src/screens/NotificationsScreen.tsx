@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -59,7 +60,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
   const fetchLiveNotifications = async () => {
     try {
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
       const notifs: AppNotification[] = [];
 
       // Read lastReadAllTime for this organization
@@ -296,7 +297,7 @@ export const NotificationsScreen: React.FC<NotificationsScreenProps> = ({
     setLoading(true);
     fetchLiveNotifications();
 
-    const targetOrgId = currentOrg?.id || orgId || 1;
+    const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
     const channel = supabase
       .channel(`notifs_page_${targetOrgId}_${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {

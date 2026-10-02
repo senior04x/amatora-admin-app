@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -43,7 +44,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     try {
       setLoadingOrganizers(true);
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
       const { data, error } = await dbClient
         .from('organization_users')
@@ -67,7 +68,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     try {
       setLoadingLogs(true);
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
       const { data, error } = await dbClient
         .from('user_login_logs')
@@ -197,7 +198,7 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
     try {
       setIsCreatingOrgUser(true);
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
       // Upload avatar image to Supabase Storage bucket first to get public HTTP URL
       let uploadedAvatarUrl: string | null = null;

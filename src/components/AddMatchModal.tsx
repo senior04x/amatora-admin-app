@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
   Modal,
@@ -90,7 +91,7 @@ export const AddMatchModal: React.FC<Props> = ({ visible, onClose, onSuccess }) 
     setLoading(true);
     try {
       const payload = {
-        organization_id: orgId || 1,
+        organization_id: requireOrganizationId(orgId),
         league: selectedLeague,
         home_team_id: homeTeamId,
         away_team_id: awayTeamId,

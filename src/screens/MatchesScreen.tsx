@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -256,10 +257,10 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     const matchesChannel = supabase
       .channel('matches_list_live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_events' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
       })
       .subscribe();
 
@@ -354,15 +355,15 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         matchTime: editMatchTime,
         stadium: editStadiumName || (editingMatch as any).stadium,
         matchId: String(editingMatch.id),
-        organizationId: (editingMatch as any).organization_id || orgId || 1,
+        organizationId: requireOrganizationId((editingMatch as any).organization_id || orgId),
       });
 
       setEditingMatch(null);
-      queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (e: any) {
       Alert.alert("Xatolik", e.message || "Tahrirlashda xatolik yuz berdi");
-      queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
     } finally {
       setSavingEdit(false);
     }
@@ -392,7 +393,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     // 2. Background DB & Storage deletion without blocking UI
     try {
       const dbClient = supabase;
-      const orgFolder = String((matchToDelete as any).organization_id || orgId || '1');
+      const orgFolder = String(requireOrganizationId((matchToDelete as any).organization_id || orgId));
       const matchFolder = `${orgFolder}/${targetId}`;
 
       // Clean up Replay videos from Supabase Storage in background

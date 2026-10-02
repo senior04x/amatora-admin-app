@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -521,8 +522,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     const channel = supabase
       .channel('players_realtime_channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       })
       .subscribe();
 
@@ -570,7 +571,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
               .in('league', collabLeagueNames);
             const cTeamIds = (cTeams || []).map((t: any) => t.id).filter(Boolean);
             if (cTeamIds.length > 0) {
-              query = query.or(`organization_id.eq.${orgId || 1},team_id.in.(${cTeamIds.join(',')})`);
+              query = query.or(`organization_id.eq.${requireOrganizationId(orgId)},team_id.in.(${cTeamIds.join(',')})`);
             } else if (orgId) {
               query = query.eq('organization_id', orgId);
             }
@@ -634,7 +635,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
         if (collabLeagueNames && collabLeagueNames.length > 0) {
           const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-          query = query.or(`organization_id.eq.${orgId || 1},league.in.(${escapedNames})`);
+          query = query.or(`organization_id.eq.${requireOrganizationId(orgId)},league.in.(${escapedNames})`);
         } else if (orgId) {
           query = query.eq('organization_id', orgId);
         }
@@ -668,8 +669,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
       setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
-      queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (e) {
       console.error(e);
     }
@@ -684,8 +685,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
       setToastMsg("Jamoa arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
-      queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['paginatedTeams', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['paginatedTeams', requireOrganizationId(orgId)] });
       refetchTeams();
     } catch (e) {
       console.error(e);
@@ -736,7 +737,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
     try {
       const dbClient = supabase;
-      const targetOrgId = Number(orgId) || 1;
+      const targetOrgId = requireOrganizationId(orgId);
 
       if (activeTab === 'players' && hasMorePlayers) {
         const nextPage = playerPage + 1;
@@ -1103,8 +1104,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
     setToastMsg("Muvaffaqiyatli arxivlandi! 📦");
     setTimeout(() => setToastMsg(null), 2500);
-    queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+    queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     fetchTotalCounts();
   };
 
@@ -1125,13 +1126,13 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       if (isPlayer) {
         setArchivedPlayers((prev) => prev.filter((p) => String(p.id) !== String(itemToDelete.id)));
         await dbClient.from('applications').delete().eq('id', itemToDelete.id);
-        queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       } else {
         setAccumulatedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
         setArchivedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToDelete.id)));
         await dbClient.from('teams').delete().eq('id', itemToDelete.id);
-        queryClient.invalidateQueries({ queryKey: ['teams', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
       }
       setItemToDelete(null);
       setToastMsg("Muvaffaqiyatli o'chirildi! 🗑️");
@@ -1173,8 +1174,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
       setToastMsg("O'yinchi arxivdan qaytarildi! 🔄");
       setTimeout(() => setToastMsg(null), 3000);
-      queryClient.invalidateQueries({ queryKey: ['players', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (e) {
       console.error(e);
     }

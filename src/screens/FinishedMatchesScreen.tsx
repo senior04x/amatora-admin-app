@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -346,11 +347,11 @@ export const FinishedMatchesScreen: React.FC<{
       const { error } = await supabase.from('matches').update(baseUpdatePayload).eq('id', editingMatch.id);
       if (error) throw error;
       setEditingMatch(null);
-      queryClient.invalidateQueries({ queryKey: ['finishedMatches', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['finishedMatches', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (e: any) {
       Alert.alert("Xatolik", e?.message || "O'yinni saqlashda xatolik yuz berdi");
-      queryClient.invalidateQueries({ queryKey: ['finishedMatches', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['finishedMatches', requireOrganizationId(orgId)] });
     } finally {
       setSavingEdit(false);
     }
@@ -372,7 +373,7 @@ export const FinishedMatchesScreen: React.FC<{
 
     try {
       const dbClient = supabase;
-      const orgFolder = String((matchToDelete as any).organization_id || orgId || '1');
+      const orgFolder = String(requireOrganizationId((matchToDelete as any).organization_id || orgId));
       const matchFolder = `${orgFolder}/${targetId}`;
 
       // Clean up Replay videos from Supabase Storage in background
@@ -445,7 +446,7 @@ export const FinishedMatchesScreen: React.FC<{
         initialMatch={activeControlMatch}
         onBack={() => {
           setActiveControlMatch(null);
-          queryClient.invalidateQueries({ queryKey: ['finishedMatches', Number(orgId) || 1] });
+          queryClient.invalidateQueries({ queryKey: ['finishedMatches', requireOrganizationId(orgId)] });
         }}
       />
     );

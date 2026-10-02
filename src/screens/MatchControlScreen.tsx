@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -355,7 +356,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     baseTimerSecondsRef.current = baseSec;
     timerStartedAtRef.current = startedAtIso;
 
-    const targetOrgId = match?.organization_id || orgId || 1;
+    const targetOrgId = requireOrganizationId(match?.organization_id || orgId);
     const nameKey = `MATCH_TIMER_${matchId}`;
 
     const currentHomeScore = scoreOverride?.home_score ?? match?.home_score ?? 0;
@@ -421,7 +422,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   // SEND REMOTE GOAL SIGNAL TO AMATORA-OBS (amatora.exe) REPLAY ENGINE
   const sendRemoteObsGoalSignal = async (eventUuid: string, playerName?: string, teamName?: string) => {
     try {
-      const targetOrgId = match?.organization_id || orgId || 1;
+      const targetOrgId = requireOrganizationId(match?.organization_id || orgId);
       const rawLocation = String(match?.location || '1').toLowerCase();
       const fieldId = rawLocation.includes('2') ? '2' : '1';
 
@@ -449,7 +450,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   // SEND REMOTE FINISH MATCH SIGNAL TO AMATORA-OBS TO CLEAN REPLAYS FOLDER
   const sendRemoteObsFinishSignal = async () => {
     try {
-      const targetOrgId = match?.organization_id || orgId || 1;
+      const targetOrgId = requireOrganizationId(match?.organization_id || orgId);
       const rawLocation = String(match?.location || '1').toLowerCase();
       const fieldId = rawLocation.includes('2') ? '2' : '1';
 
@@ -557,7 +558,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         if (matchData.league) {
           try {
             const leagueNameTrim = String(matchData.league).trim();
-            const targetOrgId = matchData.organization_id || orgId || 1;
+            const targetOrgId = requireOrganizationId(matchData.organization_id || orgId);
 
             const { data: orgLeague } = await dbClient
               .from('leagues')
@@ -1153,8 +1154,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           });
         }
 
-        queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
-        queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+        queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
       } catch (err: any) {
         // Rollback UI
         setEvents(prevEvents);
@@ -1244,8 +1245,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         sendRemoteObsGoalSignal(eventUuid, pName, tName);
       }
 
-      queryClient.invalidateQueries({ queryKey: ['matches', Number(orgId) || 1] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', Number(orgId) || 1] });
+      queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (err: any) {
       // Rollback UI
       setEvents(prevEvents);
@@ -1522,7 +1523,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             style={[styles.iconNavTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
             onPress={() => {
               const isField2 = String(match?.location || '').toLowerCase().includes('2');
-              const obsUrl = `https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`;
+              const obsUrl = `https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${requireOrganizationId(orgId)}`;
               Clipboard.setString(obsUrl);
               showToast(`OBS Stream URL (${match?.location || (isField2 ? '2-maydon' : '1-maydon')}) nusxalandi`);
             }}
@@ -2382,13 +2383,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
             <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`📍 Maydon: ${match?.location || '1-maydon'}`}</Text>
             <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔌 OBS WebSocket Porti: ${String(match?.location || '').toLowerCase().includes('2') ? 'ws://localhost:4456 (2-Maydon)' : 'ws://localhost:4455 (1-Maydon)'}`}</Text>
-            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔗 Stream Overlay URL:\nhttps://amatora.uz/obs/scoreboard/${String(match?.location || '').toLowerCase().includes('2') ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔗 Stream Overlay URL:\nhttps://amatora.uz/obs/scoreboard/${String(match?.location || '').toLowerCase().includes('2') ? 'stream2' : 'stream1'}?org_id=${requireOrganizationId(orgId)}`}</Text>
 
             <TouchableOpacity
               style={[styles.modalSubmitBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
               onPress={() => {
                 const isField2 = String(match?.location || '').toLowerCase().includes('2');
-                Clipboard.setString(`https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${orgId || 1}`);
+                Clipboard.setString(`https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${requireOrganizationId(orgId)}`);
                 Alert.alert("Nusxalandi", `OBS Stream Scoreboard (${isField2 ? '2-Maydon' : '1-Maydon'}) havolasi nusxalandi!`);
                 setShowObsModal(false);
               }}

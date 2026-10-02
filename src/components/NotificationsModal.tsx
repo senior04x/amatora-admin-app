@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -88,7 +89,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     try {
       setLoading(true);
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
       const notifs: AppNotification[] = [];
 
       // 1. Fetch pending new player applications (O'yinchi Arizalari)
@@ -260,7 +261,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
 
   // Realtime subscription for instant background notification updates
   useEffect(() => {
-    const targetOrgId = currentOrg?.id || orgId || 1;
+    const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
     const channel = supabase
       .channel(`notifs_rt_${targetOrgId}_${Date.now()}`)
       .on(

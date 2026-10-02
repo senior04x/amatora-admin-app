@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -331,7 +332,7 @@ export const NewsScreen: React.FC = () => {
           title: title.trim(),
           summary: content.trim().slice(0, 120),
           newsId: createdNews?.id,
-          organizationId: orgId || 1,
+          organizationId: requireOrganizationId(orgId),
         });
 
         Alert.alert('Muvaffaqiyatli', 'Yangilik muvaffaqiyatli chop etildi!');

@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -175,7 +176,7 @@ export const AccountScreen: React.FC<{
 
       if (tokenData.access_token) {
         const channelInfo = await fetchYtChannelInfo(tokenData.access_token);
-        await saveYtTokens(orgId || 1, tokenData, channelInfo);
+        await saveYtTokens(requireOrganizationId(orgId), tokenData, channelInfo);
         setYtChannelInfo(channelInfo);
         showToast({
           message: channelInfo
@@ -213,7 +214,7 @@ export const AccountScreen: React.FC<{
   const loadYouTubeStatus = async () => {
     setYtLoading(true);
     try {
-      const channelInfo = await loadYtChannelForOrg(orgId || 1);
+      const channelInfo = await loadYtChannelForOrg(requireOrganizationId(orgId));
       setYtChannelInfo(channelInfo);
     } catch (e) {
       console.error('Load YT status error:', e);
@@ -250,7 +251,7 @@ export const AccountScreen: React.FC<{
           style: 'destructive',
           onPress: async () => {
             try {
-              await disconnectYouTube(orgId || 1);
+              await disconnectYouTube(requireOrganizationId(orgId));
               setYtChannelInfo(null);
               showToast({
                 message: 'YouTube kanal uzildi',
@@ -280,7 +281,7 @@ export const AccountScreen: React.FC<{
     try {
       setLoadingOrganizers(true);
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
       const { data, error } = await dbClient
         .from('organization_users')
@@ -314,7 +315,7 @@ export const AccountScreen: React.FC<{
     try {
       setIsCreatingOrgUser(true);
       const dbClient = supabase;
-      const targetOrgId = currentOrg?.id || orgId || 1;
+      const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
       const { error } = await dbClient.from('organization_users').insert([
         {
@@ -466,7 +467,7 @@ export const AccountScreen: React.FC<{
           const dbClient = supabase;
           const fileExt = localUri.split('.').pop()?.toLowerCase().split('?')[0] || 'jpg';
           const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt) ? fileExt : 'jpg';
-          const fileName = `org_logo_${orgId || 1}_${Date.now()}.${safeExt}`;
+          const fileName = `org_logo_${requireOrganizationId(orgId)}_${Date.now()}.${safeExt}`;
 
           const response = await fetch(localUri);
           const blob = await response.blob();
@@ -488,7 +489,7 @@ export const AccountScreen: React.FC<{
           const publicUrl = urlData?.publicUrl || '';
 
           if (publicUrl) {
-            await dbClient.from('organizations').update({ logo_url: publicUrl }).eq('id', orgId || 1);
+            await dbClient.from('organizations').update({ logo_url: publicUrl }).eq('id', requireOrganizationId(orgId));
             updateOrgLocally({ logo_url: publicUrl });
             refreshOrg();
             showToast({ message: "Tashkilot logotipi muvaffaqiyatli saqlandi! ✅", type: "success" });
@@ -600,7 +601,7 @@ export const AccountScreen: React.FC<{
       (async () => {
         try {
           const dbClient = supabase;
-          const targetOrgId = orgId || currentOrg?.id || 1;
+          const targetOrgId = requireOrganizationId(orgId || currentOrg?.id);
 
           const userUpdatePayload: any = {
             full_name: editName.trim(),
@@ -653,7 +654,7 @@ export const AccountScreen: React.FC<{
     (async () => {
       try {
         const dbClient = supabase;
-        const targetOrgId = orgId || currentOrg?.id || 1;
+        const targetOrgId = requireOrganizationId(orgId || currentOrg?.id);
 
         const mainUpdatePayload: any = {
           name: editName.trim(),

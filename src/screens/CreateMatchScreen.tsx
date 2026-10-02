@@ -1,3 +1,4 @@
+import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -120,7 +121,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       const [leaguesRes, teamsRes, tournsRes] = await Promise.all([
         leaguesQuery,
         teamsQuery,
-        getActiveOrgTournaments(orgId || 1),
+        getActiveOrgTournaments(requireOrganizationId(orgId)),
       ]);
 
       if (leaguesRes.data) {
@@ -242,7 +243,7 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
     setLoading(true);
     try {
       const dbClient = supabase;
-      const activeOrgId = Number(orgId) || 1;
+      const activeOrgId = requireOrganizationId(orgId);
 
       // Conflict Guard: check if another match is scheduled on the exact same field, date & time
       let conflictQuery = dbClient
