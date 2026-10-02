@@ -1,6 +1,6 @@
 # Admin app: release security audit
 
-Status: not cleared for production release. This is a source audit; live database grants and RLS have not been verified. No production records or policies were changed.
+Status: not cleared for production release. Source audit plus partial live RLS inspection; database grants and effective access have not yet been verified. No production records or policies were changed.
 
 ## Confirmed source findings
 
@@ -31,3 +31,19 @@ Status: not cleared for production release. This is a source audit; live databas
 ## Missing-organization fix
 
 Missing or malformed organization IDs now block admin screens, organization requests and subscriptions. Organization-ID defaults to customer 1 were removed across screens and query hooks. Valid organization 1 remains supported. This client-side guard does not replace server authorization; cached ID/role trust and live RLS still require the next audit stage. No production deployment was performed.
+
+## Live RLS inspection — 2026-10-02
+
+Project: xzzyhfyazwohdqqbjiiy, main production. Inspected policy definitions in Supabase Dashboard only; no policy was saved, no customer rows were retrieved, and no mutation or notification endpoint was invoked.
+
+| Table | Policy | Verified definition | Priority |
+| --- | --- | --- | --- |
+| organization_users | Allow all access to organization_users (19120) | PERMISSIVE ALL TO public USING (true) WITH CHECK (true) | Critical: no organization or identity check at policy layer |
+| admin_users | Allow read admin_users (18499) | PERMISSIVE SELECT TO anon, authenticated USING (true) | Critical: no row restriction at policy layer; verify column grants, especially password |
+| matches | Enable all access for authenticated users (17953) | PERMISSIVE ALL TO public USING (auth.role() = 'authenticated'::text), no explicit WITH CHECK | High: authenticated access is not scoped to an organization |
+
+These definitions are verified live, but actual API exposure also depends on table/column grants and other restrictive policies. No exploit against customer data was attempted. Do not infer exposure solely from policy names.
+
+The mobile LoginScreen and WelcomeScreen still query password fields directly in organization_users/admin_users as a fallback. Removing public access before replacing those fallback paths can lock out existing administrators. Existing organization-scoped permissive policies must be assessed together with broad permissive policies; adding another scoped permissive policy is not sufficient to narrow a broader one.
+
+Next bounded stage: read only pg_policies, table/column privileges, RLS flags, identity mapping columns and relevant SECURITY DEFINER function definitions. Then prepare an isolated two-organization authorization test and login migration/rollback plan before production policy changes. Do not export passwords, tokens, emails or personal customer rows.
