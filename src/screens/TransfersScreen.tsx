@@ -26,6 +26,7 @@ import { useTransfersData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
 import { TeamTransferAccess } from '../components/TeamTransferAccess';
+import { hasTransferConsents } from '../utils/transferConsent';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -73,6 +74,7 @@ const TransferCardItem: React.FC<{
   isPending: boolean;
   isApproved: boolean;
   isRejected: boolean;
+  isBusy?: boolean;
   onApprove: (item: any, startAnim: () => Promise<void>) => void;
   onReject: (item: any, startAnim: () => Promise<void>) => void;
   onDeletePress: (item: any, startAnim: () => Promise<void>) => void;
@@ -85,6 +87,7 @@ const TransferCardItem: React.FC<{
   isPending,
   isApproved,
   isRejected,
+  isBusy = false,
   onApprove,
   onReject,
   onDeletePress,
@@ -253,7 +256,7 @@ const TransferCardItem: React.FC<{
           ) : (
             <TouchableOpacity
               activeOpacity={0.7}
-              onPress={() => onStatusClick(item)}
+              disabled={item.app_consent_required || isBusy} onPress={() => onStatusClick(item)}
               style={[styles.statusPill, { backgroundColor: `${statusColor}1A`, borderColor: `${statusColor}40` }]}
             >
               <Ionicons
@@ -267,13 +270,13 @@ const TransferCardItem: React.FC<{
           )}
 
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity style={[styles.iconActionBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]} onPress={() => onEditPress(item)}>
+            <TouchableOpacity disabled={item.app_consent_required || isBusy} style={[styles.iconActionBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }, item.app_consent_required && { opacity: 0.35 }]} onPress={() => onEditPress(item)}>
               <Ionicons name="pencil" size={16} color={colors.textSecondary} />
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.iconActionBtn, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}
-              onPress={() => onDeletePress(item, runDeleteAnim)}
+              disabled={item.app_consent_required || isBusy} onPress={() => onDeletePress(item, runDeleteAnim)}
             >
               <Ionicons name="trash-outline" size={16} color="#EF4444" />
             </TouchableOpacity>
@@ -333,19 +336,34 @@ const TransferCardItem: React.FC<{
           </View>
         </View>
 
+        {item.app_consent_required && <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+          <Text style={{ color: '#E85002', fontWeight: '700', fontSize: 12, marginBottom: 6 }}>Mobil ariza · Uch tomon roziligi</Text>
+          {(['player','old_team','new_team'] as const).map(party => {
+            const consent = (item.transfer_consents || []).find((value: any) => value.party === party &&
+              value.subject_id === item[party === 'player' ? 'player_id' : `${party}_id`]);
+            return <View key={party} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, paddingVertical: 4 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>{{player:'Futbolchi',old_team:'Eski jamoa sardori',new_team:'Yangi jamoa sardori'}[party]}</Text>
+              <Text style={{ color: consent?.decision === 'rejected' ? '#EF4444' : colors.textPrimary, fontSize: 12 }}>
+                {consent ? consent.decision === 'approved' ? 'Rozi' : 'Rad etdi' : 'Kutilmoqda'}
+              </Text>
+            </View>;
+          })}
+        </View>}
         {/* Card Action Buttons (Icon-only buttons matching ProfileUpdatesScreen) */}
         <View style={styles.cardActionsRow}>
           {isPending && (
             <>
               <TouchableOpacity
                 style={[styles.btnAction, styles.btnReject]}
+                disabled={isBusy}
                 onPress={() => onReject(item, runRejectAnim)}
               >
                 <Ionicons name="close" size={20} color="#EF4444" />
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.btnAction, styles.btnApprove, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                disabled={isBusy || !hasTransferConsents(item)}
+                style={[styles.btnAction, styles.btnApprove, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }, !hasTransferConsents(item) && { opacity: 0.35 }]}
                 onPress={() => onApprove(item, runApproveAnim)}
               >
                 <Ionicons name="checkmark" size={20} color="#000000" />
@@ -366,6 +384,8 @@ export const TransfersScreen: React.FC = () => {
 
   const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [page] = useState<number>(0);
+  const mobileOperations = useRef(new Set<string>());
+  const [mobileBusyIds, setMobileBusyIds] = useState<Set<string>>(new Set());
 
   // React Query Hooks
   const {
@@ -542,11 +562,22 @@ export const TransfersScreen: React.FC = () => {
 
   // 4. Status Action Handler (Approve / Reject / Pending with Atomic RPC)
   const handleUpdateTransferStatus = async (transfer: any, newStatus: string) => {
+    const transferKey = String(transfer.id);
+    if (transfer.app_consent_required) {
+      if (mobileOperations.current.has(transferKey)) return;
+      mobileOperations.current.add(transferKey); setMobileBusyIds(new Set(mobileOperations.current));
+    }
     try {
       const oldStatus = transfer.status;
       if (oldStatus === newStatus) return;
 
-      if (newStatus === 'approved') {
+      if (transfer.app_consent_required) {
+        if (oldStatus !== 'pending' || !['approved','rejected'].includes(newStatus)) throw new Error('Faqat kutilayotgan mobil ariza bo‘yicha qaror beriladi.');
+        if (newStatus === 'approved' && !hasTransferConsents(transfer)) throw new Error('Uch tomon roziligi hali olinmagan.');
+        const { data: updated, error } = await supabase.from('transfers').update({ status: newStatus })
+          .eq('id', transfer.id).eq('organization_id', Number(orgId)).eq('status', 'pending').select('id').single();
+        if (error || !updated) throw new Error('Ariza saqlanmadi. Holatni yangilab qayta tekshiring.');
+      } else if (newStatus === 'approved') {
         const { data: rpcRes, error: rpcErr } = await supabase.rpc('approve_transfer_request', {
           p_transfer_id: Number(transfer.id),
         });
@@ -599,15 +630,19 @@ export const TransfersScreen: React.FC = () => {
     } catch (err: any) {
       console.error('Error updating transfer status:', err);
       Alert.alert('Xatolik', err.message || "Statusni o'zgartirishda xatolik yuz berdi");
+    } finally {
+      if (transfer.app_consent_required) { mobileOperations.current.delete(transferKey); setMobileBusyIds(new Set(mobileOperations.current)); }
     }
   };
 
   const handleApproveWithAnim = async (item: any, animFunc: () => Promise<void>) => {
+    if (item.app_consent_required) { await handleUpdateTransferStatus(item, 'approved'); return; }
     if (animFunc) await animFunc();
     await handleUpdateTransferStatus(item, 'approved');
   };
 
   const handleRejectWithAnim = async (item: any, animFunc: () => Promise<void>) => {
+    if (item.app_consent_required) { await handleUpdateTransferStatus(item, 'rejected'); return; }
     if (animFunc) await animFunc();
     await handleUpdateTransferStatus(item, 'rejected');
   };
@@ -929,6 +964,7 @@ export const TransfersScreen: React.FC = () => {
                 <TransferCardItem
                   key={item.id}
                   item={item}
+                  isBusy={mobileBusyIds.has(String(item.id))}
                   statusColor={statusColor}
                   statusLabel={statusLabel}
                   isPending={isPending}

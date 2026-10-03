@@ -769,7 +769,17 @@ export const useTransfersData = (
 
       if (error) throw error;
 
-      const transfers = data ?? [];
+        const rows = data ?? [];
+        let transfers = rows;
+        if (rows.length) {
+          const { data: details, error: detailError } = await supabase.from('transfers')
+            .select('id,app_consent_required,player_id,old_team_id,new_team_id,transfer_consents(party,subject_id,decision,decided_at)')
+            .eq('organization_id', targetOrgId).in('id', rows.map((row: any) => row.id));
+          if (detailError) throw detailError;
+          const detailMap = new Map((details || []).map((row: any) => [String(row.id), row]));
+          if (rows.some((row: any) => !detailMap.has(String(row.id)))) throw new Error('Transfer details unavailable');
+          transfers = rows.map((row: any) => ({ ...row, ...detailMap.get(String(row.id)) }));
+        }
 
       return {
         transfers,
