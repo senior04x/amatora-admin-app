@@ -892,7 +892,7 @@ export const TransfersScreen: React.FC = () => {
           )}
         </View>
 
-        <TeamTransferAccess key={orgId} orgId={orgId} />
+        <TeamTransferAccess key={orgId} orgId={orgId} windowOpen={transferWindowOpen} windowBusy={windowToggling} />
 
         {/* 2. Transfers List Section */}
         {loading ? (

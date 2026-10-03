@@ -5,7 +5,7 @@ import {useTheme} from '../context/ThemeContext';
 import {supabase} from '../supabaseClient';
 
 type Team = {id:string;name:string;league:string|null;allowed:boolean};
-export const TeamTransferAccess:React.FC<{orgId:number|null}> = ({orgId}) => {
+export const TeamTransferAccess:React.FC<{orgId:number|null;windowOpen:boolean;windowBusy:boolean}> = ({orgId,windowOpen,windowBusy}) => {
  const {colors}=useTheme();
  const [open,setOpen]=useState(false),[league,setLeague]=useState(''),[cursor,setCursor]=useState<string|null>(null);
  const [teams,setTeams]=useState<Team[]>([]),[leagues,setLeagues]=useState<string[]>([]);
@@ -30,9 +30,19 @@ export const TeamTransferAccess:React.FC<{orgId:number|null}> = ({orgId}) => {
    }finally{if(current===version.current)setLoading(false);}
   };
   void load();return()=>{version.current++;};
- },[open,orgId,league,cursor,retry]);
+ },[open,orgId,league,cursor,retry,windowOpen,windowBusy]);
+ const setLeagueAccess=async(allowed:boolean)=>{
+  if(!league||!windowOpen||windowBusy||operations.current.size)return;
+  const current=version.current;operations.current.add('league');setBusy(new Set(operations.current));setError('');
+  try{
+   const {data,error:rpcError}=await supabase.rpc('admin_set_league_transfer_access',{p_org:orgId,p_league:league,p_allowed:allowed});
+   if(rpcError||!Number.isInteger(data))throw new Error('SAVE_FAILED');
+   if(current===version.current){setCursor(null);setRetry(value=>value+1);}
+  }catch{if(current===version.current)setError('Liga ruxsati saqlanmadi. Qayta urinib ko‘ring.');}
+  finally{operations.current.delete('league');setBusy(new Set(operations.current));}
+ };
  const toggle=async(team:Team)=>{
-  if(operations.current.has(team.id))return;
+  if(!windowOpen||windowBusy||operations.current.has('league')||operations.current.has(team.id))return;
   const current=version.current,allowed=!team.allowed;
   operations.current.add(team.id);setBusy(new Set(operations.current));setError('');
   setTeams(rows=>rows.map(row=>row.id===team.id?{...row,allowed}:row));
@@ -43,14 +53,15 @@ export const TeamTransferAccess:React.FC<{orgId:number|null}> = ({orgId}) => {
    if(current===version.current){setTeams(rows=>rows.map(row=>row.id===team.id?{...row,allowed:team.allowed}:row));setError('Ruxsat saqlanmadi. Oldingi holat qaytarildi.');}
   }finally{operations.current.delete(team.id);setBusy(new Set(operations.current));}
  };
- const button=(label:string,action:()=>void)=><TouchableOpacity accessibilityRole="button" disabled={loading||busy.size>0} onPress={action} style={styles.action}><Text style={{color:colors.accentGreen}}>{label}</Text></TouchableOpacity>;
+ const button=(label:string,action:()=>void,blocked=false)=><TouchableOpacity accessibilityRole="button" disabled={blocked||loading||windowBusy||busy.size>0} onPress={action} style={[styles.action,{opacity:blocked?0.45:1}]}><Text style={{color:colors.accentGreen}}>{label}</Text></TouchableOpacity>;
  return <View style={[styles.card,{backgroundColor:colors.bgCard,borderColor:colors.border}]}>
   <TouchableOpacity accessibilityRole="button" accessibilityState={{expanded:open}} onPress={()=>{setBusy(new Set(operations.current));setOpen(value=>!value);}} style={styles.heading}>
    <Text style={[styles.title,{color:colors.textPrimary}]}>Jamoalarga alohida ruxsat</Text>
    <Ionicons name={open?'chevron-up':'chevron-down'} size={18} color={colors.textSecondary}/>
   </TouchableOpacity>
   {open&&<View style={styles.body}>
-   <Text style={[styles.hint,{color:colors.textSecondary}]}>Faqat o‘yinchi olishga ruxsat. Umumiy transfer oynasi ham ochiq bo‘lishi kerak.</Text>
+   <Text style={[styles.hint,{color:colors.textSecondary}]}>Umumiy oyna ochilganda barcha jamoalar ochiladi, yopilganda hammasi yopiladi. Keyin liga yoki jamoa ruxsatini alohida o‘zgartiring.</Text>
+   {!windowOpen&&<Text style={[styles.hint,{color:colors.textSecondary}]}>Ruxsat berish uchun avval umumiy transfer oynasini oching.</Text>}
    <Text style={[styles.hint,{color:colors.textPrimary}]}>Liga</Text>
    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
     {['',...leagues].map(name=><TouchableOpacity key={name} accessibilityRole="button" accessibilityState={{selected:league===name}} disabled={busy.size>0} onPress={()=>{setLeague(name);setCursor(null);}}
@@ -58,10 +69,11 @@ export const TeamTransferAccess:React.FC<{orgId:number|null}> = ({orgId}) => {
      <Text style={{color:league===name?colors.accentGreen:colors.textSecondary}}>{name||'Barcha ligalar'}</Text>
     </TouchableOpacity>)}
    </ScrollView>
+   {!!league&&<View style={styles.pages}>{button('Ligani ochish',()=>void setLeagueAccess(true),!windowOpen)}{button('Ligani yopish',()=>void setLeagueAccess(false),!windowOpen)}</View>}
    {!!error&&<View><Text accessibilityRole="alert" style={{color:colors.accentRed}}>{error}</Text>{button('Qayta urinish',()=>setRetry(value=>value+1))}</View>}
    {loading?<ActivityIndicator style={styles.loading} color={colors.accentGreen}/>:teams.length===0&&!error?<Text style={{color:colors.textSecondary}}>Jamoalar topilmadi.</Text>:teams.map(team=><View key={team.id} style={[styles.row,{borderBottomColor:colors.border}]}>
     <View style={styles.person}><Text style={{color:colors.textPrimary,fontWeight:'600'}}>{team.name}</Text><Text style={[styles.hint,{color:colors.textMuted}]}>{team.league||'Liga ko‘rsatilmagan'}</Text></View>
-    <Switch accessibilityLabel={`${team.name}: o‘yinchi olishga ruxsat`} value={team.allowed} disabled={busy.has(team.id)} onValueChange={()=>void toggle(team)}
+    <Switch accessibilityLabel={`${team.name}: o‘yinchi olishga ruxsat`} value={windowOpen&&team.allowed} disabled={!windowOpen||windowBusy||busy.has('league')||busy.has(team.id)} onValueChange={()=>void toggle(team)}
      trackColor={{false:colors.textMuted,true:colors.accentGreen}} thumbColor="#FFFFFF"/>
    </View>)}
    <View style={styles.pages}>{cursor&&button('Boshiga',()=>setCursor(null))}{more&&!loading&&button('Keyingi jamoalar',()=>setCursor(teams.at(-1)?.id??null))}</View>
