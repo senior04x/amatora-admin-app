@@ -1,5 +1,5 @@
 import React, {useEffect,useRef,useState} from 'react';
-import {View,Text,TouchableOpacity,Switch,ActivityIndicator,ScrollView,StyleSheet,Platform} from 'react-native';
+import {View,Text,TextInput,TouchableOpacity,Switch,ActivityIndicator,ScrollView,StyleSheet,Platform} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useTheme} from '../context/ThemeContext';
 import {supabase} from '../supabaseClient';
@@ -11,15 +11,18 @@ export const TeamTransferAccess:React.FC<{orgId:number|null;windowOpen:boolean;w
  const [teams,setTeams]=useState<Team[]>([]),[leagues,setLeagues]=useState<string[]>([]);
  const [loading,setLoading]=useState(false),[more,setMore]=useState(false),[error,setError]=useState('');
  const [busy,setBusy]=useState<Set<string>>(new Set()),[retry,setRetry]=useState(0);
+ const [query,setQuery]=useState(''),[search,setSearch]=useState('');
+ useEffect(()=>{const timer=setTimeout(()=>{setSearch(query.trim());setCursor(null);},400);return()=>clearTimeout(timer);},[query]);
  const version=useRef(0),operations=useRef(new Set<string>());
  useEffect(()=>{
   const current=++version.current;
   if(!open)return;
+  if(search.length===1){setTeams([]);setMore(false);setLoading(false);setError('');return;}
   setLoading(true);setError('');
   const load=async()=>{
    try{
     if(!orgId || !Number.isSafeInteger(orgId))throw new Error('INVALID_ORGANIZATION');
-    const {data,error:rpcError}=await supabase.rpc('admin_team_transfer_access_page',{p_org:orgId,p_league:league||null,p_after:cursor});
+    const {data,error:rpcError}=await supabase.rpc('admin_team_transfer_access_page',{p_org:orgId,p_league:league||null,p_after:cursor,p_query:search});
     if(rpcError?.code==='PGRST202'||rpcError?.code==='42883')throw new Error('NOT_INSTALLED');
     if(rpcError || !Array.isArray(data?.items))throw new Error('LOAD_FAILED');
     if(current!==version.current)return;
@@ -30,7 +33,7 @@ export const TeamTransferAccess:React.FC<{orgId:number|null;windowOpen:boolean;w
    }finally{if(current===version.current)setLoading(false);}
   };
   void load();return()=>{version.current++;};
- },[open,orgId,league,cursor,retry,windowOpen,windowBusy]);
+ },[open,orgId,league,cursor,retry,windowOpen,windowBusy,search]);
  const setLeagueAccess=async(allowed:boolean)=>{
   if(!league||!windowOpen||windowBusy||operations.current.size)return;
   const current=version.current;operations.current.add('league');setBusy(new Set(operations.current));setError('');
@@ -62,6 +65,10 @@ export const TeamTransferAccess:React.FC<{orgId:number|null;windowOpen:boolean;w
   {open&&<View style={styles.body}>
    <Text style={[styles.hint,{color:colors.textSecondary}]}>Umumiy oyna ochilganda barcha jamoalar ochiladi, yopilganda hammasi yopiladi. Keyin liga yoki jamoa ruxsatini alohida o‘zgartiring.</Text>
    {!windowOpen&&<Text style={[styles.hint,{color:colors.textSecondary}]}>Ruxsat berish uchun avval umumiy transfer oynasini oching.</Text>}
+   <TextInput accessibilityLabel="Jamoa qidirish" placeholder="Jamoa nomini kiriting…" placeholderTextColor={colors.textMuted}
+    value={query} onChangeText={setQuery} maxLength={80} editable={busy.size===0} autoCapitalize="none" autoCorrect={false} returnKeyType="search"
+    style={{borderWidth:1,borderColor:colors.border,borderRadius:8,padding:12,marginVertical:10,color:colors.textPrimary,backgroundColor:colors.bgCardElevated}}/>
+   {query.trim().length===1&&<Text style={[styles.hint,{color:colors.textSecondary}]}>Kamida 2 ta belgi kiriting.</Text>}
    <Text style={[styles.hint,{color:colors.textPrimary}]}>Liga</Text>
    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
     {['',...leagues].map(name=><TouchableOpacity key={name} accessibilityRole="button" accessibilityState={{selected:league===name}} disabled={busy.size>0} onPress={()=>{setLeague(name);setCursor(null);}}
@@ -71,7 +78,7 @@ export const TeamTransferAccess:React.FC<{orgId:number|null;windowOpen:boolean;w
    </ScrollView>
    {!!league&&<View style={styles.pages}>{button('Ligani ochish',()=>void setLeagueAccess(true),!windowOpen)}{button('Ligani yopish',()=>void setLeagueAccess(false),!windowOpen)}</View>}
    {!!error&&<View><Text accessibilityRole="alert" style={{color:colors.accentRed}}>{error}</Text>{button('Qayta urinish',()=>setRetry(value=>value+1))}</View>}
-   {loading?<ActivityIndicator style={styles.loading} color={colors.accentGreen}/>:teams.length===0&&!error?<Text style={{color:colors.textSecondary}}>Jamoalar topilmadi.</Text>:teams.map(team=><View key={team.id} style={[styles.row,{borderBottomColor:colors.border}]}>
+   {loading?<ActivityIndicator style={styles.loading} color={colors.accentGreen}/>:teams.length===0&&!error&&search.length!==1?<Text style={{color:colors.textSecondary}}>Jamoalar topilmadi.</Text>:teams.map(team=><View key={team.id} style={[styles.row,{borderBottomColor:colors.border}]}>
     <View style={styles.person}><Text style={{color:colors.textPrimary,fontWeight:'600'}}>{team.name}</Text><Text style={[styles.hint,{color:colors.textMuted}]}>{team.league||'Liga ko‘rsatilmagan'}</Text></View>
     <Switch accessibilityLabel={`${team.name}: o‘yinchi olishga ruxsat`} value={windowOpen&&team.allowed} disabled={!windowOpen||windowBusy||busy.has('league')||busy.has(team.id)} onValueChange={()=>void toggle(team)}
      trackColor={{false:colors.textMuted,true:colors.accentGreen}} thumbColor="#FFFFFF"/>
