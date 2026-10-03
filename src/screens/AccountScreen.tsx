@@ -586,6 +586,7 @@ export const AccountScreen: React.FC<{
 
   // Save Profile / Organization Info Handler
   const handleSaveAdminInfo = async () => {
+    if (isSavingInfo) return;
     if (!editName.trim()) {
       Alert.alert('Xatolik', userRole === 'user' ? 'Iltimos, ismingizni kiriting!' : 'Iltimos, tashkilot nomini kiriting!');
       return;
@@ -643,76 +644,34 @@ export const AccountScreen: React.FC<{
       return;
     }
 
-    // 2. BOSH ADMIN (org_admin / superadmin) - UPDATE organizations AND admin_users TABLES
+    // Organization profile changes never write ecosystem superadmin records.
+    const currentEmail = String(currentOrg?.admin_email || currentOrg?.email || '').trim().toLowerCase();
+    if (editEmail.trim().toLowerCase() !== currentEmail || editPassword.trim()) {
+      setIsSavingInfo(false);
+      showToast({ message: "Email yoki parolni almashtirish uchun xavfsiz hisob boshqaruvi kerak. Boshqa profil ma’lumotlarini saqlashdan oldin bu maydonlarni qaytaring.", type: 'warning' });
+      return;
+    }
     const fullPhone = editPhoneSuffix.trim() ? `+998 ${editPhoneSuffix.trim()}` : '';
-
-    updateOrgLocally({
-      name: editName.trim(),
-      brand_colors: editBrandColors,
-      admin_email: editEmail.trim(),
-      contact_phone: fullPhone,
-    });
-
-    setIsEditingInfo(false);
-    setIsSavingInfo(false);
-
-    (async () => {
-      try {
-        const dbClient = supabase;
-        const targetOrgId = requireOrganizationId(orgId || currentOrg?.id);
-
-        const mainUpdatePayload: any = {
-          name: editName.trim(),
-          slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
-          brand_colors: editBrandColors,
-        };
-        if (editEmail.trim()) {
-          mainUpdatePayload.admin_email = editEmail.trim();
-        }
-        if (fullPhone) {
-          mainUpdatePayload.contact_phone = fullPhone;
-        }
-
-        const { error: primaryErr } = await dbClient
-          .from('organizations')
-          .update(mainUpdatePayload)
-          .eq('id', targetOrgId);
-
-        if (primaryErr) {
-          console.warn('Primary org update warning, trying fallback:', primaryErr);
-          await dbClient
-            .from('organizations')
-            .update({
-              name: editName.trim(),
-              slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
-              brand_colors: editBrandColors,
-            })
-            .eq('id', targetOrgId);
-        }
-
-        const { data: adminUser } = await dbClient
-          .from('admin_users')
-          .select('id')
-          .eq('organization_id', targetOrgId)
-          .eq('role', 'org_admin')
-          .maybeSingle();
-
-        if (adminUser) {
-          const uPayload: any = {};
-          if (editEmail.trim()) uPayload.email = editEmail.trim();
-          if (editPassword.trim()) uPayload.password = editPassword.trim();
-          if (fullPhone) uPayload.phone_number = fullPhone;
-          if (Object.keys(uPayload).length > 0) {
-            await dbClient.from('admin_users').update(uPayload).eq('id', adminUser.id);
-          }
-        }
-
-        refreshOrg();
-        showToast({ message: "Tashkilot ma'lumotlari muvaffaqiyatli saqlandi! ✅", type: "success" });
-      } catch (err: any) {
-        console.error('Background save error:', err);
-      }
-    })();
+    setIsSavingInfo(true);
+    try {
+      const targetOrgId = requireOrganizationId(orgId || currentOrg?.id);
+      const payload = {
+        name: editName.trim(),
+        slug: editSlug.trim() || editName.trim().toLowerCase().replace(/\s+/g, '-'),
+        brand_colors: editBrandColors,
+        contact_phone: fullPhone,
+      };
+      const { data, error } = await supabase.from('organizations').update(payload)
+        .eq('id', targetOrgId).select('id').maybeSingle();
+      if (error || !data || Number(data.id) !== targetOrgId) throw new Error('Profile update not confirmed');
+      updateOrgLocally(payload);
+      setIsEditingInfo(false);
+      showToast({ message: "Tashkilot ma’lumotlari saqlandi.", type: 'success' });
+    } catch {
+      showToast({ message: "Ma’lumotlar saqlanmadi. Qayta urinib ko‘ring.", type: 'error' });
+    } finally {
+      setIsSavingInfo(false);
+    }
   };
 
   // Handle Logout
