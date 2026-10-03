@@ -25,6 +25,7 @@ import { adminNotificationService } from '../utils/adminNotificationService';
 import { useTransfersData, useTeamsData, useLeaguesData } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
+import { TeamTransferAccess } from '../components/TeamTransferAccess';
 
 // Skeleton Loader Pulse Component
 const SkeletonItem: React.FC<{ style?: any }> = ({ style }) => {
@@ -890,6 +891,8 @@ export const TransfersScreen: React.FC = () => {
             />
           )}
         </View>
+
+        <TeamTransferAccess key={orgId} orgId={orgId} />
 
         {/* 2. Transfers List Section */}
         {loading ? (
