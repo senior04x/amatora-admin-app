@@ -1,5 +1,5 @@
 import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
-import { validatedAdminOrganization } from '../utils/adminMembership';
+import { resolveOrganizationOwner } from '../utils/organizationOwner';
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { AppState, ActivityIndicator, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -153,10 +153,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
       } else {
         const { data: identity, error: identityError } = await supabase.auth.getUser();
         if (identityError || !identity.user?.id) throw new Error('Admin session unavailable');
-        const { data: membership, error: membershipError } = await dbClient.from('admin_users')
-          .select('id,role,organization_id').eq('id', identity.user.id).maybeSingle();
-        if (membershipError) throw new Error('Admin membership unavailable');
-        targetOrgId = validatedAdminOrganization(identity.user.id, membership);
+        targetOrgId = await resolveOrganizationOwner(dbClient, identity.user);
         setUserRole('org_admin');
         setCurrentUser(null);
       }

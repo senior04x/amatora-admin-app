@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
-import { validatedAdminOrganization } from '../utils/adminMembership';
+import { resolveOrganizationOwner } from '../utils/organizationOwner';
 import { logUserLoginWithLocation } from '../utils/locationLogger';
 
 interface LoginScreenProps {
@@ -82,14 +82,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       });
 
       if (!authError && authData?.user) {
-        // Query authority by the authenticated UID, never by a public email.
-        const { data: adminRecord, error: membershipError } = await dbClient
-          .from('admin_users').select('id,role,organization_id')
-          .eq('id', authData.user.id).maybeSingle();
-        if (membershipError) throw new Error('Administrator huquqini tekshirib bo‘lmadi. Qayta urinib ko‘ring.');
-
-        if (adminRecord) {
-          const targetOrgId = validatedAdminOrganization(authData.user.id, adminRecord);
+        const targetOrgId = await resolveOrganizationOwner(dbClient, authData.user);
+        if (targetOrgId) {
           await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
           await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
           await AsyncStorage.setItem('@amatora_user_email', loginEmail);

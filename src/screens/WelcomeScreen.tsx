@@ -1,3 +1,4 @@
+import { resolveOrganizationOwner } from '../utils/organizationOwner';
 import React, { useState } from 'react';
 import {
   View,
@@ -89,14 +90,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onLoginSuccess }) 
       });
 
       if (!authError && authData?.user) {
-        const { data: orgData } = await dbClient
-          .from('organizations')
-          .select('id')
-          .eq('admin_email', loginEmail)
-          .limit(1);
-
-        if (orgData && orgData.length > 0) {
-          const targetOrgId = orgData[0].id;
+        const targetOrgId = await resolveOrganizationOwner(dbClient, authData.user);
+        if (targetOrgId) {
           await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
           await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
           await AsyncStorage.setItem('@amatora_user_email', loginEmail);
