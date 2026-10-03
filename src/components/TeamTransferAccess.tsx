@@ -20,12 +20,13 @@ export const TeamTransferAccess:React.FC<{orgId:number|null}> = ({orgId}) => {
    try{
     if(!orgId || !Number.isSafeInteger(orgId))throw new Error('INVALID_ORGANIZATION');
     const {data,error:rpcError}=await supabase.rpc('admin_team_transfer_access_page',{p_org:orgId,p_league:league||null,p_after:cursor});
+    if(rpcError?.code==='PGRST202'||rpcError?.code==='42883')throw new Error('NOT_INSTALLED');
     if(rpcError || !Array.isArray(data?.items))throw new Error('LOAD_FAILED');
     if(current!==version.current)return;
     setTeams(data.items.slice(0,30));setMore(data.items.length>30);
     if(Array.isArray(data.leagues))setLeagues(data.leagues);
-   }catch{
-    if(current===version.current){setTeams([]);setMore(false);setError('Jamoalar yuklanmadi. Qayta urinib ko‘ring.');}
+   }catch(error){
+    if(current===version.current){setTeams([]);setMore(false);setError(error instanceof Error&&error.message==='NOT_INSTALLED'?'Jamoaviy transfer ruxsatlari serverda hali o‘rnatilmagan. Server yangilanishi kerak.':'Jamoalar yuklanmadi. Qayta urinib ko‘ring.');}
    }finally{if(current===version.current)setLoading(false);}
   };
   void load();return()=>{version.current++;};
