@@ -337,14 +337,14 @@ const TransferCardItem: React.FC<{
         </View>
 
         {item.app_consent_required && <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-          <Text style={{ color: '#E85002', fontWeight: '700', fontSize: 12, marginBottom: 6 }}>Transfer arizasi · Ikki jamoa roziligi</Text>
+          <Text style={{ color: '#E85002', fontWeight: '700', fontSize: 12, marginBottom: 6 }}>{item.old_team_consent_required === false ? 'Erkin agent · Yangi jamoa roziligi' : 'Transfer arizasi · Ikki jamoa roziligi'}</Text>
           {(['old_team','new_team'] as const).map(party => {
             const consent = (item.transfer_consents || []).find((value: any) => value.party === party &&
               value.subject_id === item[`${party}_id`]);
             return <View key={party} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, paddingVertical: 4 }}>
               <Text style={{ color: colors.textMuted, fontSize: 12 }}>{{player:'Futbolchi',old_team:'Eski jamoa sardori',new_team:'Yangi jamoa sardori'}[party]}</Text>
-              <Text style={{ color: consent?.decision === 'rejected' ? '#EF4444' : colors.textPrimary, fontSize: 12 }}>
-                {consent ? consent.decision === 'approved' ? 'Rozi' : 'Rad etdi' : 'Kutilmoqda'}
+              <Text style={{ color: party === 'old_team' && item.old_team_consent_required === false ? '#E85002' : consent?.decision === 'rejected' ? '#EF4444' : colors.textPrimary, fontSize: 12 }}>
+                {party === 'old_team' && item.old_team_consent_required === false ? 'Talab qilinmaydi' : consent ? consent.decision === 'approved' ? 'Rozi' : 'Rad etdi' : 'Kutilmoqda'}
               </Text>
             </View>;
           })}

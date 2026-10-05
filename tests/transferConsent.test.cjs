@@ -10,6 +10,10 @@ new Function('exports', 'module', output)(mod.exports, mod);
 const { hasTransferConsents } = mod.exports;
 const row = { app_consent_required: true, player_id: 'p', old_team_id: 'o', new_team_id: 'n' };
 const consents = ['old_team', 'new_team'].map(party => ({ party, decision: 'approved', subject_id: row[`${party}_id`] }));
+test('free agents require the new captain but waive old captain consent',()=>{
+ assert.equal(hasTransferConsents({...row,old_team_consent_required:false,transfer_consents:[consents[1]]}),true);
+ assert.equal(hasTransferConsents({...row,old_team_consent_required:false,transfer_consents:[]}),false);
+});
 test('legacy web requests do not require mobile consent', () => assert.equal(hasTransferConsents({}), true));
 test('both current teams must explicitly approve', () => {
  assert.equal(hasTransferConsents(row), false);

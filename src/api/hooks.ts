@@ -773,7 +773,7 @@ export const useTransfersData = (
         let transfers = rows;
         if (rows.length) {
           const { data: details, error: detailError } = await supabase.from('transfers')
-            .select('id,app_consent_required,player_id,old_team_id,new_team_id,transfer_consents(party,subject_id,decision,decided_at)')
+            .select('id,app_consent_required,old_team_consent_required,player_id,old_team_id,new_team_id,transfer_consents(party,subject_id,decision,decided_at)')
             .eq('organization_id', targetOrgId).in('id', rows.map((row: any) => row.id));
           if (detailError) throw detailError;
           const detailMap = new Map((details || []).map((row: any) => [String(row.id), row]));
