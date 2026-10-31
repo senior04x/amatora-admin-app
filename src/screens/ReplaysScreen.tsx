@@ -761,7 +761,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                         <View style={styles.authorTextInfo}>
                           <View style={styles.authorNameRow}>
                             <Text style={[styles.authorName, { color: isDark ? '#fff' : '#0f172a' }]}>
-                              {player ? `${player.first_name} ${player.last_name}` : 'Muallif noma\'lum'}
+                              {player ? `${player.first_name} ${player.last_name}` : 'Muallifsiz gol'}
                               {player?.player_number ? ` #${player.player_number}` : ''}
                             </Text>
                             {ev.minute && (

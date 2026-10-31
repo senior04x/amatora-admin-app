@@ -215,6 +215,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   // (is_timer_running=true) davomiy ishlab qolib ketishining oldini olish
   // uchun — bitta marta avtomatik yakunlash ishga tushishini kafolatlaydi
   const autoFinishTriggeredRef = useRef(false);
+  const quickGoalWriteRef = useRef(false);
 
   // Status Change Custom Confirmation Modal State & Loading State
   const [isStatusChanging, setIsStatusChanging] = useState(false);
@@ -775,35 +776,16 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     updateTimerDBAndState(newSec, nowIso, isTimerRunning);
   };
 
-  // Instant Optimistic Score Adjuster (+1 / -1) with Rollback.
-  // MUHIM: delta=+1 (gol qo'shilayotganda) endi shunchaki hisobni oshirish
-  // bilan CHEKLANMAYDI — shu bilan birga match_events jadvaliga "muallifsiz"
-  // (player_id: null) gol voqeasi HAM to'g'ridan-to'g'ri qo'shiladi (bu
-  // usul `record_match_event` RPC'ni ATAYLAB chetlab o'tadi, chunki o'sha
-  // RPC p_player_id albatta jamoaning tasdiqlangan a'zosi bo'lishini talab
-  // qiladi va NULL qabul qilmaydi — buni web admin ham xuddi shunday
-  // to'g'ridan-to'g'ri INSERT orqali chetlab o'tadi). Bu, raqamsiz kiyimda
-  // o'ynagan (shu sabab o'yinchilar ro'yxatidan tanlab bo'lmaydigan)
-  // futbolchining goli uchun ishlatilganda, ikkita muhim narsani beradi:
-  //   1) Match Detail sahifasida bu endi "JAMOA GOLI" sifatida ko'rinadi
-  //      (avval umuman event yaratilmagani uchun voqealar ro'yxatida
-  //      butunlay ko'rinmas edi).
-  //   2) OBS controller ham to'g'ridan-to'g'ri match_events jadvalini poll
-  //      qilgani uchun bu golni oddiy gol eventi kabi aniqlab, replay
-  //      videoni ANIQ shu event id'siga avtomatik biriktiradi — avval bu
-  //      mumkin emas edi, chunki hech qanday event/id yaratilmagan, video
-  //      esa jamoaning HECH NARSASIGA bog'lanmay "etim" bo'lib qolardi.
-  // Quick Score Adjuster (+1 / -1).
-  // Tepadagi tablo tugmalari (+ / -) faqat match hisobini (home_score / away_score)
-  // to'g'ridan-to'g'ri o'zgartirish uchun mo'ljallangan.
-  // match_events jadvaliga muallifsiz bo'sh qator yozilmaydi (chunki player_id NOT NULL
-  // va statistikaga xalaqit bermasligi kerak). Haqiqiy gol o'yinchilar ro'yxatidagi
-  // yoki "Voqea qo'shish" tugmasi orqali kiritiladi.
+  // Quick + creates an unattributed goal event for FIFO replay matching; - corrects score.
   const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
-    if (!match || isReadOnlyMode) return;
+    if (!match || isReadOnlyMode || quickGoalWriteRef.current) return;
+    quickGoalWriteRef.current = true;
     const isHome = teamType === 'home';
     const oldScore = isHome ? match.home_score || 0 : match.away_score || 0;
     const newScore = Math.max(0, oldScore + delta);
+    if (newScore === oldScore) { quickGoalWriteRef.current = false; return; }
+    const eventTeamId = isHome ? match.home_team_id : match.away_team_id;
+    let insertedEventId: string | null = null;
 
     // 0ms Optimistic local update
     setMatch((prev: any) => ({
@@ -811,27 +793,33 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       [isHome ? 'home_score' : 'away_score']: newScore,
     }));
 
-    // Asosiy hisobni matches jadvalida yangilash
-    const updatePayload = {
-      [isHome ? 'home_score' : 'away_score']: newScore,
-      updated_at: new Date().toISOString(),
-    };
-
     try {
-      const { error: updateErr } = await supabase
-        .from('matches')
-        .update(updatePayload)
-        .eq('id', matchId);
-
-      if (updateErr) {
-        console.warn('adjustScore matches update error:', updateErr);
-        setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
-        Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
+      if (delta > 0) {
+        const { data: goalEvent, error: eventError } = await supabase.from('match_events').insert({
+          match_id: matchId,
+          team_id: eventTeamId,
+          player_id: null,
+          event_type: 'goal',
+          type: 'goal',
+          minute: getCurrentMinute(),
+        }).select('id').single();
+        if (eventError) throw eventError;
+        insertedEventId = goalEvent?.id || null;
       }
+
+      const { error: updateErr } = await supabase.from('matches').update({
+        [isHome ? 'home_score' : 'away_score']: newScore,
+        updated_at: new Date().toISOString(),
+      }).eq('id', matchId);
+      if (updateErr) throw updateErr;
+      if (delta > 0) await fetchEvents(matchId);
     } catch (err) {
       console.warn('adjustScore matches catch error:', err);
+      if (insertedEventId) await supabase.from('match_events').delete().eq('id', insertedEventId);
       setMatch((prev: any) => ({ ...prev, [isHome ? 'home_score' : 'away_score']: oldScore }));
-      Alert.alert("Xatolik", "Hisobni saqlashda xatolik yuz berdi");
+      Alert.alert("Xatolik", delta > 0 ? "Gol voqeasi saqlanmadi. Hisob o'zgartirilmadi." : "Hisobni saqlashda xatolik yuz berdi");
+    } finally {
+      quickGoalWriteRef.current = false;
     }
   };
 
@@ -1633,6 +1621,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                   <TouchableOpacity
                     style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                     onPress={() => adjustScore('home', 1)}
+                    accessibilityLabel="Muallifsiz gol qo'shish"
                   >
                     {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                     <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
@@ -1701,6 +1690,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                   <TouchableOpacity
                     style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                     onPress={() => adjustScore('away', 1)}
+                    accessibilityLabel="Muallifsiz gol qo'shish"
                   >
                     {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                     <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
@@ -1728,6 +1718,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               </Text>
             </View>
           </View>
+          <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
+            Gol bo'lishi bilan tegishli jamoaga + bosing. Replaylar kiritilgan gollar tartibida bog'lanadi.
+          </Text>
         </View>
 
         {/* 3. Dynamic Status Control Action Bar (1:1 Web Admin Screenshot matching) */}
@@ -2191,7 +2184,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               const evConfig = EVENT_TYPES.find((t) => t.id === ev.event_type) || EVENT_TYPES[0];
               const playerName = ev.player
                 ? `${ev.player.first_name || ''} ${ev.player.last_name || ''}`
-                : (ev.player_id ? "O'yinchi" : "Jamoa goli (o'yinchisiz)");
+                : (ev.player_id ? "O'yinchi" : (String(ev.event_type || ev.type || '').includes('goal') ? "Muallifsiz gol" : "O'yinchi kiritilmagan"));
               const isHome = ev.team_id === match?.home_team_id;
 
               return (
