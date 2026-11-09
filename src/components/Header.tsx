@@ -129,7 +129,7 @@ export const Header: React.FC<{
               <Ionicons name="checkmark-outline" size={17} color="#FFFFFF" />
               <Text style={styles.saveOrderBtnText}>{"Tayyor"}</Text>
             </TouchableOpacity>
-          ) : (
+          ) : userRole === 'org_admin' ? (
             <TouchableOpacity
               style={[
                 styles.iconBtn,
@@ -159,7 +159,7 @@ export const Header: React.FC<{
                 </View>
               )}
             </TouchableOpacity>
-          )}
+          ) : null}
         </View>
       </BlurView>
     </>

@@ -201,24 +201,26 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
         />
       </View>
 
-      <View style={[styles.settingItem, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-        <View style={styles.settingLeft}>
-          <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#FEF3C7' }]}>
-            <Ionicons name="notifications" size={20} color={Platform.OS === 'android' ? '#F59E0B' : "#FFFFFF"} />
+      {userRole === 'org_admin' && (
+        <View style={[styles.settingItem, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+          <View style={styles.settingLeft}>
+            <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : '#FEF3C7' }]}>
+              <Ionicons name="notifications" size={20} color={Platform.OS === 'android' ? '#F59E0B' : "#FFFFFF"} />
+            </View>
+            <View>
+              <Text style={[styles.settingTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Bildirishnomalar</Text>
+              <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Tizim xabarlari va eslatmalar</Text>
+            </View>
           </View>
-          <View>
-            <Text style={[styles.settingTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>Bildirishnomalar</Text>
-            <Text style={[styles.settingSub, Platform.OS === 'android' && { color: colors.textMuted }]}>Tizim xabarlari va eslatmalar</Text>
-          </View>
+          <Switch
+            value={notificationsEnabled}
+            onValueChange={toggleNotifications}
+            trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: colors.accentGreen }}
+            thumbColor={notificationsEnabled ? '#FFFFFF' : '#94A3B8'}
+          />
         </View>
-        <Switch
-          value={notificationsEnabled}
-          onValueChange={toggleNotifications}
-          trackColor={{ false: Platform.OS === 'android' ? colors.border : 'rgba(255, 255, 255, 0.1)', true: colors.accentGreen }}
-          thumbColor={notificationsEnabled ? '#FFFFFF' : '#94A3B8'}
-        />
-      </View>
+      )}
 
       {hasPin ? (
         <>

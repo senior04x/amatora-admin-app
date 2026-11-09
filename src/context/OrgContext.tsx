@@ -372,7 +372,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
 
   // Load cached read notification state on mount & listen to changes
   useEffect(() => {
-    if (!orgId) return;
+    if (!orgId || userRole !== 'org_admin') return;
     fetchLiveUnreadCount();
 
     const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
@@ -391,10 +391,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
         supabase.removeChannel(channel);
       } catch (e) {}
     };
-  }, [orgId, currentOrg?.id]);
+  }, [orgId, currentOrg?.id, userRole]);
 
   const fetchLiveUnreadCount = async () => {
-    if (!orgId) return;
+    if (!orgId || userRole !== 'org_admin') return;
     try {
       const dbClient = supabase;
       const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
@@ -472,17 +472,15 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
         }
       });
 
-      if (userRole !== 'user') {
-        pendingCollabs.forEach((c: any) => {
-          const notifId = `collab_${c.id}`;
-          const createdMs = new Date(c.created_at || 0).getTime();
-          const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
-          const isReadById = readList.includes(notifId);
-          if (!isReadByTime && !isReadById) {
-            unreadCount++;
-          }
-        });
-      }
+      pendingCollabs.forEach((c: any) => {
+        const notifId = `collab_${c.id}`;
+        const createdMs = new Date(c.created_at || 0).getTime();
+        const isReadByTime = lastReadAllTime > 0 && createdMs <= lastReadAllTime;
+        const isReadById = readList.includes(notifId);
+        if (!isReadByTime && !isReadById) {
+          unreadCount++;
+        }
+      });
 
       setUnreadNotificationsCount(unreadCount);
     } catch (e) {}

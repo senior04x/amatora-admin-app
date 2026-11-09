@@ -92,7 +92,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     subTab?: 'players' | 'teams'
   ) => {
     if (tab === 'create-match' && !canCreateMatch) return;
-    if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers', 'cards'].includes(tab)) {
+    if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers', 'cards', 'notifications'].includes(tab)) {
       Alert.alert('Cheklangan huquq', 'Sizda ushbu bo\'limga kirish huquqi yo\'q!');
       return;
     }
@@ -307,7 +307,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'tournaments'}><TournamentsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'replays'}><ReplaysScreen onBack={handleGoBack} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={handleGoBack} /></LazyScreen>
+        <LazyScreen isActive={userRole === 'org_admin' && activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={handleGoBack} /></LazyScreen>
       </View>
 
       {/* Tactile Navigation Dock */}
