@@ -1762,7 +1762,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
                   )}
                 </TouchableOpacity>
               </View>
-            ) : null
+            ) : undefined
           }
           renderItem={({ item }) => (
             <SwipeablePlayerCard
@@ -2953,7 +2953,7 @@ const styles = StyleSheet.create({
 
   // Modal Select Picker Styles
   pickerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'center',
     alignItems: 'center',

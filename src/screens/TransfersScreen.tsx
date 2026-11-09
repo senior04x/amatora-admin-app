@@ -182,7 +182,7 @@ const TransferCardItem: React.FC<{
     <View style={{ position: 'relative' }}>
       {/* Particle Shatter Layer */}
       {particlesActive && (
-        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {particles.map((p, idx) => (
             <Animated.View
               key={idx}
@@ -232,7 +232,7 @@ const TransferCardItem: React.FC<{
         <Animated.View
           pointerEvents="none"
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             {
               backgroundColor: 'rgba(239, 68, 68, 0.35)',
               borderRadius: 18,
@@ -1990,7 +1990,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inlinePickerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(15, 23, 42, 0.95)',
     borderRadius: 20,
     zIndex: 999,

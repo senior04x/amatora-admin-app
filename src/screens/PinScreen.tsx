@@ -230,7 +230,7 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
       <StatusBar style={Platform.OS === 'android' ? (isDark ? 'light' : 'dark') : 'light'} />
       
       {Platform.OS === 'ios' && (
-        <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFillObject} pointerEvents="none" />
+        <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
       )}
 
       {/* Top Bar for Back / Skip Button */}

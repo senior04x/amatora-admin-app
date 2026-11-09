@@ -911,7 +911,7 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
   androidMenuBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#0F172A',
   },
   leagueMenuItem: {

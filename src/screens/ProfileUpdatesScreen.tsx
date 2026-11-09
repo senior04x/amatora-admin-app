@@ -348,7 +348,7 @@ const UpdateCardItem: React.FC<{
     <View style={{ position: 'relative' }}>
       {/* Particle Shatter Layer */}
       {particlesActive && (
-        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {particles.map((p, idx) => (
             <Animated.View
               key={idx}
@@ -398,7 +398,7 @@ const UpdateCardItem: React.FC<{
         <Animated.View
           pointerEvents="none"
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             {
               backgroundColor: 'rgba(239, 68, 68, 0.35)',
               borderRadius: 18,

@@ -1515,7 +1515,7 @@ export const ApplicationsScreen: React.FC<Props> = ({ initialTab = 'players', on
                   )}
                 </TouchableOpacity>
               </View>
-            ) : null
+            ) : undefined
           }
           renderItem={({ item }) => {
             const isPlayer = activeTab === 'players';

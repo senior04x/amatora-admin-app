@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   androidHeaderBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(8, 8, 12, 0.68)',
   },
   rightRow: {

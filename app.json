@@ -7,11 +7,6 @@
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.amatora.admin",
@@ -35,7 +30,7 @@
         "READ_MEDIA_IMAGES"
       ]
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.0.0-sdk58",
     "updates": {
       "url": "https://u.expo.dev/64a552bf-be37-4da8-80c1-8473e71ad8b2"
     },
@@ -60,6 +55,18 @@
         {
           "photosPermission": "Eksport qilingan o'yin jadvallari va rasmlarni galereyaga saqlash uchun ruxsat kerak.",
           "savePhotosPermission": "Eksport qilingan o'yin jadvallari va rasmlarni galereyaga saqlash uchun ruxsat kerak."
+        }
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
         }
       ]
     ]

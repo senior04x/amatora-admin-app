@@ -1,6 +1,6 @@
-if (typeof global !== 'undefined' && (global as any).ErrorUtils) {
-  const defaultHandler = (global as any).ErrorUtils.getGlobalHandler();
-  (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+if ((globalThis as any).ErrorUtils) {
+  const defaultHandler = (globalThis as any).ErrorUtils.getGlobalHandler();
+  (globalThis as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
     console.error('=== EXPLICIT ERROR STACK TRACE ===\n', error, '\nSTACK:\n', error?.stack);
     if (defaultHandler) defaultHandler(error, isFatal);
   });
@@ -255,12 +255,12 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
       {/* Organization Gradient Background on iOS only (Android uses clean solid dark theme for high performance) */}
       {hasGradient && Platform.OS === 'ios' && (
-        <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: fadeAnim }]}>
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: fadeAnim }]}>
           <LinearGradient
             colors={(orgColors.length > 1 ? orgColors : [orgColors[0] || '#0F172A', orgColors[0] || '#0F172A']) as any}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
         </Animated.View>
       )}
@@ -678,7 +678,7 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   androidNavBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(8, 8, 14, 0.72)',
   },
   navDock: {

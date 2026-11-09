@@ -1814,14 +1814,14 @@ export const LeaguesScreen: React.FC = () => {
                 </View>
               )}
             </View>
-          ) : null}
+          ) : undefined}
           ListFooterComponent={
             !isReadOnlyUser ? (
               <TouchableOpacity style={s.addBtn} onPress={handleCreateLeague} activeOpacity={0.8}>
                 <Ionicons name="add-circle" size={20} color="#000000" />
                 <Text style={s.addBtnText}>{"Yangi Liga Qo'shish"}</Text>
               </TouchableOpacity>
-            ) : null
+            ) : undefined
           }
         />
       )}

@@ -1015,7 +1015,7 @@ export const CardsScreen: React.FC<{ onGoBack?: () => void }> = ({ onGoBack }) =
                   {`${Math.min(visibleCount, cardPlayers.length)} / ${cardPlayers.length}`}
                 </Text>
               </View>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
