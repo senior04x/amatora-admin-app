@@ -701,8 +701,12 @@ export const AccountScreen: React.FC<{
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Admin Akkounti"}</Text>
-        <Text style={[styles.headerSub, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Tashkilot va Admin profil boshqaruvi"}</Text>
+        <Text style={[styles.headerTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>
+          {userRole === 'user' ? 'Organizator akkaunti' : 'Admin akkaunti'}
+        </Text>
+        <Text style={[styles.headerSub, Platform.OS === 'android' && { color: colors.textMuted }]}>
+          {userRole === 'user' ? 'Huquqlaringiz cheklangan' : 'Tashkilot va Admin profil boshqaruvi'}
+        </Text>
       </View>
 
       {/* Organization Profile Card */}
