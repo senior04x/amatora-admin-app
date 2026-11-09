@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Animated,
   Modal,
+  Keyboard,
   TextInput,
   Switch,
   ActivityIndicator,
@@ -199,53 +200,48 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
   const [showSecretStages, setShowSecretStages] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // DateTimePicker Modal States for Edit
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [tempDate, setTempDate] = useState(new Date());
-  const [tempTime, setTempTime] = useState(new Date());
+  const [editPickerMode, setEditPickerMode] = useState<'date' | 'time' | null>(null);
+  const [editPickerValue, setEditPickerValue] = useState(new Date());
 
-  // Native Date/Time picker openers (Android native dialog / iOS glass modal)
-  const handleOpenEditDatePicker = () => {
-    if (Platform.OS === 'android') {
-      const validDate = tempDate instanceof Date && !isNaN(tempDate.getTime()) ? tempDate : new Date();
-      DateTimePickerAndroid.open({
-        value: validDate,
-        mode: 'date',
-        onChange: (event, selectedDate) => {
-          if (event.type === 'set' && selectedDate) {
-            setTempDate(selectedDate);
-            const year = selectedDate.getFullYear();
-            const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
-            const day = String(selectedDate.getDate()).padStart(2, '0');
-            setEditMatchDate(`${year}-${month}-${day}`);
-          }
-        },
-      });
+  const applyEditPickerValue = (mode: 'date' | 'time', value: Date) => {
+    if (mode === 'date') {
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      const day = String(value.getDate()).padStart(2, '0');
+      setEditMatchDate(`${year}-${month}-${day}`);
     } else {
-      setShowDatePicker(true);
+      const hours = String(value.getHours()).padStart(2, '0');
+      const minutes = String(value.getMinutes()).padStart(2, '0');
+      setEditMatchTime(`${hours}:${minutes}`);
     }
   };
 
-  const handleOpenEditTimePicker = () => {
+  const openEditPicker = (mode: 'date' | 'time') => {
+    Keyboard.dismiss();
+    const now = new Date();
+    const savedDate = mode === 'date'
+      ? new Date(`${editMatchDate.slice(0, 10)}T00:00:00`)
+      : new Date(`${now.getFullYear()}-01-01T${editMatchTime.slice(0, 5)}:00`);
+    const value = Number.isNaN(savedDate.getTime()) ? now : savedDate;
+
     if (Platform.OS === 'android') {
-      const validTime = tempTime instanceof Date && !isNaN(tempTime.getTime()) ? tempTime : new Date();
       DateTimePickerAndroid.open({
-        value: validTime,
-        mode: 'time',
+        mode,
+        value,
         is24Hour: true,
-        onChange: (event, selectedTime) => {
-          if (event.type === 'set' && selectedTime) {
-            setTempTime(selectedTime);
-            const hours = String(selectedTime.getHours()).padStart(2, '0');
-            const minutes = String(selectedTime.getMinutes()).padStart(2, '0');
-            setEditMatchTime(`${hours}:${minutes}`);
-          }
+        onChange: (event, selectedValue) => {
+          if (event.type === 'set' && selectedValue) applyEditPickerValue(mode, selectedValue);
         },
       });
-    } else {
-      setShowTimePicker(true);
+    } else if (Platform.OS === 'ios') {
+      setEditPickerValue(value);
+      setEditPickerMode(mode);
     }
+  };
+
+  const closeEditModal = () => {
+    setEditPickerMode(null);
+    setEditingMatch(null);
   };
 
   // Custom Delete Modal State
@@ -294,12 +290,6 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
     setEditYtLink(match.youtube_link || '');
     setEditEnableYtLink(!!match.youtube_link);
     setEditIsPostponed(!!match.is_postponed);
-
-    try {
-      if (match.match_date || match.date) {
-        setTempDate(new Date(match.match_date || match.date || ''));
-      }
-    } catch (e) {}
   };
 
   // Save Edit Match to Supabase DB (Cascading all 11 fields)
@@ -359,7 +349,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
         organizationId: requireOrganizationId((editingMatch as any).organization_id || orgId),
       });
 
-      setEditingMatch(null);
+      closeEditModal();
       queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
     } catch (e: any) {
@@ -1106,19 +1096,19 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       )}
 
       {/* FULL EDIT MATCH MODAL (11 Fields 1:1 Matching Admin Web) */}
-      <Modal visible={userRole === 'org_admin' && !!editingMatch} transparent animationType="slide">
+      <Modal visible={userRole === 'org_admin' && !!editingMatch} transparent animationType="slide" onRequestClose={closeEditModal}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { maxHeight: '90%' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
             <View style={styles.modalHeaderRow}>
               <Text style={[styles.modalTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"O'yinni Tahrirlash"}</Text>
-              <TouchableOpacity onPress={() => setEditingMatch(null)}>
+              <TouchableOpacity onPress={closeEditModal}>
                 <Ionicons name="close" size={22} color={Platform.OS === 'android' ? colors.textMuted : "rgba(255,255,255,0.6)"} />
               </TouchableOpacity>
             </View>
 
             {editingMatch && (
-              <ScrollView contentContainerStyle={styles.modalScrollBody} showsVerticalScrollIndicator={false}>
+              <ScrollView contentContainerStyle={styles.modalScrollBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 {/* 1. Liga Selection */}
                 <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Liga:"}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
@@ -1234,7 +1224,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yin Sanasi:"}</Text>
                     <TouchableOpacity
                       style={[styles.pickerTriggerBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
-                      onPress={handleOpenEditDatePicker}
+                      onPress={() => openEditPicker('date')}
                     >
                       {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                       <Ionicons name="calendar-outline" size={16} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
@@ -1246,7 +1236,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
                     <Text style={[styles.inputLabel, Platform.OS === 'android' && { color: colors.textMuted }]}>{"O'yin Vaqti:"}</Text>
                     <TouchableOpacity
                       style={[styles.pickerTriggerBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
-                      onPress={handleOpenEditTimePicker}
+                      onPress={() => openEditPicker('time')}
                     >
                       {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                       <Ionicons name="time-outline" size={16} color={Platform.OS === 'android' ? colors.accentGreen : "#00FF66"} />
@@ -1370,95 +1360,41 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
               </ScrollView>
             )}
           </View>
+          {editPickerMode && (
+            <View style={styles.pickerModalOverlay} accessibilityViewIsModal>
+              <View style={styles.pickerModalCard}>
+                <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <Text style={styles.pickerModalTitle}>
+                  {editPickerMode === 'date' ? "O'yin Sanasini Tanlang" : "O'yin Vaqtini Tanlang"}
+                </Text>
+                <DateTimePicker
+                  value={editPickerValue}
+                  mode={editPickerMode}
+                  display="spinner"
+                  onChange={(_, value) => value && setEditPickerValue(value)}
+                  textColor="#FFFFFF"
+                />
+                <View style={styles.pickerModalActions}>
+                  <TouchableOpacity style={styles.pickerCancelBtn} onPress={() => setEditPickerMode(null)}>
+                    <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                    <Text style={styles.pickerCancelText}>Bekor qilish</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.pickerConfirmBtn}
+                    onPress={() => {
+                      applyEditPickerValue(editPickerMode, editPickerValue);
+                      setEditPickerMode(null);
+                    }}
+                  >
+                    <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                    <Text style={styles.pickerConfirmText}>OK • Tasdiqlash</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
         </View>
       </Modal>
-
-      {/* iOS Date Picker Confirmation Modal */}
-      {Platform.OS === 'ios' && showDatePicker && (
-        <Modal transparent animationType="fade">
-          <View style={styles.pickerModalOverlay}>
-            <View style={styles.pickerModalCard}>
-              <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
-              <Text style={styles.pickerModalTitle}>{"O'yin Sanasini Tanlang"}</Text>
-
-              <DateTimePicker
-                value={tempDate}
-                mode="date"
-                display="spinner"
-                onChange={(_, d) => d && setTempDate(d)}
-                textColor="#FFFFFF"
-              />
-
-              <View style={styles.pickerModalActions}>
-                <TouchableOpacity
-                  style={styles.pickerCancelBtn}
-                  onPress={() => setShowDatePicker(false)}
-                >
-                  <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                  <Text style={styles.pickerCancelText}>{"Bekor qilish"}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.pickerConfirmBtn}
-                  onPress={() => {
-                    const year = tempDate.getFullYear();
-                    const month = String(tempDate.getMonth() + 1).padStart(2, '0');
-                    const day = String(tempDate.getDate()).padStart(2, '0');
-                    setEditMatchDate(`${year}-${month}-${day}`);
-                    setShowDatePicker(false);
-                  }}
-                >
-                  <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                  <Text style={styles.pickerConfirmText}>{"OK • Tasdiqlash"}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* iOS Time Clock Picker Confirmation Modal */}
-      {Platform.OS === 'ios' && showTimePicker && (
-        <Modal transparent animationType="fade">
-          <View style={styles.pickerModalOverlay}>
-            <View style={styles.pickerModalCard}>
-              <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
-              <Text style={styles.pickerModalTitle}>{"O'yin Vaqtini Tanlang"}</Text>
-
-              <DateTimePicker
-                value={tempTime}
-                mode="time"
-                display="spinner"
-                onChange={(_, t) => t && setTempTime(t)}
-                textColor="#FFFFFF"
-              />
-
-              <View style={styles.pickerModalActions}>
-                <TouchableOpacity
-                  style={styles.pickerCancelBtn}
-                  onPress={() => setShowTimePicker(false)}
-                >
-                  <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                  <Text style={styles.pickerCancelText}>{"Bekor qilish"}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.pickerConfirmBtn}
-                  onPress={() => {
-                    const hours = String(tempTime.getHours()).padStart(2, '0');
-                    const minutes = String(tempTime.getMinutes()).padStart(2, '0');
-                    setEditMatchTime(`${hours}:${minutes}`);
-                    setShowTimePicker(false);
-                  }}
-                >
-                  <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
-                  <Text style={styles.pickerConfirmText}>{"OK • Tasdiqlash"}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
 
       {/* Custom App-Styled Delete Confirmation Modal */}
       <Modal
@@ -2128,7 +2064,8 @@ const styles = StyleSheet.create({
 
   /* Date & Time Confirmation Modal */
   pickerModalOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFill,
+    zIndex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
