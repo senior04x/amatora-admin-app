@@ -75,6 +75,10 @@ export const SwipeRow: React.FC<Props> = ({
     })
   ).current;
 
+  if (actions == null) {
+    return <View style={styles.container}>{children}</View>;
+  }
+
   const handleRowPress = () => {
     if (isOpenRef.current) {
       Animated.spring(panX, {

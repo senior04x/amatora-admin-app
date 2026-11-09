@@ -304,6 +304,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
   // Save Edit Match to Supabase DB (Cascading all 11 fields)
   const handleSaveEditMatch = async () => {
+    if (userRole !== 'org_admin') return;
     if (!editingMatch) return;
     if (!editLeague || !editHomeTeamId || !editAwayTeamId || !editMatchDate || !editMatchTime) {
       Alert.alert("Majburiy Maydonlar", "Iltimos, barcha majburiy maydonlarni (Liga, Jamoalar, Sana, Vaqt) to'ldiring.");
@@ -380,6 +381,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
   // Execute Match Delete in Supabase with 0ms Optimistic UI + Background Delete
   const executeDeleteMatch = async () => {
+    if (userRole !== 'org_admin') return;
     if (!matchToDelete) return;
     const targetId = matchToDelete.id;
 
@@ -913,18 +915,19 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
             );
             const homeName = item.home_team?.name || 'Mezbon';
             const awayName = item.away_team?.name || 'Mehmon';
-            const isRowOpen = activeSwipedId === item.id;
+            const canEditMatch = userRole === 'org_admin' && !isCoHost;
+            const isRowOpen = canEditMatch && activeSwipedId === item.id;
 
             return (
               <SwipeRow
                 isOpen={isRowOpen}
-                onOpen={() => !isCoHost && setActiveSwipedId(item.id)}
+                onOpen={() => setActiveSwipedId(item.id)}
                 onClose={() => {
                   if (activeSwipedId === item.id) setActiveSwipedId(null);
                 }}
                 actionWidth={70}
                 actions={
-                  isCoHost ? null : (
+                  !canEditMatch ? null : (
                     /* Stacked Vertical Actions (Edit Top, Delete Bottom) */
                     <View style={styles.stackedSwipeActions}>
                       {/* Tahrirlash (Edit) Button */}
@@ -1103,7 +1106,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
       )}
 
       {/* FULL EDIT MATCH MODAL (11 Fields 1:1 Matching Admin Web) */}
-      <Modal visible={!!editingMatch} transparent animationType="slide">
+      <Modal visible={userRole === 'org_admin' && !!editingMatch} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { maxHeight: '90%' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
@@ -1459,7 +1462,7 @@ export const MatchesScreen: React.FC<{ onNavigateToCreate?: () => void }> = ({ o
 
       {/* Custom App-Styled Delete Confirmation Modal */}
       <Modal
-        visible={!!matchToDelete}
+        visible={userRole === 'org_admin' && !!matchToDelete}
         transparent
         animationType="fade"
         onRequestClose={() => setMatchToDelete(null)}

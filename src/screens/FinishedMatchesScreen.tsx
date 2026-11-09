@@ -101,7 +101,7 @@ export const FinishedMatchesScreen: React.FC<{
   onGoBack?: () => void;
   onNavigateToCreate?: () => void;
 }> = ({ onGoBack, onNavigateToCreate }) => {
-  const { orgId, collabLeagueNames } = useOrg();
+  const { orgId, userRole, collabLeagueNames } = useOrg();
   const { colors, isDark } = useTheme();
   const queryClient = useQueryClient();
   const scrollDockProps = useScrollDockHandler();
@@ -316,6 +316,7 @@ export const FinishedMatchesScreen: React.FC<{
   };
 
   const handleSaveEditMatch = async () => {
+    if (userRole !== 'org_admin') return;
     if (!editingMatch) return;
     if (!editLeague || !editHomeTeamId || !editAwayTeamId || !editMatchDate || !editMatchTime) {
       Alert.alert("Majburiy Maydonlar", "Iltimos, barcha majburiy maydonlarni to'ldiring.");
@@ -362,6 +363,7 @@ export const FinishedMatchesScreen: React.FC<{
   };
 
   const executeDeleteMatch = async () => {
+    if (userRole !== 'org_admin') return;
     if (!matchToDelete) return;
     const targetId = matchToDelete.id;
     const previousMatches = [...accumulatedMatches];
@@ -794,13 +796,13 @@ export const FinishedMatchesScreen: React.FC<{
 
             return (
               <SwipeRow
-                isOpen={isSwiped}
+                isOpen={userRole === 'org_admin' && isSwiped}
                 onOpen={() => setActiveSwipedId(item.id)}
                 onClose={() => {
                   if (activeSwipedId === item.id) setActiveSwipedId(null);
                 }}
                 actionWidth={80}
-                actions={
+                actions={userRole === 'org_admin' ? (
                   <View style={styles.swipeButtonsStackedContainer}>
                     <TouchableOpacity
                       style={styles.swipeEditBtnStacked}
@@ -824,7 +826,7 @@ export const FinishedMatchesScreen: React.FC<{
                       <Text style={styles.swipeBtnTextStacked}>{"O'chirish"}</Text>
                     </TouchableOpacity>
                   </View>
-                }
+                ) : null}
               >
                 <View style={[
                   styles.matchCard,
@@ -924,7 +926,7 @@ export const FinishedMatchesScreen: React.FC<{
       )}
 
       {/* Edit Match Modal */}
-      <Modal visible={!!editingMatch} transparent animationType="slide">
+      <Modal visible={userRole === 'org_admin' && !!editingMatch} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { maxHeight: '90%' }, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border, borderWidth: 1 }]}>
             {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
@@ -1051,7 +1053,7 @@ export const FinishedMatchesScreen: React.FC<{
       </Modal>
 
       {/* Delete Confirmation Modal */}
-      <Modal visible={!!matchToDelete} transparent animationType="fade">
+      <Modal visible={userRole === 'org_admin' && !!matchToDelete} transparent animationType="fade">
         <View style={styles.deleteModalOverlay}>
           <View style={[styles.deleteModalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             {Platform.OS === 'ios' && <BlurView intensity={90} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
