@@ -18,6 +18,8 @@ import {
   AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import MatchActionSlider from '../components/MatchActionSlider';
 import { BlurView } from '../components/SafeBlurView';
 import * as Crypto from 'expo-crypto';
 // 🔒 SECURITY FIX: supabase o'chirildi, faqat supabase (anon + RLS) ishlatiladi
@@ -611,51 +613,29 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }
   };
 
-  // Open Sleek Uzbek Confirmation Modal for Match Status Changes
-  const promptStatusChange = (newStatus: string) => {
+  const promptStatusReset = () => {
     if (isReadOnlyMode || isStatusChanging) return;
     if (!timerReady) {
       Alert.alert('Taymer', 'O‘yin taymeri ma’lumotlari yuklanmoqda. Qayta urinib ko‘ring.');
       return;
     }
-    let title = "Statusni O'zgartirish";
-    let message = "";
-
-    if (newStatus === 'first_half') {
-      title = "1-Taymni Boshlash 🚀";
-      message = `1-taym boshlanishini tasdiqlaysizmi? (Taymer ${halfDurationMins}:00 dan teskari sanaydi)`;
-    } else if (newStatus === 'half_time') {
-      title = "Tanaffus E'lon Qilish ⏸️";
-      message = `Uchrashuvda tanaffus e'lon qilishni tasdiqlaysizmi?`;
-    } else if (newStatus === 'second_half') {
-      title = "2-Taymni Boshlash 🚀";
-      message = `2-taym boshlanishini tasdiqlaysizmi? (Taymer ${halfDurationMins}:00 dan teskari sanaydi)`;
-    } else if (newStatus === 'finished') {
-      title = "O'yinni Yakunlash 🏁";
-      message = `Uchrashuvni rasman yakunlashni tasdiqlaysizmi?`;
-    } else if (newStatus === 'scheduled') {
-      title = "Holatga Qaytarish (1-Taym Boshlashga) 🔄";
-      message = `Uchrashuvni boshlang'ich (Rejalashtirilgan) holatiga qaytarishni va taymerni ${halfDurationMins}:00 qilishni tasdiqlaysizmi?`;
-    }
-
     setStatusConfirmModal({
       isOpen: true,
-      targetStatus: newStatus,
+      targetStatus: 'scheduled',
       expectedStatus: match?.status,
-      title,
-      message,
+      title: 'Holatga Qaytarish (1-Taym Boshlashga) 🔄',
+      message: `Uchrashuvni boshlang'ich (Rejalashtirilgan) holatiga qaytarishni va taymerni ${halfDurationMins}:00 qilishni tasdiqlaysizmi?`,
     });
   };
 
-  // Execute Status Change
-  const executeStatusChange = async () => {
-    const newStatus = statusConfirmModal.targetStatus;
-    if (!newStatus || typeof newStatus !== 'string') return;
-
-    setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
-
-    if (match?.status !== statusConfirmModal.expectedStatus) {
+  const executeStatusChange = async (newStatus: string, expectedStatus: string | undefined) => {
+    if (isReadOnlyMode || isStatusChanging || !newStatus) return;
+    if (match?.status !== expectedStatus || latestMatchRow.current?.status !== expectedStatus) {
       Alert.alert('Taymer', 'O‘yin holati o‘zgargan. Amalni qayta tanlang.');
+      return;
+    }
+    if (timerWritePending.current) {
+      Alert.alert('Taymer', 'Taymer yangilanmoqda. Qayta urinib ko‘ring.');
       return;
     }
 
@@ -1090,6 +1070,15 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   };
 
   const matchStatus = resolveMatchStatus();
+  const slideAction = matchStatus === 'scheduled'
+    ? { target: 'first_half', label: '1-taymni boshlash uchun suring' }
+    : matchStatus === 'first_half'
+    ? { target: 'half_time', label: 'Tanaffus e’lon qilish uchun suring' }
+    : matchStatus === 'half_time'
+    ? { target: 'second_half', label: '2-taymni boshlash uchun suring' }
+    : matchStatus === 'second_half'
+    ? { target: 'finished', label: 'O‘yinni yakunlash uchun suring' }
+    : null;
 
   // Bottom Sticky Pause/Play Button Pop-Up Spring Animation
   const isStickyTimerVisible = matchStatus === 'first_half' || matchStatus === 'second_half';
@@ -1182,7 +1171,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   }
 
   return (
-    <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
+    <GestureHandlerRootView style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* 1. Top Action Buttons Bar (Sleek Icon-Only Row) */}
       <View style={styles.topHeaderNav}>
         <TouchableOpacity
@@ -1440,79 +1429,18 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           </Text>
         </View>
 
-        {/* 3. Dynamic Status Control Action Bar (1:1 Web Admin Screenshot matching) */}
+        {/* Match status control */}
         {!isReadOnlyMode && (
-          <View style={[styles.mainActionBarRow, matchStatus === 'finished' && { flexDirection: 'column', width: '100%', gap: 8 }]}>
-            {matchStatus === 'scheduled' && (
-              <TouchableOpacity
-                style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
-                onPress={() => promptStatusChange('first_half')}
-                disabled={isStatusChanging}
-              >
-                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                {isStatusChanging ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="play" size={18} color="#FFFFFF" />
-                    <Text style={[styles.bigGreenBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"1-Taym Boshlash"}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-
-            {matchStatus === 'first_half' && (
-              <TouchableOpacity
-                style={[styles.bigOrangeActionBtn, isStatusChanging && { opacity: 0.7 }]}
-                onPress={() => promptStatusChange('half_time')}
-                disabled={isStatusChanging}
-              >
-                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                {isStatusChanging ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="pause" size={18} color="#FFFFFF" />
-                    <Text style={[styles.bigGreenBtnText, { color: '#FFFFFF' }]}>{"Tanaffus e'lon qilish"}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-
-            {matchStatus === 'half_time' && (
-              <TouchableOpacity
-                style={[styles.bigGreenActionBtn, isStatusChanging && { opacity: 0.7 }, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
-                onPress={() => promptStatusChange('second_half')}
-                disabled={isStatusChanging}
-              >
-                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                {isStatusChanging ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="play" size={18} color="#FFFFFF" />
-                    <Text style={[styles.bigGreenBtnText, Platform.OS === 'android' && { color: '#FFFFFF' }]}>{"2-Taym Boshlash"}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-
-            {matchStatus === 'second_half' && (
-              <TouchableOpacity
-                style={[styles.bigRedActionBtn, isStatusChanging && { opacity: 0.7 }]}
-                onPress={() => promptStatusChange('finished')}
-                disabled={isStatusChanging}
-              >
-                {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                {isStatusChanging ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="flag" size={18} color="#FFFFFF" />
-                    <Text style={styles.bigRedBtnText}>{"O'yinni Yakunlash"}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+          <View style={styles.mainActionBar}>
+            {slideAction && (
+              <MatchActionSlider
+                key={JSON.stringify([matchId, match?.status, slideAction.target])}
+                label={slideAction.label}
+                disabled={!timerReady}
+                busy={isStatusChanging}
+                isDark={Platform.OS === 'ios' || isDark}
+                onComplete={() => executeStatusChange(slideAction.target, match?.status)}
+              />
             )}
 
             {matchStatus === 'finished' && (
@@ -1524,7 +1452,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.resetStatusBtn, isStatusChanging && { opacity: 0.7 }]}
-                  onPress={() => promptStatusChange('scheduled')}
+                  onPress={promptStatusReset}
                   disabled={isStatusChanging}
                 >
                   {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
@@ -1544,11 +1472,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             {matchStatus !== 'finished' && (
               <TouchableOpacity
                 style={[styles.penaltyDropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-                onPress={() => setShowPenaltyControls(!showPenaltyControls)}
+                onPress={() => setShowPenaltyControls(open => !open)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showPenaltyControls }}
               >
                 {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 <Ionicons name="football-outline" size={16} color="#38BDF8" />
-                <Text style={[styles.penaltyDropdownText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Penaltilar seriyasi ▼"}</Text>
+                <Text style={[styles.penaltyDropdownText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{showPenaltyControls ? "Penaltilar seriyasi ▲" : "Penaltilar seriyasi ▼"}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -2043,7 +1973,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               <TouchableOpacity
                 style={[styles.confirmOkBtn, isStatusChanging && { opacity: 0.8 }, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
                 disabled={isStatusChanging}
-                onPress={() => executeStatusChange()}
+                onPress={() => {
+                  setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
+                  void executeStatusChange(statusConfirmModal.targetStatus, statusConfirmModal.expectedStatus);
+                }}
               >
                 {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
                 {isStatusChanging ? (
@@ -2303,7 +2236,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           </View>
         </View>
       </Modal>
-    </View>
+    </GestureHandlerRootView>
   );
 };
 
@@ -2562,44 +2495,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
-  /* Action Bar under scoreboard (Matching Web Admin Screenshot 1:1) */
-  mainActionBarRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  mainActionBar: {
     gap: 8,
-  },
-  bigGreenActionBtn: {
-    flex: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Platform.OS === 'ios' ? 'rgba(0, 255, 102, 0.85)' : '#00FF66',
-    paddingVertical: 14,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  bigOrangeActionBtn: {
-    flex: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Platform.OS === 'ios' ? 'rgba(245, 158, 11, 0.85)' : '#F59E0B',
-    paddingVertical: 14,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  bigRedActionBtn: {
-    flex: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Platform.OS === 'ios' ? 'rgba(239, 68, 68, 0.85)' : '#EF4444',
-    paddingVertical: 14,
-    borderRadius: 16,
-    overflow: 'hidden',
   },
   bigFinishedBtn: {
     width: '100%',
@@ -2613,23 +2510,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
   },
-  bigGreenBtnText: {
-    color: '#000000',
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  bigRedBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '900',
-  },
   bigFinishedBtnText: {
     color: '#00FF66',
     fontSize: 14,
     fontWeight: '900',
   },
   penaltyDropdownBtn: {
-    flex: 1,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
