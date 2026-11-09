@@ -15,6 +15,7 @@ import {
   Animated,
   Platform,
   BackHandler,
+  AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from '../components/SafeBlurView';
@@ -24,6 +25,12 @@ import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { useQueryClient } from '@tanstack/react-query';
+import { getHalfDurationSeconds, loadMatchCompetition } from '../utils/matchDuration';
+import {
+  canRunMatchTimer, getElapsedMatchSeconds, getRemainingSeconds, getStreamField,
+  getPauseSeconds, isRunningTimerSnapshot, serverNowMs, syncServerClock, useMatchTimer,
+} from '../utils/matchTimer';
+import { TIMER_ROW_COLUMNS, writeMatchTimer } from '../api/matchTimer';
 
 interface Props {
   matchId: string | number;
@@ -83,6 +90,8 @@ class LimitedCache<K, V> {
   }
 }
 
+const CLOCK_URL = Platform.OS === 'web' ? 'https://www.amatora.uz/api/server-time' : undefined;
+
 const MATCH_CONTROL_CACHE = new LimitedCache<string, any>(50, 10 * 60 * 1000);
 // Cache unassigned replays when admin deletes a goal mistake so re-adding re-links the replay video
 const ORPHAN_REPLAYS_BY_MATCH = new Map<string, { url: string; timestamp: number }>();
@@ -97,23 +106,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const seedMatch = cachedData?.match || initialMatch;
   const [loading, setLoading] = useState(!seedMatch);
 
-  const initialLeagueName = seedMatch?.league ? String(seedMatch.league).trim() : '';
-  const initialMatchDur = initialLeagueName.includes('7x7') ? 50 : 60;
-  const initialHalfDur = Math.round(initialMatchDur / 2);
-
-  const [match, setMatch] = useState<any>(
-    seedMatch
-      ? { ...seedMatch, match_duration: seedMatch.match_duration || initialMatchDur, half_duration: seedMatch.half_duration || initialHalfDur }
-      : null
-  );
-
-  const isReadOnlyMode = isReadOnly || Boolean(match?.organization_id && Number(match.organization_id) !== Number(orgId));
-  const [leagueData, setLeagueData] = useState<any>(
-    cachedData?.leagueData || {
-      match_duration: initialMatchDur,
-      half_duration: initialHalfDur,
-    }
-  );
+  const [match, setMatch] = useState<any>(seedMatch ?? null);
+  const isReadOnlyMode = isReadOnly || !match?.organization_id || Number(match.organization_id) !== Number(orgId);
+  const [competition, setCompetition] = useState<Awaited<ReturnType<typeof loadMatchCompetition>> | null>(cachedData?.competition ?? null);
+  const [readyMatchId, setReadyMatchId] = useState<string | number | null>(null);
+  const timerReady = String(readyMatchId) === String(matchId);
+  const latestMatchRow = useRef<any>(null);
+  const timerWritePending = useRef(false);
   const [homeTeam, setHomeTeam] = useState<any>(cachedData?.homeTeam || seedMatch?.home_team || null);
   const [awayTeam, setAwayTeam] = useState<any>(cachedData?.awayTeam || seedMatch?.away_team || null);
   const [homePlayers, setHomePlayers] = useState<any[]>(cachedData?.homePlayers || []);
@@ -170,51 +169,14 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   };
 
   // OBS Studio & amatora.exe Connection Live Status State
-  const [isObsConnected, setIsObsConnected] = useState(true);
+  const [isObsConnected] = useState(true);
+  const obsField = getStreamField(match?.location);
+  const obsOrgId = match?.organization_id ?? orgId;
+  const obsUrl = obsOrgId ? 'https://www.amatora.uz/obs/scoreboard/stream' + obsField + '?org_id=' + encodeURIComponent(String(obsOrgId)) : '';
 
   // Roster subtab ('home' vs 'away')
   const [activeRosterTab, setActiveRosterTab] = useState<'home' | 'away'>('home');
 
-  const getInitialTimerState = (payload: any) => {
-    if (!payload) return { baseSec: 1500, isRunning: false, startedAt: null, curSec: 1500 };
-    const isRunning =
-      payload.is_timer_running !== undefined && payload.is_timer_running !== null
-        ? String(payload.is_timer_running) === 'true' || payload.is_timer_running === true
-        : payload.isTimerRunning !== undefined && payload.isTimerRunning !== null
-        ? String(payload.isTimerRunning) === 'true' || payload.isTimerRunning === true
-        : false;
-
-    const startedAt = payload.timer_started_at || payload.timerStartedAt || null;
-    const baseSec =
-      payload.timer_seconds !== undefined && payload.timer_seconds !== null
-        ? Number(payload.timer_seconds)
-        : payload.timerSeconds !== undefined && payload.timerSeconds !== null
-        ? Number(payload.timerSeconds)
-        : 1500;
-
-    let curSec = baseSec;
-    if (isRunning && startedAt) {
-      const ms = new Date(startedAt).getTime();
-      if (!isNaN(ms)) {
-        const elapsed = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-        curSec = Math.max(0, baseSec - elapsed);
-      }
-    }
-    return { baseSec, isRunning, startedAt, curSec };
-  };
-
-  const initialTimer = getInitialTimerState(initialMatch);
-
-  // Live Timer State & Background Sync Refs (1:1 Web Admin MatchControl.jsx logic)
-  const [timerSeconds, setTimerSeconds] = useState(initialTimer.curSec);
-  const [isTimerRunning, setIsTimerRunning] = useState(initialTimer.isRunning);
-  const timerRef = useRef<any>(null);
-  const timerStartedAtRef = useRef<string | null>(initialTimer.startedAt);
-  const baseTimerSecondsRef = useRef<number>(initialTimer.baseSec);
-  // Operator o'yinni yakunlashni unutib, taymer pauza qilinmagan holda
-  // (is_timer_running=true) davomiy ishlab qolib ketishining oldini olish
-  // uchun — bitta marta avtomatik yakunlash ishga tushishini kafolatlaydi
-  const autoFinishTriggeredRef = useRef(false);
   const quickGoalWriteRef = useRef(false);
 
   // Status Change Custom Confirmation Modal State & Loading State
@@ -222,6 +184,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const [statusConfirmModal, setStatusConfirmModal] = useState<{
     isOpen: boolean;
     targetStatus: string;
+    expectedStatus?: string;
     title: string;
     message: string;
   }>({
@@ -251,20 +214,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   const dbClient = supabase;
 
-  // Dynamic Match Duration Calculation (From Match -> League -> Sponsors -> Default 50 mins for 7x7)
-  const matchDurationMins = Number(
-    match?.match_duration ||
-    leagueData?.match_duration ||
-    (leagueData?.half_duration ? leagueData.half_duration * 2 : 50)
-  );
-  const halfDurationMins = Number(
-    match?.half_duration ||
-    leagueData?.half_duration ||
-    Math.round(matchDurationMins / 2) ||
-    25
-  );
-  const halfDurationSecs = halfDurationMins * 60;
-
+  const halfDurationSecs = getHalfDurationSeconds(match, competition?.league, competition?.tournamentDuration);
+  const halfDurationMins = halfDurationSecs / 60;
+  const matchDurationMins = halfDurationMins * 2;
+  const { timerSeconds, isTimerRunning, isClockSynced } = useMatchTimer(match, halfDurationSecs, CLOCK_URL);
   // Hardware Android Back Button Handler (Closes modals first, or navigates back)
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -292,134 +245,48 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     return () => backHandler.remove();
   }, [statusConfirmModal.isOpen, showEventModal, showObsModal, onBack]);
 
-  // Helper to apply persistent timer payload in countdown mode (25:00 -> 00:00)
-  const applyTimerPayload = (payload: any) => {
-    if (!payload) return;
-
-    const isRunning =
-      payload.is_timer_running !== undefined && payload.is_timer_running !== null
-        ? String(payload.is_timer_running) === 'true' || payload.is_timer_running === true
-        : payload.isTimerRunning !== undefined && payload.isTimerRunning !== null
-        ? String(payload.isTimerRunning) === 'true' || payload.isTimerRunning === true
-        : false;
-
-    const startedAt = payload.timer_started_at || payload.timerStartedAt;
-    const defaultSec = halfDurationSecs;
-
-    let baseSec =
-      payload.timer_seconds !== undefined && payload.timer_seconds !== null
-        ? Number(payload.timer_seconds)
-        : payload.timerSeconds !== undefined && payload.timerSeconds !== null
-        ? Number(payload.timerSeconds)
-        : defaultSec;
-
-    if (baseSec === 0 && (payload.status === 'scheduled' || !isRunning)) {
-      baseSec = defaultSec;
-    }
-
-    setIsTimerRunning(isRunning);
-    baseTimerSecondsRef.current = baseSec;
-    timerStartedAtRef.current = startedAt || null;
-
-    if (payload.status) {
-      setMatch((prev: any) => ({ ...prev, status: payload.status }));
-    }
-
-    if (isRunning && startedAt) {
-      const startedMs = new Date(startedAt).getTime();
-      if (!isNaN(startedMs)) {
-        const elapsedSec = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
-        const remaining = Math.max(0, baseSec - elapsedSec);
-        setTimerSeconds(remaining);
-      } else {
-        setTimerSeconds(baseSec);
-      }
-    } else {
-      setTimerSeconds(baseSec);
-    }
-  };
-
-  // Maps app-level status to DB enum ('scheduled' | 'first_half' | 'half_time' | 'second_half' | 'finished')
-  const mapStatusToDB = (appStatus: string): string => {
-    return appStatus;
-  };
-
-  // INSTANT OPTIMISTIC TIMER UPDATE (RAM update first 0ms, DB sync in background)
-  const updateTimerDBAndState = (
-    baseSec: number,
-    startedAtIso: string | null,
-    isRunning: boolean,
-    newStatus?: string,
-    scoreOverride?: { home_score?: number; away_score?: number; home_penalty_score?: number; away_penalty_score?: number }
+  const saveTimer = async (
+    buildUpdate: (nowMs: number) => Record<string, unknown> | null,
+    automatic = false,
   ) => {
-    setTimerSeconds(baseSec);
-    setIsTimerRunning(isRunning);
-    baseTimerSecondsRef.current = baseSec;
-    timerStartedAtRef.current = startedAtIso;
-
-    const targetOrgId = requireOrganizationId(match?.organization_id || orgId);
-    const nameKey = `MATCH_TIMER_${matchId}`;
-
-    const currentHomeScore = scoreOverride?.home_score ?? match?.home_score ?? 0;
-    const currentAwayScore = scoreOverride?.away_score ?? match?.away_score ?? 0;
-
-    const timerPayload: any = {
-      timer_seconds: baseSec,
-      timer_started_at: startedAtIso,
-      is_timer_running: isRunning,
-      home_score: currentHomeScore,
-      away_score: currentAwayScore,
-      updated_at: new Date().toISOString(),
-    };
-    if (newStatus) {
-      timerPayload.status = newStatus;
+    if (isReadOnlyMode || timerWritePending.current || String(match?.id) !== String(matchId)) return false;
+    if (!timerReady) {
+      if (!automatic) Alert.alert('Taymer', 'O‘yin taymeri ma’lumotlari yuklanmoqda. Qayta urinib ko‘ring.');
+      return false;
     }
-
-    // 1. Fast broadcast channel for instant OBS update (0ms latency!)
+    timerWritePending.current = true;
+    if (!automatic) setIsStatusChanging(true);
+    const snapshot = match;
     try {
-      const isField2 = String(match?.location || '').toLowerCase().includes('2');
-      const streamKey = isField2 ? 'stream2' : 'stream1';
-      supabase.channel(`obs_fast_timer_${matchId}`).send({
-        type: 'broadcast',
-        event: 'timer_update',
-        payload: timerPayload,
-      });
-      supabase.channel(`obs_fast_${streamKey}`).send({
-        type: 'broadcast',
-        event: 'timer_update',
-        payload: timerPayload,
-      });
-    } catch (bcErr) {}
+      const targetOrgId = requireOrganizationId(orgId);
+      if (serverNowMs() == null) await syncServerClock(CLOCK_URL);
+      const now = serverNowMs();
+      if (now == null) throw new Error('Server clock unavailable');
+      const values = buildUpdate(now);
+      if (!values) return false;
 
-    // 2. Non-blocking Background DB Persistence (Zero UI delay!)
-    (async () => {
-      try {
-        const matchUpdate: any = {
-          updated_at: new Date().toISOString(),
-          timer_seconds: baseSec,
-          timer_started_at: startedAtIso,
-          is_timer_running: isRunning,
-        };
-        if (newStatus) {
-          matchUpdate.status = newStatus;
-        }
-        if (scoreOverride?.home_score !== undefined) {
-          matchUpdate.home_score = scoreOverride.home_score;
-        }
-        if (scoreOverride?.away_score !== undefined) {
-          matchUpdate.away_score = scoreOverride.away_score;
-        }
-
-        await supabase
-          .from('matches')
-          .update(matchUpdate)
-          .eq('id', matchId);
-      } catch (e) {
-        console.warn('Background timer sync error:', e);
+      const rowAtWrite = latestMatchRow.current;
+      const saved = await writeMatchTimer(supabase, targetOrgId, snapshot, {
+        ...values, updated_at: new Date(now).toISOString(),
+      });
+      if (saved) {
+        if (latestMatchRow.current === rowAtWrite) applyMatchRow(saved);
+        return true;
       }
-    })();
-  };
 
+      if (!automatic) {
+        await refreshMatchRow();
+        Alert.alert('Taymer', 'O‘yin holati o‘zgargan. Ekrandagi holatni tekshirib, qayta urinib ko‘ring.');
+      }
+    } catch (error) {
+      console.warn('Match timer update failed:', error);
+      if (!automatic) Alert.alert('Taymer', 'O‘zgarish tasdiqlanmadi. Internet ulanishini va o‘yin holatini tekshiring.');
+    } finally {
+      timerWritePending.current = false;
+      if (!automatic) setIsStatusChanging(false);
+    }
+    return false;
+  };
   // SEND REMOTE GOAL SIGNAL TO AMATORA-OBS (amatora.exe) REPLAY ENGINE
   const sendRemoteObsGoalSignal = async (eventUuid: string, playerName?: string, teamName?: string) => {
     try {
@@ -472,216 +339,143 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }
   };
 
-  // 1:1 Realtime Channel Subscription for live cross-device sync
-  useEffect(() => {
-    fetchMatchControlData();
-
-    // Supabase Realtime Channel
-    const matchChannel = supabase
-      .channel(`match_control_${matchId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_events', filter: `match_id=eq.${matchId}` }, () => {
-        fetchEvents(matchId);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` }, (payload: any) => {
-        const updated = payload.new;
-        if (updated) {
-          setMatch((prev: any) => ({ ...prev, ...updated }));
-          if (updated.timer_seconds !== undefined) {
-            applyTimerPayload(updated);
-          }
-        }
-      })
-      .subscribe();
-
-    // Fast Broadcast Channel for Instant 0ms Timer Sync
-    const fastChannel = supabase
-      .channel(`obs_fast_timer_${matchId}`)
-      .on('broadcast', { event: 'timer_update' }, (msg: any) => {
-        if (msg.payload) {
-          applyTimerPayload(msg.payload);
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(matchChannel);
-      supabase.removeChannel(fastChannel);
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [matchId, orgId]);
-
-  // Realtime Accurate Countdown Timer Interval (25:00 -> 00:00)
-  useEffect(() => {
-    if (isTimerRunning) {
-      timerRef.current = setInterval(() => {
-        if (timerStartedAtRef.current) {
-          const startedMs = new Date(timerStartedAtRef.current).getTime();
-          if (!isNaN(startedMs)) {
-            const elapsedSec = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
-            const remaining = Math.max(0, baseTimerSecondsRef.current - elapsedSec);
-            setTimerSeconds(remaining);
-            if (remaining === 0) {
-              setIsTimerRunning(false);
-            }
-            return;
-          }
-        }
-        setTimerSeconds((prev) => {
-          if (prev <= 1) {
-            setIsTimerRunning(false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isTimerRunning]);
-
-  const fetchMatchControlData = async () => {
-    // Only show blocking loader if we have NO initial match data at all
-    if (!match && !initialMatch) setLoading(true);
-    try {
-      // 1. Fetch match directly from matches table
-      const { data: matchData } = await dbClient.from('matches').select('*').eq('id', matchId).single();
-
-      if (matchData) {
-        // 1. Fetch League Data & League Duration from leagues table
-        let matchDur = Number(matchData.match_duration || matchData.duration || 0) || null;
-        let halfDur = Number(matchData.half_duration || 0) || null;
-        let lData: any = null;
-
-        if (matchData.league) {
-          try {
-            const leagueNameTrim = String(matchData.league).trim();
-            const targetOrgId = requireOrganizationId(matchData.organization_id || orgId);
-
-            const { data: orgLeague } = await dbClient
-              .from('leagues')
-              .select('*')
-              .eq('organization_id', targetOrgId)
-              .ilike('name', leagueNameTrim)
-              .maybeSingle();
-
-            lData = orgLeague;
-            if (!lData) {
-              const { data: fallbackLeague } = await dbClient
-                .from('leagues')
-                .select('*')
-                .ilike('name', leagueNameTrim)
-                .maybeSingle();
-              lData = fallbackLeague;
-            }
-
-            if (lData) {
-              if (!matchDur) {
-                matchDur = Number(lData.duration || lData.match_duration || lData.match_minutes || 0) || null;
-              }
-              if (!halfDur) {
-                halfDur = Number(lData.half_duration || lData.half_minutes || 0) || null;
-              }
-            }
-          } catch (lErr) {
-            console.warn('Error loading league duration:', lErr);
-          }
-        }
-
-        if (halfDur && !matchDur) {
-          matchDur = halfDur * 2;
-        } else if (matchDur && !halfDur) {
-          halfDur = Math.round(matchDur / 2);
-        }
-
-        const finalMatchDuration = matchDur || (String(matchData.league).includes('7x7') ? 50 : 60);
-        const finalHalfDuration = halfDur || Math.round(finalMatchDuration / 2);
-
-        setLeagueData({
-          ...(lData || {}),
-          match_duration: finalMatchDuration,
-          half_duration: finalHalfDuration,
-        });
-
-        const mergedMatchData = {
-          ...matchData,
-          match_duration: finalMatchDuration,
-          half_duration: finalHalfDuration,
-        };
-
-        setMatch((prev: any) => ({ ...prev, ...mergedMatchData }));
-
-        // Apply timer state from matches table columns
-        applyTimerPayload(mergedMatchData);
-
-        if (mergedMatchData.status) {
-          setMatch((prev: any) => ({ ...prev, status: mergedMatchData.status }));
-        }
-
-        if (matchData.home_penalty_score !== undefined && matchData.away_penalty_score !== undefined) {
-          setHomePenalties(matchData.home_penalty_score || 0);
-          setAwayPenalties(matchData.away_penalty_score || 0);
-        }
-
-        // 3. Fetch Teams, Roster Applications and Events all in a single parallel roundtrip
-        const [teamsRes, homeAppsRes, awayAppsRes, eventsRes] = await Promise.all([
-          dbClient.from('teams').select('id, name, logo_url').in('id', [matchData.home_team_id, matchData.away_team_id].filter(Boolean)),
-          matchData.home_team_id
-            ? dbClient.from('applications').select('id, first_name, last_name, position, player_number, is_archived').eq('team_id', matchData.home_team_id).eq('status', 'approved')
-            : Promise.resolve({ data: [] }),
-          matchData.away_team_id
-            ? dbClient.from('applications').select('id, first_name, last_name, position, player_number, is_archived').eq('team_id', matchData.away_team_id).eq('status', 'approved')
-            : Promise.resolve({ data: [] }),
-          dbClient.from('match_events').select('*, player:player_id(first_name, last_name, player_number), team:team_id(name)').eq('match_id', matchId).order('minute', { ascending: true })
-        ]);
-
-        let ht = null;
-        let at = null;
-        if (teamsRes.data) {
-          ht = teamsRes.data.find((t: any) => t.id === matchData.home_team_id);
-          at = teamsRes.data.find((t: any) => t.id === matchData.away_team_id);
-          if (ht) setHomeTeam(ht);
-          if (at) setAwayTeam(at);
-        }
-
-        const finalHomePlayers = ((homeAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived);
-        const finalAwayPlayers = ((awayAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived);
-        const finalEvents = (eventsRes.data as any[]) || [];
-
-        setHomePlayers(finalHomePlayers);
-        setAwayPlayers(finalAwayPlayers);
-        setEvents(finalEvents);
-        setIsPlayersLoading(false);
-        setIsEventsLoading(false);
-
-        // Update high-speed memory cache for instant future loads
-        MATCH_CONTROL_CACHE.set(String(matchId), {
-          match: mergedMatchData,
-          leagueData: {
-            match_duration: finalMatchDuration,
-            half_duration: finalHalfDuration,
-          },
-          homeTeam: ht || null,
-          awayTeam: at || null,
-          homePlayers: finalHomePlayers,
-          awayPlayers: finalAwayPlayers,
-          events: finalEvents,
-          homePenalties: matchData.home_penalty_score || 0,
-          awayPenalties: matchData.away_penalty_score || 0,
-        });
-      }
-    } catch (e) {
-      console.error('Background fetchMatchControlData error:', e);
-    } finally {
-      setLoading(false);
-      setIsPlayersLoading(false);
-      setIsEventsLoading(false);
-    }
+  const applyMatchRow = (row: any) => {
+    latestMatchRow.current = { ...latestMatchRow.current, ...row };
+    setMatch((previous: any) => String(previous?.id) === String(row.id) ? { ...previous, ...row } : row);
+    if ('home_penalty_score' in row) setHomePenalties(row.home_penalty_score ?? 0);
+    if ('away_penalty_score' in row) setAwayPenalties(row.away_penalty_score ?? 0);
   };
 
+  const refreshMatchRow = async (isActive = () => true) => {
+    const rowAtRequest = latestMatchRow.current;
+    const { data, error } = await dbClient.from('matches').select(TIMER_ROW_COLUMNS).eq('id', matchId).maybeSingle();
+    if (error) throw error;
+    if (data && isActive() && latestMatchRow.current === rowAtRequest) applyMatchRow(data);
+  };
+
+  useEffect(() => {
+    if (String(latestMatchRow.current?.id) !== String(matchId)) latestMatchRow.current = null;
+    let active = true;
+    let subscribed = false;
+    let refreshing = false;
+    let loaded = false;
+    let needsRefresh = false;
+    const refresh = async () => {
+      if (!active) return;
+      if (refreshing) { needsRefresh = true; return; }
+      refreshing = true;
+      try {
+        if (loaded) await refreshMatchRow(() => active);
+        else loaded = await fetchMatchControlData(() => active);
+      } catch (error) {
+        console.warn('Match timer refresh failed:', error);
+      } finally {
+        refreshing = false;
+        if (needsRefresh && active) { needsRefresh = false; void refresh(); }
+      }
+    };
+
+    void refresh();
+    const channel = supabase.channel('match_control_' + matchId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_events', filter: 'match_id=eq.' + matchId }, () => {
+        if (active) void fetchEvents(matchId);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: 'id=eq.' + matchId }, ({ new: row }) => {
+        if (active) applyMatchRow(row);
+      })
+      .subscribe(status => {
+        subscribed = status === 'SUBSCRIBED';
+        if (subscribed) void refresh();
+      });
+    const poll = setInterval(() => {
+      if ((!subscribed || !loaded) && AppState.currentState !== 'background') void refresh();
+    }, 5000);
+    const appState = AppState.addEventListener('change', state => {
+      if (state !== 'active') return;
+      void syncServerClock(CLOCK_URL).catch(() => {});
+      void refresh();
+    });
+
+    return () => {
+      active = false;
+      clearInterval(poll);
+      appState.remove();
+      void supabase.removeChannel(channel);
+    };
+  }, [matchId, orgId]);
+  const fetchMatchControlData = async (isActive: () => boolean) => {
+    const rowAtRequest = latestMatchRow.current;
+    if (!match && !initialMatch) setLoading(true);
+    try {
+      const { data: matchData, error } = await dbClient.from('matches').select('*').eq('id', matchId).single();
+      if (error) throw error;
+      if (!isActive()) return false;
+      const resolvedMatch = latestMatchRow.current !== rowAtRequest ? { ...matchData, ...latestMatchRow.current } : matchData;
+      applyMatchRow(resolvedMatch);
+
+      const competitionLoad = loadMatchCompetition(dbClient, matchData).catch(error => {
+        console.warn('Match duration could not be loaded:', error);
+        return null;
+      });
+      // 3. Fetch Teams, Roster Applications and Events all in a single parallel roundtrip
+      const [teamsRes, homeAppsRes, awayAppsRes, eventsRes, resolvedCompetition] = await Promise.all([
+        dbClient.from('teams').select('id, name, logo_url').in('id', [matchData.home_team_id, matchData.away_team_id].filter(Boolean)),
+        matchData.home_team_id
+          ? dbClient.from('applications').select('id, first_name, last_name, position, player_number, is_archived').eq('team_id', matchData.home_team_id).eq('status', 'approved')
+          : Promise.resolve({ data: [] }),
+        matchData.away_team_id
+          ? dbClient.from('applications').select('id, first_name, last_name, position, player_number, is_archived').eq('team_id', matchData.away_team_id).eq('status', 'approved')
+          : Promise.resolve({ data: [] }),
+        dbClient.from('match_events').select('*, player:player_id(first_name, last_name, player_number), team:team_id(name)').eq('match_id', matchId).order('minute', { ascending: true }),
+        competitionLoad,
+      ]);
+      if (!isActive()) return false;
+      setCompetition(resolvedCompetition);
+      setReadyMatchId(resolvedCompetition !== null ? matchId : null);
+
+      let ht = null;
+      let at = null;
+      if (teamsRes.data) {
+        ht = teamsRes.data.find((t: any) => t.id === matchData.home_team_id);
+        at = teamsRes.data.find((t: any) => t.id === matchData.away_team_id);
+        if (ht) setHomeTeam(ht);
+        if (at) setAwayTeam(at);
+      }
+
+      const finalHomePlayers = ((homeAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived);
+      const finalAwayPlayers = ((awayAppsRes.data as any[]) || []).filter((p: any) => !p.is_archived);
+      const finalEvents = (eventsRes.data as any[]) || [];
+
+      setHomePlayers(finalHomePlayers);
+      setAwayPlayers(finalAwayPlayers);
+      setEvents(finalEvents);
+      setIsPlayersLoading(false);
+      setIsEventsLoading(false);
+
+      // Update high-speed memory cache for instant future loads
+      MATCH_CONTROL_CACHE.set(String(matchId), {
+        match: latestMatchRow.current,
+        competition: resolvedCompetition,
+        homeTeam: ht || null,
+        awayTeam: at || null,
+        homePlayers: finalHomePlayers,
+        awayPlayers: finalAwayPlayers,
+        events: finalEvents,
+        homePenalties: latestMatchRow.current.home_penalty_score || 0,
+        awayPenalties: latestMatchRow.current.away_penalty_score || 0,
+      });
+      return resolvedCompetition !== null;
+    } catch (error) {
+      console.warn('Match Control data could not be loaded:', error);
+      return false;
+    } finally {
+      if (isActive()) {
+        setLoading(false);
+        setIsPlayersLoading(false);
+        setIsEventsLoading(false);
+      }
+    }
+  };
   const fetchEvents = async (mId?: string | number) => {
     try {
       const { data } = await dbClient
@@ -698,24 +492,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }
   };
 
-  // Calculate elapsed time (Count-UP: to'g'ri sanash) for Mobile Admin Display
-  const getElapsedSeconds = () => {
-    if (!match || match.status === 'scheduled' || match.status === 'not_started' || match.status === 'pending') {
-      return 0;
-    }
-    if (match.status === 'half_time' || match.status === 'break') {
-      return halfDurationSecs;
-    }
-    if (match.status === 'second_half' || match.status === 'extra_time') {
-      const secondHalfElapsed = Math.max(0, halfDurationSecs - timerSeconds);
-      return halfDurationSecs + secondHalfElapsed;
-    }
-    if (match.status === 'finished') {
-      return matchDurationMins * 60;
-    }
-    // first_half / default
-    return Math.max(0, halfDurationSecs - timerSeconds);
-  };
+  const getElapsedSeconds = () => getElapsedMatchSeconds(match?.status, timerSeconds, halfDurationSecs);
 
   // Current calculated minute (Count-UP: 1' dan 60' gacha)
   const getCurrentMinute = () => {
@@ -725,7 +502,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   };
 
   // Format seconds to MM:SS (Count-UP display for Mobile Admin)
-  const formatTimer = (rawSeconds?: number) => {
+  const formatTimer = () => {
     const totalSeconds = getElapsedSeconds();
     const validSec = Math.max(0, Number(totalSeconds) || 0);
     const mins = Math.floor(validSec / 60);
@@ -733,49 +510,41 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Instant Manual Timer Toggle (Play / Pause 0ms Instant Response!)
-  const toggleTimerManual = () => {
-    if (isReadOnlyMode) return;
-    const newRunning = !isTimerRunning;
-    let curRemaining = timerSeconds;
-    if (curRemaining <= 0) curRemaining = halfDurationSecs;
-    const nowIso = newRunning ? new Date().toISOString() : null;
-
-    // 1. Immediate UI flip (0ms - zero delay!)
-    setIsTimerRunning(newRunning);
-    setTimerSeconds(curRemaining);
-    baseTimerSecondsRef.current = curRemaining;
-    timerStartedAtRef.current = nowIso;
-    showToast(newRunning ? "Taymer davom ettirildi ▶️" : "Taymer to'xtatildi (Pauza) ⏸️");
-
-    // 2. Non-blocking Background persistence
-    updateTimerDBAndState(curRemaining, nowIso, newRunning);
+  const toggleTimerManual = async () => {
+    if (!canRunMatchTimer(match?.status)) return;
+    const saved = await saveTimer(now => {
+      const remaining = getRemainingSeconds(match, halfDurationSecs, now);
+      const seconds = isTimerRunning ? getPauseSeconds(timerSeconds, remaining) : remaining || halfDurationSecs;
+      if (seconds == null) {
+        Alert.alert('Taymer', 'Ekrandagi vaqt yangilanmoqda. Pauzani qayta bosing.');
+        return null;
+      }
+      const running = !isTimerRunning;
+      return {
+        timer_seconds: seconds,
+        timer_started_at: running ? new Date(now).toISOString() : null,
+        is_timer_running: running,
+      };
+    });
+    if (saved) showToast(isTimerRunning ? 'Taymer to‘xtatildi ⏸️' : 'Taymer davom ettirildi ▶️');
   };
 
-  // Instant Reset Timer (0ms RAM response)
-  const resetTimerManual = () => {
-    if (isReadOnlyMode) return;
-    updateTimerDBAndState(halfDurationSecs, null, false);
-    showToast("Taymer qayta o'rnatildi (Reset) 🔄");
+  const resetTimerManual = async () => {
+    if (await saveTimer(() => ({ timer_seconds: halfDurationSecs, timer_started_at: null, is_timer_running: false }))) {
+      showToast('Taymer qayta o‘rnatildi 🔄');
+    }
   };
 
-  // Instant Quick Minute Adjuster (+1m / -1m)
-  const adjustTimerSeconds = (deltaSec: number) => {
-    if (isReadOnlyMode) return;
-    const maxSec = (matchDurationMins * 60) || (halfDurationSecs * 2) || 3600;
-    const newSec = Math.max(0, Math.min(maxSec, timerSeconds + deltaSec));
-    const nowIso = isTimerRunning ? new Date().toISOString() : null;
-
-    // 1. Immediate UI flip (0ms response)
-    setTimerSeconds(newSec);
-    baseTimerSecondsRef.current = newSec;
-    timerStartedAtRef.current = nowIso;
-    showToast(deltaSec > 0 ? "+1 daqiqa qo'shildi ⏱️" : "-1 daqiqa kamaytirildi ⏱️");
-
-    // 2. Non-blocking Background persistence
-    updateTimerDBAndState(newSec, nowIso, isTimerRunning);
+  const adjustTimerSeconds = async (deltaSec: number) => {
+    if (!canRunMatchTimer(match?.status)) return;
+    const saved = await saveTimer(now => {
+      const remaining = getRemainingSeconds(match, halfDurationSecs, now);
+      const seconds = Math.max(0, Math.min(halfDurationSecs, remaining + deltaSec));
+      const running = isRunningTimerSnapshot(match) && remaining > 0 && seconds > 0;
+      return { timer_seconds: seconds, timer_started_at: running ? new Date(now).toISOString() : null, is_timer_running: running };
+    });
+    if (saved) showToast(deltaSec > 0 ? '+1 daqiqa qo‘shildi ⏱️' : '-1 daqiqa kamaytirildi ⏱️');
   };
-
   // Quick + creates an unattributed goal event for FIFO replay matching; - corrects score.
   const adjustScore = async (teamType: 'home' | 'away', delta: number) => {
     if (!match || isReadOnlyMode || quickGoalWriteRef.current) return;
@@ -844,7 +613,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Open Sleek Uzbek Confirmation Modal for Match Status Changes
   const promptStatusChange = (newStatus: string) => {
-    if (isReadOnlyMode) return;
+    if (isReadOnlyMode || isStatusChanging) return;
+    if (!timerReady) {
+      Alert.alert('Taymer', 'O‘yin taymeri ma’lumotlari yuklanmoqda. Qayta urinib ko‘ring.');
+      return;
+    }
     let title = "Statusni O'zgartirish";
     let message = "";
 
@@ -868,44 +641,25 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     setStatusConfirmModal({
       isOpen: true,
       targetStatus: newStatus,
+      expectedStatus: match?.status,
       title,
       message,
     });
   };
 
   // Execute Status Change
-  const executeStatusChange = (overrideStatus?: string) => {
-    const newStatus = typeof overrideStatus === 'string' ? overrideStatus : statusConfirmModal.targetStatus;
+  const executeStatusChange = async () => {
+    const newStatus = statusConfirmModal.targetStatus;
     if (!newStatus || typeof newStatus !== 'string') return;
 
     setStatusConfirmModal({ isOpen: false, targetStatus: '', title: '', message: '' });
 
-    let newBaseSec = timerSeconds;
-    let newRunning = isTimerRunning;
-    let nowIso: string | null = new Date().toISOString();
-
-    if (newStatus === 'first_half') {
-      newBaseSec = halfDurationSecs;
-      newRunning = true;
-      nowIso = new Date().toISOString();
-    } else if (newStatus === 'half_time') {
-      newBaseSec = timerSeconds;
-      newRunning = false;
-      nowIso = null;
-    } else if (newStatus === 'second_half') {
-      newBaseSec = halfDurationSecs;
-      newRunning = true;
-      nowIso = new Date().toISOString();
-    } else if (newStatus === 'finished') {
-      newRunning = false;
-      nowIso = null;
-    } else if (newStatus === 'scheduled') {
-      newBaseSec = halfDurationSecs;
-      newRunning = false;
-      nowIso = null;
+    if (match?.status !== statusConfirmModal.expectedStatus) {
+      Alert.alert('Taymer', 'O‘yin holati o‘zgargan. Amalni qayta tanlang.');
+      return;
     }
 
-    let scoreOverride: any = undefined;
+    let scoreOverride: { home_score: number; away_score: number } | undefined = undefined;
     if (newStatus === 'finished') {
       const homeGoals = events.filter(
         (e) =>
@@ -924,29 +678,22 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       scoreOverride = {
         home_score: finalHomeScore,
         away_score: finalAwayScore,
-        home_penalty_score: homePenalties,
-        away_penalty_score: awayPenalties,
       };
     }
 
-    const localUpdateData: any = {
-      status: newStatus,
-      timer_seconds: newBaseSec,
-      timer_started_at: nowIso,
-      is_timer_running: newRunning,
-      ...(scoreOverride || {}),
-    };
-
-    setMatch((prev: any) => ({ ...prev, ...localUpdateData }));
-    setIsTimerRunning(newRunning);
-    setTimerSeconds(newBaseSec);
-
-    updateTimerDBAndState(newBaseSec, nowIso, newRunning, newStatus, scoreOverride);
-
-    if (newStatus === 'finished') {
-      sendRemoteObsFinishSignal();
-    }
-
+    const saved = await saveTimer(now => {
+      const running = newStatus === 'first_half' || newStatus === 'second_half';
+      const seconds = running || newStatus === 'scheduled' ? halfDurationSecs : getRemainingSeconds(match, halfDurationSecs, now);
+      return {
+        status: newStatus,
+        ...scoreOverride,
+        timer_seconds: seconds,
+        timer_started_at: running ? new Date(now).toISOString() : null,
+        is_timer_running: running,
+      };
+    });
+    if (!saved) return;
+    if (newStatus === 'finished') void sendRemoteObsFinishSignal();
     showToast(
       newStatus === 'first_half'
         ? "1-Taym Boshlandi 🚀"
@@ -965,43 +712,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // AVTOMATIK YAKUNLASH NAZORATCHISI (Auto-finish watchdog)
-  // Operator o'yinni yakunlashni unutib qo'yishi mumkin — agar taymer
-  // pauza qilinmagan holda (is_timer_running=true, timer_started_at
-  // real vaqt belgisi bo'yicha) ligaga belgilangan umumiy o'yin
-  // vaqtidan + 30 daqiqa "grace" muddatdan ko'proq davomiy ishlab
-  // ketsa, o'yin bazani behuda band qilib turmasligi uchun avtomatik
-  // "finished" holatiga o'tkaziladi. Haqiqiy (server) vaqt belgisiga
-  // asoslangani uchun ekran qayta ochilganda ham to'g'ri ishlaydi.
+  // Freeze the expired timer at zero without ending the fixture.
   useEffect(() => {
-    if (!match || !matchId) return;
-    if (match.status === 'finished' || match.status === 'scheduled') {
-      autoFinishTriggeredRef.current = false;
-      return;
-    }
-    if (!match.is_timer_running || !match.timer_started_at) return;
-
-    const checkAutoFinish = () => {
-      if (autoFinishTriggeredRef.current) return;
-      if (!match.timer_started_at) return;
-      const startedMs = new Date(match.timer_started_at).getTime();
-      if (isNaN(startedMs)) return;
-      const runningForSec = (Date.now() - startedMs) / 1000;
-      const limitSec = (matchDurationMins + 30) * 60;
-      if (runningForSec >= limitSec) {
-        autoFinishTriggeredRef.current = true;
-        console.warn(`⏰ Auto-finish: match ${matchId} taymeri ${Math.round(runningForSec / 60)} daqiqadan beri pauzasiz ishlab turibdi (limit: ${matchDurationMins + 30} daq) — o'yin avtomatik yakunlanmoqda.`);
-        executeStatusChange('finished');
-      }
-    };
-
-    checkAutoFinish();
-    const watchdogInterval = setInterval(checkAutoFinish, 60000);
-    return () => clearInterval(watchdogInterval);
-  }, [matchId, match?.status, match?.is_timer_running, match?.timer_started_at, matchDurationMins]);
-
-  // Open Event Modal prefilled
+    if (isReadOnlyMode || !timerReady || !isClockSynced || isStatusChanging || timerSeconds !== 0 || !isRunningTimerSnapshot(match)) return;
+    void saveTimer(now => getRemainingSeconds(match, halfDurationSecs, now) === 0
+      ? { timer_seconds: 0, timer_started_at: null, is_timer_running: false } : null, true);
+  }, [match?.status, match?.id, match?.timer_started_at, match?.timer_seconds, match?.is_timer_running,
+    timerSeconds, isClockSynced, timerReady, isReadOnlyMode, isStatusChanging, halfDurationSecs]);
   const openEventModal = (type: string, teamId?: string | number, playerId?: string | number) => {
     if (isReadOnlyMode) return;
     setEditingEventId(null);
@@ -1147,7 +864,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       } catch (err: any) {
         // Rollback UI
         setEvents(prevEvents);
-        setMatch(prevMatch);
+        setMatch((current: any) => ({ ...current, home_score: prevMatch.home_score, away_score: prevMatch.away_score }));
         Alert.alert("Xatolik", err.message || "Voqeani yangilashda xatolik yuz berdi");
       } finally {
         setSavingEvent(false);
@@ -1238,7 +955,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     } catch (err: any) {
       // Rollback UI
       setEvents(prevEvents);
-      setMatch(prevMatch);
+      setMatch((current: any) => ({ ...current, home_score: prevMatch.home_score, away_score: prevMatch.away_score }));
       Alert.alert("Xatolik", err.message || "Voqeani saqlashda xatolik yuz berdi");
     } finally {
       setSavingEvent(false);
@@ -1510,10 +1227,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           <TouchableOpacity
             style={[styles.iconNavTile, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
             onPress={() => {
-              const isField2 = String(match?.location || '').toLowerCase().includes('2');
-              const obsUrl = `https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${requireOrganizationId(orgId)}`;
+              if (!obsUrl) return;
               Clipboard.setString(obsUrl);
-              showToast(`OBS Stream URL (${match?.location || (isField2 ? '2-maydon' : '1-maydon')}) nusxalandi`);
+              showToast('OBS havolasi nusxalandi (' + obsField + '-maydon)');
             }}
           >
             {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
@@ -1639,13 +1355,14 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               {/* Clean Timer Pill Container (Only counting timer clock + play/reset) */}
               <View style={[styles.timerOnlyCapsule, Platform.OS === 'android' && { backgroundColor: isDark ? '#1E293B' : '#F1F5F9', borderColor: colors.accentGreen }]}>
                 {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                <Text style={[styles.timerPillText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{formatTimer(timerSeconds)}</Text>
+                <Text style={[styles.timerPillText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{formatTimer()}</Text>
                 <Text style={[styles.timerMinBadge, Platform.OS === 'android' && { color: colors.accentGreen }]}>{`(${getCurrentMinute()}')`}</Text>
 
                 {!isReadOnlyMode && (
                   <>
                     <TouchableOpacity 
                       style={[styles.pillIconBtn, { backgroundColor: isTimerRunning ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)' }]} 
+                      disabled={isStatusChanging}
                       onPress={toggleTimerManual}
                     >
                       {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
@@ -2259,6 +1976,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             {/* Left Edge: -1m Button */}
             <TouchableOpacity
               style={styles.capsuleSideAdjustBtn}
+              disabled={isStatusChanging}
               onPress={() => adjustTimerSeconds(-60)}
               activeOpacity={0.75}
             >
@@ -2268,6 +1986,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             {/* Center: Main Play/Pause Button */}
             <TouchableOpacity
               style={styles.capsuleCenterPlayBtn}
+              disabled={isStatusChanging}
               onPress={toggleTimerManual}
               activeOpacity={0.85}
             >
@@ -2284,7 +2003,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                 </View>
                 <View style={styles.solidBtnTimeBadge}>
                   <Text style={styles.solidBtnTimeText}>
-                    {formatTimer(timerSeconds)}
+                    {formatTimer()}
                   </Text>
                 </View>
               </View>
@@ -2293,6 +2012,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
             {/* Right Edge: +1m Button */}
             <TouchableOpacity
               style={styles.capsuleSideAdjustBtnRight}
+              disabled={isStatusChanging}
               onPress={() => adjustTimerSeconds(60)}
               activeOpacity={0.75}
             >
@@ -2376,14 +2096,14 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
             <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`📍 Maydon: ${match?.location || '1-maydon'}`}</Text>
             <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔌 OBS WebSocket Porti: ${String(match?.location || '').toLowerCase().includes('2') ? 'ws://localhost:4456 (2-Maydon)' : 'ws://localhost:4455 (1-Maydon)'}`}</Text>
-            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{`🔗 Stream Overlay URL:\nhttps://amatora.uz/obs/scoreboard/${String(match?.location || '').toLowerCase().includes('2') ? 'stream2' : 'stream1'}?org_id=${requireOrganizationId(orgId)}`}</Text>
+            <Text style={[styles.modalLabel, Platform.OS === 'android' && { color: colors.textSecondary }]}>{'🔗 Stream Overlay URL:\n' + obsUrl}</Text>
 
             <TouchableOpacity
               style={[styles.modalSubmitBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
               onPress={() => {
-                const isField2 = String(match?.location || '').toLowerCase().includes('2');
-                Clipboard.setString(`https://amatora.uz/obs/scoreboard/${isField2 ? 'stream2' : 'stream1'}?org_id=${requireOrganizationId(orgId)}`);
-                Alert.alert("Nusxalandi", `OBS Stream Scoreboard (${isField2 ? '2-Maydon' : '1-Maydon'}) havolasi nusxalandi!`);
+                if (!obsUrl) return;
+                Clipboard.setString(obsUrl);
+                Alert.alert('Nusxalandi', 'OBS havolasi nusxalandi (' + obsField + '-maydon)');
                 setShowObsModal(false);
               }}
             >
