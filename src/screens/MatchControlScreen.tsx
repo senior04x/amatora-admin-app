@@ -104,7 +104,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   useHideNavigationDock();
   const { bottom: safeAreaBottom } = useSafeAreaInsets();
   const timerBarBottom = Math.max(24, safeAreaBottom + 8);
-  const { orgId } = useOrg();
+  const { orgId, userRole } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
   const cachedData = MATCH_CONTROL_CACHE.get(String(matchId));
@@ -648,10 +648,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     try {
       const updatePayload = isHome ? { home_penalty_score: newPen } : { away_penalty_score: newPen };
-      await supabase.from('matches').update(updatePayload).eq('id', matchId);
+      const { data, error } = await supabase.from('matches').update(updatePayload)
+        .eq('id', matchId).eq('organization_id', requireOrganizationId(orgId)).select('id').maybeSingle();
+      if (error || !data) throw error ?? new Error('Penalty write denied');
     } catch (e) {
       if (isHome) setHomePenalties(oldPen);
       else setAwayPenalties(oldPen);
+      Alert.alert('Penaltilar', 'Hisobni saqlab bo‘lmadi. Qayta urinib ko‘ring.');
     }
   };
 
@@ -937,7 +940,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
     // 2. Background RPC with rollback on error
     try {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('record_match_event', {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc(userRole === 'user' ? 'record_organizer_match_event' : 'record_match_event', {
         p_event_uuid: eventUuid,
         p_match_id: matchId,
         p_team_id: selectedTeamId,

@@ -1,3 +1,4 @@
+import { manageMatchOrganizer } from '../api/matchOrganizers';
 import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
@@ -190,8 +191,14 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
   };
 
   const handleCreateOrganizer = async () => {
+    if (isCreatingOrgUser) return;
     if (!newOrgEmail.trim() || !newOrgPassword.trim() || !newOrgName.trim()) {
       Alert.alert('Xatolik', 'Iltimos, barcha maydonlarni to\'ldiring!');
+      return;
+    }
+
+    if (newOrgPassword.trim().length < 8) {
+      Alert.alert('Parol', 'Yangi parol kamida 8 belgidan iborat bo‘lsin.');
       return;
     }
 
@@ -206,25 +213,18 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
         uploadedAvatarUrl = await uploadAvatarToSupabase(dbClient, newOrgAvatar);
       }
 
-      const { error } = await dbClient.from('organization_users').insert([
-        {
-          organization_id: targetOrgId,
-          email: newOrgEmail.trim().toLowerCase(),
-          password: newOrgPassword.trim(),
-          full_name: newOrgName.trim(),
-          role: 'user',
-          avatar_url: uploadedAvatarUrl || null,
-        },
-      ]);
-
-      if (error) {
-        throw new Error(error.message);
-      }
+      await manageMatchOrganizer({
+        organizationId: targetOrgId,
+        email: newOrgEmail.trim().toLowerCase(),
+        password: newOrgPassword.trim(),
+        name: newOrgName.trim(),
+        avatarUrl: uploadedAvatarUrl,
+      });
 
       if (showToast) {
-        showToast({ message: 'Yangi organizator (user) saqlandi!', type: 'success' });
+        showToast({ message: 'Organizator akkaunti faollashtirildi.', type: 'success' });
       } else {
-        Alert.alert('Muvaffaqiyatli', 'Yangi organizator (user) saqlandi!');
+        Alert.alert('Muvaffaqiyatli', 'Organizator akkaunti faollashtirildi.');
       }
 
       setNewOrgName('');
@@ -248,8 +248,11 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
         style: 'destructive',
         onPress: async () => {
           try {
-            const dbClient = supabase;
-            await dbClient.from('organization_users').delete().eq('id', id);
+            await manageMatchOrganizer({
+              action: 'remove',
+              organizationId: requireOrganizationId(currentOrg?.id || orgId),
+              profileId: Number(id),
+            });
             fetchOrganizers();
             if (showToast) {
               showToast({ message: 'Organizator o\'chirildi', type: 'info' });
@@ -402,9 +405,12 @@ export const OrganizersScreen: React.FC<OrganizersScreenProps> = ({ onGoBack }) 
                   autoCapitalize="none"
                 />
 
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 6 }}>
+                  Eski profilni faollashtirish uchun uning emailini kiriting va yangi parol belgilang.
+                </Text>
                 <TextInput
                   style={[styles.input, { marginTop: 10 }, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
-                  placeholder="Parol"
+                  placeholder="Yangi parol (kamida 8 belgi)"
                   placeholderTextColor={colors.textMuted}
                   value={newOrgPassword}
                   onChangeText={setNewOrgPassword}

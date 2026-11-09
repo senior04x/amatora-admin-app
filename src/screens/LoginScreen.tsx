@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
-import { resolveOrganizationOwner } from '../utils/organizationOwner';
+import { resolveAdminAppAccount } from '../api/matchOrganizers';
 import { logUserLoginWithLocation } from '../utils/locationLogger';
 
 interface LoginScreenProps {
@@ -53,122 +53,61 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     try {
       const dbClient = supabase;
       let loginEmail = '';
+      let phoneOrganizationId: number | undefined;
 
       if (loginMode === 'email') {
-        loginEmail = identifier.toLowerCase();
+        loginEmail = identifier.trim().toLowerCase();
       } else {
         // Find email by phone number from organizations table
         let phoneSearch = identifier.replace(/[^0-9]/g, '');
-        if (phoneSearch.startsWith('998')) {
+        if (phoneSearch.length === 12 && phoneSearch.startsWith('998')) {
           phoneSearch = phoneSearch.substring(3);
         }
         
+        if (!/^\d{9}$/.test(phoneSearch)) throw new Error('Telefon raqamini to‘liq kiriting.');
         const { data: orgs, error: fetchErr } = await dbClient
           .from('organizations')
-          .select('admin_email')
+          .select('id,admin_email')
           .ilike('contact_phone', `%${phoneSearch}%`)
-          .limit(1);
+          .limit(2);
 
-        if (fetchErr || !orgs || orgs.length === 0 || !orgs[0].admin_email) {
-          throw new Error('Bu telefon raqami bilan tashkilot topilmadi!');
+        if (fetchErr || !orgs || orgs.length !== 1 || !orgs[0].admin_email) {
+          throw new Error('Bu raqam uchun bitta tashkilot tasdiqlanmadi. Email orqali kiring.');
         }
         loginEmail = orgs[0].admin_email;
+        phoneOrganizationId = Number(orgs[0].id);
       }
 
-      // 1. First try Supabase Auth (for org_admin or auth registered users)
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: password.trim(),
       });
-
-      if (!authError && authData?.user) {
-        const targetOrgId = await resolveOrganizationOwner(dbClient, authData.user);
-        if (targetOrgId) {
-          await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
-          await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
-          await AsyncStorage.setItem('@amatora_user_email', loginEmail);
-          logUserLoginWithLocation({
-            organizationId: targetOrgId,
-            userEmail: loginEmail,
-            userName: 'Bosh Admin',
-            userRole: 'org_admin',
-          });
-          onLoginSuccess();
-          return;
-        }
-
-        // Check if user is in organization_users table
-        const { data: orgUser } = await dbClient
-          .from('organization_users')
-          .select('*')
-          .eq('email', loginEmail)
-          .maybeSingle();
-
-        if (orgUser) {
-          const targetOrgId = orgUser.organization_id;
-          const role = orgUser.role || 'user';
-          await AsyncStorage.setItem('@amatora_user_role', role);
-          await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
-          await AsyncStorage.setItem('@amatora_user_email', loginEmail);
-          logUserLoginWithLocation({
-            organizationId: targetOrgId,
-            userEmail: loginEmail,
-            userName: orgUser.full_name || loginEmail,
-            userRole: role,
-          });
-          onLoginSuccess();
-          return;
-        }
+      if (error || !data.user) {
+        throw new Error('Login yoki parol noto‘g‘ri. Eski organizator akkauntini Bosh Admin faollashtirishi kerak.');
       }
 
-      // 2. Fallback: Check organization_users table directly by email & password
-      const { data: directOrgUser } = await dbClient
-        .from('organization_users')
-        .select('*')
-        .eq('email', loginEmail)
-        .eq('password', password.trim())
-        .maybeSingle();
-
-      if (directOrgUser) {
-        const targetOrgId = directOrgUser.organization_id;
-        const role = directOrgUser.role || 'user';
-        await AsyncStorage.setItem('@amatora_user_role', role);
-        await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
-        await AsyncStorage.setItem('@amatora_user_email', loginEmail);
-        logUserLoginWithLocation({
-          organizationId: targetOrgId,
-          userEmail: loginEmail,
-          userName: directOrgUser.full_name || loginEmail,
-          userRole: role,
+      try {
+        const account = await resolveAdminAppAccount(data.user);
+        if (phoneOrganizationId !== undefined &&
+            (account.role !== 'org_admin' || account.organizationId !== phoneOrganizationId)) {
+          throw new Error('Telefon raqami ushbu Bosh Admin akkauntiga tegishli emas.');
+        }
+        await AsyncStorage.multiSet([
+          ['@amatora_user_role', account.role],
+          ['@amatora_org_id', String(account.organizationId)],
+          ['@amatora_user_email', loginEmail],
+        ]);
+        void logUserLoginWithLocation({
+          organizationId: account.organizationId,
+          userEmail: account.profile?.email ?? loginEmail,
+          userName: account.name,
+          userRole: account.role,
         });
         onLoginSuccess();
-        return;
+      } catch (accountError) {
+        await supabase.auth.signOut({ scope: 'local' });
+        throw accountError;
       }
-
-      // 3. Fallback: Check admin_users table directly
-      const { data: adminUser } = await dbClient
-        .from('admin_users')
-        .select('*')
-        .eq('email', loginEmail)
-        .eq('password', password.trim())
-        .maybeSingle();
-
-      if (adminUser) {
-        const targetOrgId = adminUser.organization_id;
-        await AsyncStorage.setItem('@amatora_user_role', 'org_admin');
-        await AsyncStorage.setItem('@amatora_org_id', targetOrgId.toString());
-        await AsyncStorage.setItem('@amatora_user_email', loginEmail);
-        logUserLoginWithLocation({
-          organizationId: targetOrgId,
-          userEmail: loginEmail,
-          userName: 'Bosh Admin',
-          userRole: 'org_admin',
-        });
-        onLoginSuccess();
-        return;
-      }
-
-      throw new Error('Noto\'g\'ri parol yoki login!');
     } catch (err: any) {
       console.error('Login error:', err);
       showError(err.message || 'Tizimga kirishda xatolik yuz berdi');

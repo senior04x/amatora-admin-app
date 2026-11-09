@@ -1,4 +1,4 @@
-import { resolveOrganizationOwner } from '../utils/organizationOwner';
+import { resolveAdminAppAccount } from '../api/matchOrganizers';
 import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
@@ -254,7 +254,8 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
         Alert.alert('Sessiya tasdiqlanmadi', 'Bosh Admin akkauntiga qayta kiring.');
         return;
       }
-      if (await resolveOrganizationOwner(dbClient, identity.user) !== activeOrgId) {
+      const account = await resolveAdminAppAccount(identity.user);
+      if (account.role !== 'org_admin' || account.organizationId !== activeOrgId) {
         Alert.alert('Ruxsat cheklangan', 'Yangi o‘yinni faqat shu tashkilotning Bosh Admini yaratishi mumkin.');
         return;
       }

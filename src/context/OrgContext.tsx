@@ -1,5 +1,5 @@
 import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
-import { resolveOrganizationOwner } from '../utils/organizationOwner';
+import { loadMatchOrganizerProfile, resolveAdminAppAccount } from '../api/matchOrganizers';
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { AppState, ActivityIndicator, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -114,26 +114,10 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
 
   const fetchCurrentUser = async () => {
     try {
-      const dbClient = supabase;
-      const { data: sessionData } = await supabase.auth.getSession();
-      let sessionEmail = sessionData?.session?.user?.email;
-      if (!sessionEmail) {
-        sessionEmail = (await AsyncStorage.getItem('@amatora_user_email')) || undefined;
-      }
-
-      if (sessionEmail) {
-        const { data: uRec } = await dbClient
-          .from('organization_users')
-          .select('id,organization_id,full_name,email,role,created_at,avatar_url')
-          .ilike('email', sessionEmail)
-          .maybeSingle();
-
-        if (uRec) {
-          setCurrentUser(uRec);
-        }
-      }
-    } catch (e) {
-      console.error('Fetch currentUser error:', e);
+      if (!currentUser?.auth_user_id) return;
+      setCurrentUser(await loadMatchOrganizerProfile(currentUser.auth_user_id));
+    } catch (error) {
+      console.warn('Organizer profile refresh failed:', error);
     }
   };
 
@@ -141,30 +125,17 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
     try {
       const dbClient = supabase;
 
-      // Legacy organizer path is pending migration; admin cache is never authority.
-      const storedRole = await AsyncStorage.getItem('@amatora_user_role');
-      const storedOrgId = await AsyncStorage.getItem('@amatora_org_id');
+      const { data: identity, error: identityError } = await supabase.auth.getUser();
+      if (identityError || !identity.user) throw new Error('Verified session required');
+      const account = await resolveAdminAppAccount(identity.user);
+      const targetOrgId = requireOrganizationId(account.organizationId);
+      setUserRole(account.role);
+      setCurrentUser(account.profile);
 
-      let targetOrgId = parseOrganizationId(storedOrgId);
-
-      if (storedRole === 'user') {
-        setUserRole('user');
-        await fetchCurrentUser();
-      } else {
-        const { data: identity, error: identityError } = await supabase.auth.getUser();
-        if (identityError || !identity.user?.id) throw new Error('Admin session unavailable');
-        targetOrgId = await resolveOrganizationOwner(dbClient, identity.user);
-        setUserRole('org_admin');
-        setCurrentUser(null);
-      }
-
-      // Fail closed: no customer is a default organization.
-      if (!targetOrgId) throw new Error('Organization not resolved');
-
-      // 4. Fetch organization record
-      const { data, error } = await dbClient
-        .from('organizations')
-        .select('*')
+      const organizations = dbClient.from('organizations');
+      const { data, error } = await (account.role === 'user'
+        ? organizations.select('id,name,slug,logo_url,brand_colors,transfer_window_open,is_registration_open')
+        : organizations.select('*'))
         .eq('id', targetOrgId)
         .maybeSingle();
 

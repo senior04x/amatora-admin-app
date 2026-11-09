@@ -549,6 +549,7 @@ function AppContent() {
     // Listen for auth changes (logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
+        appQueryClient.clear();
         setIsLoggedIn(false);
         setPinState('checking');
       }
@@ -592,10 +593,12 @@ function AppContent() {
   };
 
   const handleLogoutApp = async () => {
-    setIsLoggedIn(false);
-    setPinState('checking');
     try {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+      appQueryClient.clear();
+      setIsLoggedIn(false);
+      setPinState('checking');
       await AsyncStorage.multiRemove([
         '@amatora_user_role',
         '@amatora_org_id',
@@ -603,7 +606,9 @@ function AppContent() {
         '@amatora_app_pin',
         '@amatora_pin_skipped',
       ]);
-    } catch (e) {}
+    } catch {
+      Alert.alert('Akkaunt', 'Chiqishni yakunlab bo‘lmadi. Internetni tekshirib, qayta urinib ko‘ring.');
+    }
   };
 
   if (showSplash) {
@@ -628,6 +633,7 @@ function AppContent() {
         </View>
       ) : !isLoggedIn ? (
         <WelcomeScreen onLoginSuccess={() => {
+          appQueryClient.clear();
           setIsLoggedIn(true);
           checkPinStatus(true);
         }} />

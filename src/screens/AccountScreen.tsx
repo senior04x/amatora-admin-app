@@ -1,3 +1,4 @@
+import { manageMatchOrganizer } from '../api/matchOrganizers';
 import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
@@ -25,7 +26,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useOrg } from '../context/OrgContext';
 import { useTheme } from '../context/ThemeContext';
 import { supabase } from '../supabaseClient';
@@ -312,26 +312,23 @@ export const AccountScreen: React.FC<{
       return;
     }
 
+    if (newOrgPassword.trim().length < 8) {
+      Alert.alert('Parol', 'Yangi parol kamida 8 belgidan iborat bo‘lsin.');
+      return;
+    }
+
     try {
       setIsCreatingOrgUser(true);
-      const dbClient = supabase;
       const targetOrgId = requireOrganizationId(currentOrg?.id || orgId);
 
-      const { error } = await dbClient.from('organization_users').insert([
-        {
-          organization_id: targetOrgId,
-          email: newOrgEmail.trim().toLowerCase(),
-          password: newOrgPassword.trim(),
-          full_name: newOrgName.trim(),
-          role: 'user',
-        },
-      ]);
+      await manageMatchOrganizer({
+        organizationId: targetOrgId,
+        email: newOrgEmail.trim().toLowerCase(),
+        password: newOrgPassword.trim(),
+        name: newOrgName.trim(),
+      });
 
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      Alert.alert('Muvaffaqiyatli', 'Yangi organizator (user) saqlandi!');
+      Alert.alert('Muvaffaqiyatli', 'Organizator akkaunti faollashtirildi.');
       setNewOrgName('');
       setNewOrgEmail('');
       setNewOrgPassword('');
@@ -352,8 +349,11 @@ export const AccountScreen: React.FC<{
         style: 'destructive',
         onPress: async () => {
           try {
-            const dbClient = supabase;
-            await dbClient.from('organization_users').delete().eq('id', id);
+            await manageMatchOrganizer({
+              action: 'remove',
+              organizationId: requireOrganizationId(currentOrg?.id || orgId),
+              profileId: Number(id),
+            });
             fetchOrganizers();
           } catch (e) {
             console.error('Delete organizer error:', e);
@@ -402,48 +402,20 @@ export const AccountScreen: React.FC<{
   const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadData = async () => {
-      if (userRole === 'user') {
-        try {
-          const dbClient = supabase;
-          const { data: sessionData } = await supabase.auth.getSession();
-          let sessionEmail = sessionData?.session?.user?.email || currentUser?.email;
-          if (!sessionEmail) {
-            sessionEmail = await AsyncStorage.getItem('@amatora_user_email');
-          }
-
-          if (sessionEmail) {
-            const { data: userRec } = await dbClient
-              .from('organization_users')
-              .select('id,organization_id,full_name,email,avatar_url')
-              .eq('organization_id', requireOrganizationId(orgId || currentOrg?.id))
-              .ilike('email', sessionEmail)
-              .maybeSingle();
-
-            if (userRec) {
-              setEditName(userRec.full_name || 'Organizator');
-              setEditEmail(userRec.email || sessionEmail);
-              setUserAvatarUrl(userRec.avatar_url || null);
-              return;
-            }
-          }
-        } catch (e) {
-          console.error('Fetch user account record error:', e);
-        }
-      }
-
-      if (currentOrg) {
-        setEditName(currentOrg.name || '');
-        setEditSlug(currentOrg.slug || '');
-        setEditEmail(currentOrg.admin_email || currentOrg.email || '');
-        const phoneVal = currentOrg.contact_phone || currentOrg.phone || '';
-        setEditPhoneSuffix(rawPhone(phoneVal));
-        setEditBrandColors(Array.isArray(currentOrg.brand_colors) ? currentOrg.brand_colors : ['#00FF87']);
-      }
-    };
-
-    loadData();
-  }, [currentOrg, userRole]);
+    if (isEditingInfo) return;
+    if (userRole === 'user') {
+      setEditName(currentUser?.full_name ?? '');
+      setEditEmail(currentUser?.email ?? '');
+      setUserAvatarUrl(currentUser?.avatar_url ?? null);
+      return;
+    }
+    if (!currentOrg) return;
+    setEditName(currentOrg.name || '');
+    setEditSlug(currentOrg.slug || '');
+    setEditEmail(currentOrg.admin_email || currentOrg.email || '');
+    setEditPhoneSuffix(rawPhone(currentOrg.contact_phone || currentOrg.phone || ''));
+    setEditBrandColors(Array.isArray(currentOrg.brand_colors) ? currentOrg.brand_colors : ['#00FF87']);
+  }, [currentOrg, currentUser, userRole, isEditingInfo]);
 
   // Handle Organization Logo Upload (SuperAdmin - Instant 0ms Preview + Background CDN Upload)
   const handlePickLogo = async () => {
@@ -535,22 +507,23 @@ export const AccountScreen: React.FC<{
       (async () => {
         try {
           const dbClient = supabase;
-          const { data: sessionData } = await supabase.auth.getSession();
-          const sessionEmail = sessionData?.session?.user?.email;
+          const { data: identity, error: identityError } = await supabase.auth.getUser();
+          if (identityError || !identity.user?.id || !currentUser?.id) throw new Error('Organizer session missing');
 
           const fileExt = localUri.split('.').pop()?.toLowerCase().split('?')[0] || 'jpg';
           const safeExt = ['jpg', 'jpeg', 'png', 'webp'].includes(fileExt) ? fileExt : 'jpg';
           const fileName = `user_avatar_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${safeExt}`;
 
+          const path = `avatars/organizers/${identity.user.id}/${fileName}`;
           const response = await fetch(localUri);
           const blob = await response.blob();
           const arrayBuffer = await new Response(blob).arrayBuffer();
 
           const { error: uploadErr } = await dbClient.storage
             .from('player-photos')
-            .upload(`avatars/${fileName}`, arrayBuffer, {
+            .upload(path, arrayBuffer, {
               contentType: `image/${safeExt === 'jpg' ? 'jpeg' : safeExt}`,
-              upsert: true
+              upsert: false
             });
 
           if (uploadErr) {
@@ -559,20 +532,17 @@ export const AccountScreen: React.FC<{
             return;
           }
 
-          const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(`avatars/${fileName}`);
+          const { data: urlData } = dbClient.storage.from('player-photos').getPublicUrl(path);
           const publicUrl = urlData?.publicUrl || '';
 
           if (publicUrl) {
             setUserAvatarUrl(publicUrl);
             updateCurrentUserLocally({ avatar_url: publicUrl });
 
-            if (sessionEmail) {
-              await dbClient
-                .from('organization_users')
-                .update({ avatar_url: publicUrl })
-                .ilike('email', sessionEmail);
-            }
-            refreshCurrentUser();
+            const { data, error } = await dbClient.from('organization_users')
+              .update({ avatar_url: publicUrl }).eq('id', currentUser.id).select('id').maybeSingle();
+            if (error || !data) throw error ?? new Error('Organizer profile update denied');
+            await refreshCurrentUser();
             showToast({ message: "Profil rasmingiz muvaffaqiyatli saqlandi! ✅", type: "success" });
           }
         } catch (bgErr: any) {
@@ -594,53 +564,28 @@ export const AccountScreen: React.FC<{
 
     triggerIosCrescendoHaptic();
 
-    // 1. ORGANIZATOR (user role) - ONLY UPDATE organization_users TABLE
     if (userRole === 'user') {
-      updateCurrentUserLocally({
-        full_name: editName.trim(),
-        email: editEmail.trim(),
-      });
-
-      setIsEditingInfo(false);
-      setIsSavingInfo(false);
-
-      (async () => {
-        try {
-          const dbClient = supabase;
-          const targetOrgId = requireOrganizationId(orgId || currentOrg?.id);
-
-          const userUpdatePayload: any = {
-            full_name: editName.trim(),
-            email: editEmail.trim(),
-          };
-          if (editPassword.trim()) {
-            userUpdatePayload.password = editPassword.trim();
-          }
-
-          if (currentUser?.id) {
-            await dbClient
-              .from('organization_users')
-              .update(userUpdatePayload)
-              .eq('id', currentUser.id);
-          } else {
-            const { data: sessionData } = await supabase.auth.getSession();
-            const sessionEmail = sessionData?.session?.user?.email;
-            if (sessionEmail) {
-              await dbClient
-                .from('organization_users')
-                .update(userUpdatePayload)
-                .eq('organization_id', targetOrgId)
-                .ilike('email', sessionEmail);
-            }
-          }
-
-          refreshCurrentUser();
-          showToast({ message: "Profil ma'lumotlaringiz muvaffaqiyatli saqlandi! ✅", type: "success" });
-        } catch (err: any) {
-          console.error('Save organizer profile error:', err);
-          showToast({ message: "Saqlashda xatolik yuz berdi", type: "error" });
+      try {
+        if (!currentUser?.id) throw new Error('Organizator profili topilmadi.');
+        if (editPassword.trim()) {
+          const { error: passwordError } = await supabase.auth.updateUser({ password: editPassword.trim() });
+          if (passwordError) throw passwordError;
         }
-      })();
+        const { data, error } = await supabase.from('organization_users')
+          .update({ full_name: editName.trim() })
+          .eq('id', currentUser.id)
+          .select('id')
+          .maybeSingle();
+        if (error || !data) throw error ?? new Error('Profilni saqlash ruxsati topilmadi.');
+        await refreshCurrentUser();
+        setEditPassword('');
+        setIsEditingInfo(false);
+        showToast({ message: 'Profil ma’lumotlari saqlandi.', type: 'success' });
+      } catch {
+        showToast({ message: 'Profilni saqlab bo‘lmadi.', type: 'error' });
+      } finally {
+        setIsSavingInfo(false);
+      }
       return;
     }
 
@@ -943,6 +888,7 @@ export const AccountScreen: React.FC<{
                 style={[styles.textInput, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border, color: colors.textPrimary }]}
                 value={editEmail}
                 onChangeText={setEditEmail}
+                editable={userRole !== 'user'}
                 placeholder="email@domain.com"
                 placeholderTextColor={colors.textMuted}
                 keyboardType="email-address"
