@@ -75,7 +75,8 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 };
 
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
-  const { currentOrg, userRole } = useOrg();
+  const { currentOrg, orgId, userRole, loading: orgLoading } = useOrg();
+  const canCreateMatch = userRole === 'org_admin' && Boolean(orgId) && !orgLoading;
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<
@@ -89,6 +90,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards' | 'replays',
     subTab?: 'players' | 'teams'
   ) => {
+    if (tab === 'create-match' && !canCreateMatch) return;
     if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers', 'cards'].includes(tab)) {
       Alert.alert('Cheklangan huquq', 'Sizda ushbu bo\'limga kirish huquqi yo\'q!');
       return;
@@ -297,9 +299,9 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'cards'}><CardsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={handleGoBack} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={() => handleNavigate('create-match')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'finished-matches'}><FinishedMatchesScreen onGoBack={handleGoBack} onNavigateToCreate={() => handleNavigate('create-match')} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => handleNavigate('matches')} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={canCreateMatch ? () => handleNavigate('create-match') : undefined} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'finished-matches'}><FinishedMatchesScreen onGoBack={handleGoBack} /></LazyScreen>
+        {canCreateMatch && <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => handleNavigate('matches')} /></LazyScreen>}
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'tournaments'}><TournamentsScreen onGoBack={handleGoBack} /></LazyScreen>
@@ -410,22 +412,26 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
 
-          {/* Segment 3: CENTER '+' QUICK ADD MATCH BUTTON */}
-          <TouchableOpacity
-            style={styles.segmentItem}
-            onPress={() => setActiveTab('create-match')}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="add-outline"
-              size={28}
-              color={activeTab === 'create-match' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-              style={activeTab === 'create-match' && isDark && styles.glowingIcon}
-            />
-            <View style={[styles.activeDot, activeTab === 'create-match' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
-          </TouchableOpacity>
+          {canCreateMatch && (
+            <>
+              {/* Segment 3: CENTER '+' QUICK ADD MATCH BUTTON */}
+              <TouchableOpacity
+                style={styles.segmentItem}
+                onPress={() => handleNavigate('create-match')}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="add-outline"
+                  size={28}
+                  color={activeTab === 'create-match' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+                  style={activeTab === 'create-match' && isDark && styles.glowingIcon}
+                />
+                <View style={[styles.activeDot, activeTab === 'create-match' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+              </TouchableOpacity>
 
-          <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
+              <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
+            </>
+          )}
 
           {/* Segment 5: Turnir Jadvali (Stats / Standings Outline) */}
           <TouchableOpacity

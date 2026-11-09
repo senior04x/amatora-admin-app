@@ -1,3 +1,4 @@
+import { resolveOrganizationOwner } from '../utils/organizationOwner';
 import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
 import {
@@ -36,7 +37,7 @@ interface Props {
 }
 
 export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
-  const { orgId } = useOrg();
+  const { orgId, userRole } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
@@ -219,6 +220,10 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
   };
 
   const handleSaveMatch = async () => {
+    if (userRole !== 'org_admin') {
+      Alert.alert('Ruxsat cheklangan', 'Yangi o‘yinni faqat Bosh Admin yaratishi mumkin.');
+      return;
+    }
     if (competitionType === 'league' && !selectedLeague) {
       Alert.alert("Xatolik", "Iltimos, Ligani tanlang!");
       return;
@@ -244,6 +249,15 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
     try {
       const dbClient = supabase;
       const activeOrgId = requireOrganizationId(orgId);
+      const { data: identity, error: identityError } = await dbClient.auth.getUser();
+      if (identityError || !identity.user) {
+        Alert.alert('Sessiya tasdiqlanmadi', 'Bosh Admin akkauntiga qayta kiring.');
+        return;
+      }
+      if (await resolveOrganizationOwner(dbClient, identity.user) !== activeOrgId) {
+        Alert.alert('Ruxsat cheklangan', 'Yangi o‘yinni faqat shu tashkilotning Bosh Admini yaratishi mumkin.');
+        return;
+      }
 
       // Conflict Guard: check if another match is scheduled on the exact same field, date & time
       let conflictQuery = dbClient
@@ -324,7 +338,9 @@ export const CreateMatchScreen: React.FC<Props> = ({ onSuccess }) => {
       }
     } catch (e: any) {
       console.error('Create match error:', e);
-      Alert.alert("Xatolik", e.message || "O'yinni saqlashda xatolik yuz berdi");
+      Alert.alert('Xatolik', e?.code === '42501'
+        ? 'O‘yin yaratish uchun baza ruxsati tasdiqlanmadi.'
+        : 'O‘yinni saqlab bo‘lmadi. Qayta urinib ko‘ring.');
     } finally {
       setLoading(false);
     }
