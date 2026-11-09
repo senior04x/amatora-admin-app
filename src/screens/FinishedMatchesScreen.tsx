@@ -24,10 +24,10 @@ import { useTheme } from '../context/ThemeContext';
 import { BlurView } from '../components/SafeBlurView';
 import { SwipeRow } from '../components/SwipeRow';
 import { MatchControlScreen } from './MatchControlScreen';
-import { useFinishedMatchesData, useTeamsData, useLeaguesData, useTournamentStageOptions } from '../api/hooks';
+import { useFinishedMatchesData, useFinishedMatchRounds, useTeamsData, useLeaguesData, useTournamentStageOptions } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
-import { getStageDisplayTitle, getActiveOrgTournaments, getStageOptionKey } from '../utils/tournamentUtils';
+import { getStageDisplayTitle, getActiveOrgTournaments } from '../utils/tournamentUtils';
 
 interface Match {
   id: string | number;
@@ -110,8 +110,6 @@ export const FinishedMatchesScreen: React.FC<{
   const [selectedLeague, setSelectedLeague] = useState<string>('all');
   const [selectedRound, setSelectedRound] = useState<string>('all');
   const [activeDropdown, setActiveDropdown] = useState<'none' | 'league' | 'round'>('none');
-  const [page, setPage] = useState<number>(0);
-  const [accumulatedMatches, setAccumulatedMatches] = useState<any[]>([]);
 
   // Tournament / Musobaqa Filter State (Top Full-width expandable filter)
   const [tournaments, setTournaments] = useState<any[]>([]);
@@ -149,54 +147,35 @@ export const FinishedMatchesScreen: React.FC<{
     filterScope === 'tournament' ? selectedTournament : null
   );
 
-  // Aniq bir turnir tanlanganda: "Tur" filtrini avtomatik eng so'nggi (joriy) bosqichga o'rnatish
-  useEffect(() => {
-    if (filterScope !== 'tournament' || selectedTournament === 'tournaments_all' || selectedTournament === 'all') return;
-    if (tournamentStageOptions.length === 0) return;
-    const validKeys = tournamentStageOptions.map((o: any) => o.key);
-    if (!validKeys.includes(selectedRound)) {
-      setSelectedRound(tournamentStageOptions[tournamentStageOptions.length - 1].key);
-    }
-  }, [filterScope, selectedTournament, tournamentStageOptions]);
-
-  // React Query Hooks (15 matches per page)
   const {
     data: finishedData,
     isLoading: loading,
+    isError,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    fetchNextPage,
     refetch: refetchFinishedMatches,
-  } = useFinishedMatchesData(orgId, selectedLeague, page, 15, collabLeagueNames, selectedTournament);
-
+  } = useFinishedMatchesData(orgId, selectedLeague, collabLeagueNames, selectedTournament, selectedRound, filterScope === 'tournament');
+  const { data: availableRounds = [] } = useFinishedMatchRounds(
+    orgId, selectedLeague, collabLeagueNames, selectedTournament, filterScope !== 'tournament' && activeDropdown === 'round',
+  );
   const { data: leagues = [] } = useLeaguesData(orgId);
   const { data: teams = [] } = useTeamsData(orgId);
-
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setPage(0);
-    setAccumulatedMatches([]);
-  }, [selectedLeague, selectedTournament, orgId]);
-
-  useEffect(() => {
-    if (finishedData?.matches) {
-      if (page === 0) {
-        setAccumulatedMatches(finishedData.matches);
-      } else {
-        setAccumulatedMatches((prev) => {
-          const existingIds = new Set(prev.map((m) => m.id));
-          const newUnique = finishedData.matches.filter((m: any) => !existingIds.has(m.id));
-          return [...prev, ...newUnique];
-        });
+  const matches = React.useMemo(() => {
+    const rows = new Map<string, Match>();
+    for (const page of finishedData?.pages ?? []) {
+      for (const match of page.matches) {
+        const id = String(match.id);
+        if (id !== deletingMatchId && !rows.has(id)) rows.set(id, match);
       }
     }
-  }, [finishedData?.matches, page]);
-
-  const handleLoadMore = () => {
-    if (finishedData?.hasMore && !loading) {
-      setPage((prev) => prev + 1);
-    }
-  };
-
-  const matches = accumulatedMatches;
+    return Array.from(rows.values());
+  }, [finishedData, deletingMatchId]);
 
   // Active Control Match Object State (0ms instant transition)
   const [activeControlMatch, setActiveControlMatch] = useState<Match | null>(null);
@@ -366,10 +345,7 @@ export const FinishedMatchesScreen: React.FC<{
     if (userRole !== 'org_admin') return;
     if (!matchToDelete) return;
     const targetId = matchToDelete.id;
-    const previousMatches = [...accumulatedMatches];
-
-    // 0ms Optimistic UI update - card disappears instantly from screen
-    setAccumulatedMatches((prev) => prev.filter((m) => String(m.id) !== String(targetId)));
+    setDeletingMatchId(String(targetId));
     setMatchToDelete(null);
     setDeletingMatch(true);
 
@@ -426,18 +402,15 @@ export const FinishedMatchesScreen: React.FC<{
       }
 
       // Invalidate all query caches and refetch immediately
-      queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
+      await queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
       queryClient.invalidateQueries({ queryKey: ['matches'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.refetchQueries({ queryKey: ['finishedMatches'] });
-      refetchFinishedMatches();
     } catch (e: any) {
-      // Rollback on actual error
-      setAccumulatedMatches(previousMatches);
       Alert.alert("Xatolik", e?.message || "O'yinni o'chirishda xatolik yuz berdi");
       queryClient.invalidateQueries({ queryKey: ['finishedMatches'] });
     } finally {
       setDeletingMatch(false);
+      setDeletingMatchId(null);
     }
   };
 
@@ -454,26 +427,9 @@ export const FinishedMatchesScreen: React.FC<{
     );
   }
 
-  const filteredMatches = matches.filter((m) => {
-    if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
-    if (selectedRound !== 'all') {
-      if (filterScope === 'tournament') {
-        // Turnir rejimida "Tur" qiymati stage+round kombinatsiyasi kaliti sifatida saqlanadi
-        if (getStageOptionKey(m.stage, m.round) !== selectedRound) return false;
-      } else if (String(m.round) !== selectedRound) {
-        return false;
-      }
-    }
-    return true;
-  });
-
   const editAvailableTeams = teams.filter(
     (t) => !t.league || t.league.split(',').map((s: string) => s.trim()).includes(editLeague)
   );
-
-  const availableRounds = Array.from(
-    new Set(matches.map((m) => String(m.round || '')).filter(Boolean))
-  ).sort();
 
   return (
     <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
@@ -494,7 +450,7 @@ export const FinishedMatchesScreen: React.FC<{
 
         <View style={[styles.finishedCountBadge, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ECFDF5', borderColor: isDark ? 'rgba(16, 185, 129, 0.3)' : '#A7F3D0' }]}>
           <Ionicons name="checkmark-done" size={14} color="#10B981" />
-          <Text style={styles.finishedCountText}>{`${filteredMatches.length} ta`}</Text>
+          <Text style={styles.finishedCountText}>{`${matches.length} ta`}</Text>
         </View>
       </View>
 
@@ -592,6 +548,7 @@ export const FinishedMatchesScreen: React.FC<{
               style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
               onPress={() => {
                 setSelectedLeague('all');
+                setSelectedRound('all');
                 setActiveDropdown('none');
               }}
             >
@@ -609,6 +566,7 @@ export const FinishedMatchesScreen: React.FC<{
                 style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                 onPress={() => {
                   setSelectedLeague(lg.name);
+                  setSelectedRound('all');
                   setActiveDropdown('none');
                 }}
               >
@@ -637,6 +595,7 @@ export const FinishedMatchesScreen: React.FC<{
               style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
               onPress={() => {
                 setSelectedTournament('tournaments_all');
+                setSelectedRound('all');
                 setActiveDropdown('none');
               }}
             >
@@ -654,6 +613,7 @@ export const FinishedMatchesScreen: React.FC<{
                 style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
                 onPress={() => {
                   setSelectedTournament(String(t.id));
+                  setSelectedRound('all');
                   setActiveDropdown('none');
                 }}
               >
@@ -740,38 +700,26 @@ export const FinishedMatchesScreen: React.FC<{
                   </Text>
                 </TouchableOpacity>
               ))
-            ) : (
-              ['1-tur', '2-tur', '3-tur', '4-tur', 'Chorak final', 'Yarim final', 'Final'].map((rnd) => (
-                <TouchableOpacity
-                  key={rnd}
-                  style={[styles.dropdownMenuItem, Platform.OS === 'android' && { borderBottomColor: colors.border }]}
-                  onPress={() => {
-                    setSelectedRound(rnd);
-                    setActiveDropdown('none');
-                  }}
-                >
-                  <Text style={[
-                    styles.dropdownMenuText,
-                    Platform.OS === 'android' && { color: colors.textSecondary },
-                    selectedRound === rnd && { color: colors.accentGreen, fontWeight: '900' }
-                  ]}>
-                    {rnd}
-                  </Text>
-                </TouchableOpacity>
-              ))
-            )}
+            ) : null}
           </ScrollView>
         </View>
       )}
 
       {/* Matches List */}
-      {loading && page === 0 ? (
+      {loading ? (
         <ScrollView contentContainerStyle={{ gap: 14, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
           <MatchCardSkeleton />
           <MatchCardSkeleton />
           <MatchCardSkeleton />
         </ScrollView>
-      ) : filteredMatches.length === 0 ? (
+      ) : isError && !finishedData ? (
+        <View style={styles.emptyContainer}>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>O‘yinlarni yuklab bo‘lmadi</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={() => void refetchFinishedMatches()}>
+            <Text style={[styles.loadMoreText, { color: colors.textPrimary }]}>Qayta urinish</Text>
+          </TouchableOpacity>
+        </View>
+      ) : matches.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="checkmark-done-circle-outline" size={64} color={Platform.OS === 'android' ? colors.border : "rgba(255,255,255,0.15)"} />
           <Text style={[styles.emptyTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Yakunlangan o'yinlar topilmadi"}</Text>
@@ -779,13 +727,29 @@ export const FinishedMatchesScreen: React.FC<{
         </View>
       ) : (
         <FlatList
-          data={filteredMatches}
+          key={JSON.stringify([orgId, selectedTournament, selectedLeague, selectedRound])}
+          data={matches}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           {...scrollDockProps}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.4}
+          ListFooterComponent={hasNextPage ? (
+            <TouchableOpacity
+              style={[styles.loadMore, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+              accessibilityRole="button"
+              accessibilityState={{ busy: isFetchingNextPage, disabled: isFetching }}
+              disabled={isFetching}
+              onPress={() => void fetchNextPage({ cancelRefetch: false })}
+            >
+              {isFetchingNextPage ? (
+                <ActivityIndicator size="small" color={colors.textPrimary} />
+              ) : (
+                <Text style={[styles.loadMoreText, { color: colors.textPrimary }]}>
+                  {isFetchNextPageError ? 'Qayta urinish' : 'Keyingi 5 ta o‘yinni ochish'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : undefined}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
           renderItem={({ item }) => {
             const homeName = item.home_team?.name || 'Mezbon';
@@ -1262,6 +1226,18 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.8)',
     fontSize: 13,
     fontWeight: '600',
+  },
+  loadMore: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: Platform.OS === 'ios' ? 12 : 8,
+  },
+  loadMoreText: {
+    fontSize: 14,
+    fontWeight: '700',
+    padding: 8,
   },
   listContent: {
     paddingHorizontal: 20,

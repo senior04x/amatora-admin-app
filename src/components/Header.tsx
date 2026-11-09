@@ -113,7 +113,7 @@ export const Header: React.FC<{
             ) : (
               <>
                 <Text style={[styles.orgName, { color: colors.textPrimary }]}>{displayName}</Text>
-                <Text style={[styles.greetingText, { color: colors.textMuted }]}>{getGreeting()}</Text>
+                <Text style={[styles.greetingText, { color: Platform.OS === 'ios' || isDark ? '#FFFFFF' : colors.textPrimary }]}>{getGreeting()}</Text>
               </>
             )}
           </View>

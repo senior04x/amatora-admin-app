@@ -1,5 +1,5 @@
-import { requireOrganizationId } from '../utils/organizationId';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabaseClient';
 import { queryKeys } from './queryKeys';
 import { getTournamentRoundOptions } from '../utils/tournamentUtils';
@@ -878,126 +878,96 @@ export const useMatchesData = (
   });
 };
 
-/**
- * Hook for fetching Paginated Finished Matches list
- */
-export const useFinishedMatchesData = (
-  orgId: any,
-  leagueName = 'all',
-  page = 0,
-  pageSize = 15,
-  collabLeagueNames: string[] = [],
-  tournamentFilter: string = 'all' // 'all' | 'leagues' | 'tournaments_all' | tournamentId
-) => {
-  return useQuery({
-    queryKey: queryKeys.finishedMatches(orgId, leagueName, page, pageSize, collabLeagueNames, tournamentFilter),
-    queryFn: async () => {
-      const targetOrgId = requireOrganizationId(orgId);
-      const from = page * pageSize;
-      const to = from + pageSize - 1;
+const FINISHED_MATCH_STATUSES = ['finished', 'FINISHED', 'tugagan', 'yakunlangan', 'completed'];
+const FINISHED_MATCH_PAGE_SIZE = 5;
+const FINISHED_MATCH_COLUMNS = `
+  id, organization_id, league, tournament_id, stage, round, home_team_id, away_team_id,
+  home_score, away_score, match_date, match_time, location, importance, youtube_link,
+  is_postponed, status, home_team:home_team_id (id, name, logo_url),
+  away_team:away_team_id (id, name, logo_url)
+`;
 
-      let query = supabase
-        .from('matches')
-        .select(`
-          id,
-          organization_id,
-          league,
-          tournament_id,
-          stage,
-          round,
-          home_team_id,
-          away_team_id,
-          home_score,
-          away_score,
-          home_penalty_score,
-          away_penalty_score,
-          match_date,
-          match_time,
-          location,
-          stadium_name,
-          importance,
-          youtube_link,
-          is_postponed,
-          status,
-          home_team:home_team_id (id, name, logo_url),
-          away_team:away_team_id (id, name, logo_url)
-        `, { count: 'exact' })
-        .in('status', ['finished', 'FINISHED', 'tugagan', 'yakunlangan', 'completed'])
-        .order('match_date', { ascending: false })
-        .order('match_time', { ascending: false })
-        // Sana/vaqt bir xil bo'lsa: 1-maydon har doim 2-maydondan oldin ko'rsatiladi
+function finishedMatchesQuery<Columns extends string>(
+  columns: Columns, orgId: number, leagueName: string, collabLeagueNames: string[], tournamentFilter: string,
+) {
+  let query = supabase.from('matches').select(columns).in('status', FINISHED_MATCH_STATUSES);
+  if (collabLeagueNames.length > 0) {
+    const names = collabLeagueNames.map(name => JSON.stringify(name)).join(',');
+    query = query.or(`organization_id.eq.${orgId},league.in.(${names})`);
+  } else {
+    query = query.eq('organization_id', orgId);
+  }
+
+  if (leagueName !== 'all') query = query.eq('league', leagueName);
+  if (tournamentFilter === 'leagues') return query.is('tournament_id', null);
+  if (tournamentFilter === 'tournaments_all') return query.not('tournament_id', 'is', null);
+  if (tournamentFilter !== 'all') return query.eq('tournament_id', tournamentFilter);
+  return query;
+}
+
+export const useFinishedMatchesData = (
+  orgId: unknown, leagueName: string, collabLeagueNames: string[], tournamentFilter: string,
+  roundFilter: string, tournamentStage: boolean,
+) => {
+  const organizationId = parseOrganizationId(orgId);
+  return useInfiniteQuery({
+    queryKey: ['finishedMatches', organizationId, leagueName, [...collabLeagueNames].sort(), tournamentFilter, roundFilter, tournamentStage],
+    initialPageParam: 0,
+    queryFn: async ({ pageParam, signal }) => {
+      const from = pageParam * FINISHED_MATCH_PAGE_SIZE;
+      let query = finishedMatchesQuery(FINISHED_MATCH_COLUMNS, requireOrganizationId(orgId), leagueName, collabLeagueNames, tournamentFilter);
+      if (roundFilter !== 'all') {
+        if (tournamentStage) {
+          const [stage, round] = roundFilter.split('::');
+          if (stage === 'group') {
+            query = query.or('stage.eq.group,stage.is.null,stage.eq.');
+            query = round ? query.eq('round', round) : query.is('round', null);
+          } else {
+            query = query.eq('stage', stage);
+          }
+        } else {
+          query = query.eq('round', roundFilter);
+        }
+      }
+
+      const { data, error } = await query
+        .order('match_date', { ascending: false, nullsFirst: false })
+        .order('match_time', { ascending: false, nullsFirst: false })
         .order('location', { ascending: true })
         .order('id', { ascending: false })
-        .range(from, to);
-
-      if (leagueName && leagueName !== 'all') {
-        query = query.ilike('league', `%${leagueName}%`);
-      } else if (collabLeagueNames && collabLeagueNames.length > 0) {
-        const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-        query = query.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
-      } else if (targetOrgId) {
-        query = query.eq('organization_id', targetOrgId);
-      }
-
-      // Turnir / Liga scope filtri (server-side, pagination bilan mos ishlashi uchun)
-      if (tournamentFilter === 'leagues') {
-        query = query.is('tournament_id', null);
-      } else if (tournamentFilter === 'tournaments_all') {
-        query = query.not('tournament_id', 'is', null);
-      } else if (tournamentFilter && tournamentFilter !== 'all') {
-        query = query.eq('tournament_id', tournamentFilter);
-      }
-
-      const { data, count, error } = await query;
-      let rawMatches = data || [];
-
-      if ((error || !data || data.length === 0) && page === 0) {
-        let fbQuery = supabase
-          .from('matches')
-          .select('*')
-          .in('status', ['finished', 'FINISHED', 'tugagan', 'yakunlangan', 'completed'])
-          .order('id', { ascending: false })
-          .limit(pageSize);
-
-        if (targetOrgId) {
-          if (collabLeagueNames && collabLeagueNames.length > 0) {
-            const escapedNames = collabLeagueNames.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
-            fbQuery = fbQuery.or(`organization_id.eq.${targetOrgId},league.in.(${escapedNames})`);
-          } else {
-            fbQuery = fbQuery.eq('organization_id', targetOrgId);
-          }
-        }
-
-        if (tournamentFilter === 'leagues') {
-          fbQuery = fbQuery.is('tournament_id', null);
-        } else if (tournamentFilter === 'tournaments_all') {
-          fbQuery = fbQuery.not('tournament_id', 'is', null);
-        } else if (tournamentFilter && tournamentFilter !== 'all') {
-          fbQuery = fbQuery.eq('tournament_id', tournamentFilter);
-        }
-
-        const { data: fallbackData } = await fbQuery;
-        if (fallbackData && fallbackData.length > 0) {
-          const { data: teamsData } = await supabase.from('teams').select('id, name, logo_url');
-          const teamsMap = new Map((teamsData || []).map((t) => [t.id, t]));
-          rawMatches = fallbackData.map((m: any) => ({
-            ...m,
-            home_team: teamsMap.get(m.home_team_id),
-            away_team: teamsMap.get(m.away_team_id),
-          }));
-        }
-      }
-
+        .range(from, from + FINISHED_MATCH_PAGE_SIZE)
+        .abortSignal(signal);
+      if (error) throw error;
       return {
-        matches: rawMatches as any[],
-        totalCount: count ?? rawMatches.length,
-        hasMore: rawMatches.length === pageSize,
+        matches: (data ?? []).slice(0, FINISHED_MATCH_PAGE_SIZE) as any[],
+        hasMore: (data?.length ?? 0) > FINISHED_MATCH_PAGE_SIZE,
       };
     },
-    enabled: !!orgId && Number(orgId) > 0,
-    staleTime: 0,
-    refetchOnMount: 'always',
-    placeholderData: (previousData) => previousData,
+    getNextPageParam: (lastPage, _pages, lastPageParam) => lastPage.hasMore ? lastPageParam + 1 : undefined,
+    enabled: organizationId !== null,
+    staleTime: 30_000,
+    retry: 1,
+  });
+};
+
+export const useFinishedMatchRounds = (
+  orgId: unknown, leagueName: string, collabLeagueNames: string[], tournamentFilter: string, enabled: boolean,
+) => {
+  const organizationId = parseOrganizationId(orgId);
+  return useQuery({
+    queryKey: ['finishedMatchRounds', organizationId, leagueName, [...collabLeagueNames].sort(), tournamentFilter],
+    queryFn: async ({ signal }) => {
+      const { data, error } = await finishedMatchesQuery('round', requireOrganizationId(orgId), leagueName, collabLeagueNames, tournamentFilter)
+        .not('round', 'is', null)
+        .order('round')
+        .limit(1000)
+        .abortSignal(signal);
+      if (error) throw error;
+      return Array.from(new Set((data ?? []).map(row => String(row.round)))).sort((a, b) => Number(a) - Number(b));
+    },
+    enabled: organizationId !== null && enabled,
+    staleTime: 60_000,
+    retry: 1,
   });
 };
 
