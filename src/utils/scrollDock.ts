@@ -1,5 +1,17 @@
-﻿import { useRef, useCallback } from 'react';
+﻿import { createContext, useContext, useLayoutEffect, useRef, useCallback } from 'react';
 import { DeviceEventEmitter, NativeSyntheticEvent, NativeScrollEvent, Platform } from 'react-native';
+
+export const DockVisibilityContext = createContext<((hidden: boolean) => void) | null>(null);
+
+export function useHideNavigationDock() {
+  const setDockHidden = useContext(DockVisibilityContext);
+
+  useLayoutEffect(() => {
+    if (!setDockHidden) return;
+    setDockHidden(true);
+    return () => setDockHidden(false);
+  }, [setDockHidden]);
+}
 
 export const emitScrollDirection = (direction: 'up' | 'down') => {
   if (Platform.OS === 'ios') {

@@ -17,6 +17,8 @@ import {
   BackHandler,
   AppState,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHideNavigationDock } from '../utils/scrollDock';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import MatchActionSlider from '../components/MatchActionSlider';
@@ -99,6 +101,9 @@ const MATCH_CONTROL_CACHE = new LimitedCache<string, any>(50, 10 * 60 * 1000);
 const ORPHAN_REPLAYS_BY_MATCH = new Map<string, { url: string; timestamp: number }>();
 
 export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack, isReadOnly = false }) => {
+  useHideNavigationDock();
+  const { bottom: safeAreaBottom } = useSafeAreaInsets();
+  const timerBarBottom = Math.max(24, safeAreaBottom + 8);
   const { orgId } = useOrg();
   const { isDark, colors } = useTheme();
   const queryClient = useQueryClient();
@@ -1131,7 +1136,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(110, timerBarBottom + 86) }]} showsVerticalScrollIndicator={false}>
           {/* Main Scoreboard Board Skeleton */}
           <Animated.View style={[styles.skeletonCard, { height: 160, opacity: pulseAnim }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flex: 1 }}>
@@ -1261,7 +1266,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         </Animated.View>
       )}
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(110, timerBarBottom + 86) }]} showsVerticalScrollIndicator={false}>
         {/* Co-Host Read-Only View Banner */}
         {isReadOnlyMode && (
           <View
@@ -1885,6 +1890,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           style={[
             styles.stickyBottomTimerBar,
             {
+              bottom: timerBarBottom,
               opacity: stickyBtnOpacity,
               transform: [
                 { translateY: stickyBtnTranslateY },
@@ -2942,7 +2948,6 @@ const styles = StyleSheet.create({
   /* Sticky Bottom Floating Bar (Exact same position & dimensions as Navbar, Solid styling) */
   stickyBottomTimerBar: {
     position: 'absolute',
-    bottom: 24,
     left: 16,
     right: 16,
     height: 66,

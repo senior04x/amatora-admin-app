@@ -6,7 +6,7 @@ if ((globalThis as any).ErrorUtils) {
   });
 }
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
@@ -28,7 +28,6 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { PinScreen } from './src/screens/PinScreen';
-import { MatchControlScreen } from './src/screens/MatchControlScreen';
 import { supabase } from './src/supabaseClient';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { MatchesScreen } from './src/screens/MatchesScreen';
@@ -48,29 +47,26 @@ import { CardsScreen } from './src/screens/CardsScreen';
 import { TournamentsScreen } from './src/screens/TournamentsScreen';
 import { ReplaysScreen } from './src/screens/ReplaysScreen';
 import { triggerIosCrescendoHaptic } from './src/utils/haptics';
+import { DockVisibilityContext } from './src/utils/scrollDock';
 import { hasSecurePin } from './src/utils/securePin';
 import { SafeBlurView as BlurView } from './src/components/SafeBlurView';
 
-const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React.ReactNode }) => {
-  if (Platform.OS === 'android') {
-    if (!isActive) return null;
-    return <View style={{ flex: 1 }}>{children}</View>;
-  }
-
+const LazyScreen = ({ isActive, children, onDockHiddenChange }: {
+  isActive: boolean;
+  children: React.ReactNode;
+  onDockHiddenChange?: (hidden: boolean) => void;
+}) => {
   const [hasRendered, setHasRendered] = useState(isActive);
 
   useEffect(() => {
-    if (isActive && !hasRendered) {
-      setHasRendered(true);
-    }
+    if (isActive) setHasRendered(true);
   }, [isActive]);
 
-  if (!hasRendered) return null;
-
+  if (!isActive && (Platform.OS === 'android' || !hasRendered)) return null;
   return (
-    <View style={{ flex: 1, display: isActive ? 'flex' : 'none' }}>
-      {children}
-    </View>
+    <DockVisibilityContext.Provider value={isActive ? onDockHiddenChange ?? null : null}>
+      <View style={{ flex: 1, display: isActive ? 'flex' : 'none' }}>{children}</View>
+    </DockVisibilityContext.Provider>
   );
 };
 
@@ -160,7 +156,12 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const saveDashboardOrderRef = useRef<(() => void) | null>(null);
 
   // iOS Floating Navbar Shrink/Expand on Scroll Animation
+  const [dockHidden, setDockHidden] = useState(false);
   const navDockAnim = useRef(new Animated.Value(1)).current;
+
+  useLayoutEffect(() => {
+    if (dockHidden) navDockAnim.setValue(1);
+  }, [dockHidden, navDockAnim]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -279,7 +280,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       />
 
       <View style={styles.screenContainer}>
-        <LazyScreen isActive={activeTab === 'dashboard'}>
+        <LazyScreen isActive={activeTab === 'dashboard'} onDockHiddenChange={setDockHidden}>
           <DashboardScreen
             onNavigate={handleNavigate}
             isEditingOrder={isEditingDashboardOrder}
@@ -300,8 +301,8 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'cards'}><CardsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={handleGoBack} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'matches'}><MatchesScreen onNavigateToCreate={canCreateMatch ? () => handleNavigate('create-match') : undefined} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'finished-matches'}><FinishedMatchesScreen onGoBack={handleGoBack} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'matches'} onDockHiddenChange={setDockHidden}><MatchesScreen onNavigateToCreate={canCreateMatch ? () => handleNavigate('create-match') : undefined} /></LazyScreen>
+        <LazyScreen isActive={activeTab === 'finished-matches'} onDockHiddenChange={setDockHidden}><FinishedMatchesScreen onGoBack={handleGoBack} /></LazyScreen>
         {canCreateMatch && <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => handleNavigate('matches')} /></LazyScreen>}
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
@@ -311,7 +312,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       </View>
 
       {/* Tactile Navigation Dock */}
-      <Animated.View
+      {!dockHidden && <Animated.View
         style={[
           styles.navDockWrapper,
           Platform.OS === 'ios' && {
@@ -478,7 +479,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             <View style={[styles.activeDot, activeTab === 'account' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </Animated.View>}
     </View>
   );
 }
