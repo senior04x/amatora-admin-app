@@ -2,6 +2,7 @@
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
 import { parseOrganizationId } from '../utils/organizationId';
+import { resolveMatchOwner } from '../utils/organizationOwner';
 
 export const MATCH_ORGANIZER_ROLE = 'amatora_organizer';
 
@@ -23,10 +24,7 @@ export async function resolveAdminAppAccount(user: User) {
     return { role: 'user' as const, organizationId: profile.organization_id, name: profile.full_name, profile };
   }
   if (user.role !== 'authenticated') throw new Error('Akkaunt roli tasdiqlanmadi.');
-  const { data, error } = await supabase.rpc('current_match_owner_identity').maybeSingle();
-  if (error) throw new Error('Bosh Admin vakolatini tekshirib bo‘lmadi.');
-  const binding = data as { auth_user_id: string; organization_id: number } | null;
-  const organizationId = binding?.auth_user_id === user.id ? parseOrganizationId(binding.organization_id) : null;
+  const organizationId = await resolveMatchOwner(supabase, user);
   if (!organizationId) throw new Error('Bu akkauntga tashkilot boshqaruvi biriktirilmagan.');
   return { role: 'org_admin' as const, organizationId, name: 'Bosh Admin', profile: null };
 }

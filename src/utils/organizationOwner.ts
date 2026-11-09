@@ -19,3 +19,12 @@ export async function resolveOrganizationOwner(client: any, user: Identity): Pro
     if (error) throw new Error('Tashkilot ruxsatini tekshirib bo‘lmadi.');
     return verifiedOwnerOrganization(user, data);
 }
+
+export async function resolveMatchOwner(client: any, user: Identity): Promise<number | null> {
+    const { data, error } = await client.rpc('current_match_owner_identity').maybeSingle();
+    // Before the backend migration, use the existing verified owner lookup.
+    // A real denial, an empty result, or a different UID must never fall back.
+    if (error?.code === 'PGRST202') return resolveOrganizationOwner(client, user);
+    if (error) throw new Error('Bosh Admin vakolatini tekshirib bo‘lmadi.');
+    return user.id && data?.auth_user_id === user.id ? parseOrganizationId(data.organization_id) : null;
+}
