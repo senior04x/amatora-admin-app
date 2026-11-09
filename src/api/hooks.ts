@@ -794,7 +794,7 @@ export const useTransfersData = (
 };
 
 /**
- * Hook for fetching Active Matches list with timer enrichment
+ * Hook for fetching the active matches and their saved timer state
  */
 export const useMatchesData = (
   orgId: any,
@@ -827,6 +827,9 @@ export const useMatchesData = (
           youtube_link,
           is_postponed,
           status,
+          timer_seconds,
+          timer_started_at,
+          is_timer_running,
           home_team:home_team_id (id, name, logo_url),
           away_team:away_team_id (id, name, logo_url)
         `)
@@ -867,58 +870,7 @@ export const useMatchesData = (
         }
       }
 
-      // Fetch live timer payloads from sponsors table for active matches
-      const { data: timerSponsors } = await supabase
-        .from('sponsors')
-        .select('name, logo_url')
-        .like('name', 'MATCH_TIMER_%');
-
-      const timerMap = new Map();
-      if (timerSponsors) {
-        timerSponsors.forEach((sp: any) => {
-          try {
-            const matchIdFromKey = sp.name.replace('MATCH_TIMER_', '');
-            const jsonStr = sp.logo_url || sp.image_url || sp.url;
-            if (jsonStr) {
-              const parsed = JSON.parse(jsonStr);
-              timerMap.set(String(matchIdFromKey), parsed);
-            }
-          } catch (e) {}
-        });
-      }
-
-      const enrichedMatches = rawMatches.map((m: any) => {
-        const livePayload = timerMap.get(String(m.id));
-        const isLive = m.status === 'first_half' || m.status === 'second_half' || m.status === 'live';
-
-        const baseSec =
-          livePayload?.timer_seconds !== undefined && livePayload?.timer_seconds !== null
-            ? Number(livePayload.timer_seconds)
-            : m.timer_seconds !== undefined && m.timer_seconds !== null
-            ? Number(m.timer_seconds)
-            : 0;
-
-        const isRunning =
-          livePayload?.is_timer_running !== undefined && livePayload?.is_timer_running !== null
-            ? String(livePayload.is_timer_running) === 'true' || livePayload.is_timer_running === true
-            : m.is_timer_running !== undefined && m.is_timer_running !== null
-            ? String(m.is_timer_running) === 'true' || m.is_timer_running === true
-            : isLive;
-
-        const startedAt = livePayload?.timer_started_at || m.timer_started_at || null;
-
-        return {
-          ...m,
-          timer_seconds: baseSec,
-          timer_started_at: startedAt,
-          is_timer_running: isRunning,
-          status: livePayload?.status || m.status,
-          home_score: livePayload?.home_score ?? m.home_score,
-          away_score: livePayload?.away_score ?? m.away_score,
-        };
-      });
-
-      return enrichedMatches as any[];
+      return rawMatches as any[];
     },
     enabled: !!orgId && Number(orgId) > 0,
     staleTime: 30 * 1000,
