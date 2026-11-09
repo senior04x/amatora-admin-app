@@ -1466,9 +1466,6 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               </Text>
             </View>
           </View>
-          <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
-            Gol bo'lishi bilan tegishli jamoaga + bosing. Replaylar kiritilgan gollar tartibida bog'lanadi.
-          </Text>
           {!isReadOnlyMode && (
             <View style={[styles.scoreboardActions, { borderTopColor: colors.border }]}>
               <TouchableOpacity
