@@ -516,7 +516,7 @@ export const DashboardScreen: React.FC<Props> = ({
       icon: 'calendar-outline',
       color: '#FB7185',
       action: () => onNavigate('matches'),
-      adminOnly: false,
+      adminOnly: true,
     },
     {
       id: 'replays',
@@ -998,12 +998,9 @@ export const DashboardScreen: React.FC<Props> = ({
       {/* Real Live & Chronological Matches Section at the VERY BOTTOM */}
       {userRole === 'user' && (
         <View style={{ marginTop: 24, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"O'yinlar Jadvali"}</Text>
-            <TouchableOpacity onPress={() => onNavigate && onNavigate('matches')}>
-              <Text style={{ color: colors.accentGreen, fontSize: 12, fontWeight: '800' }}>{"BARCHA O'YINLAR →"}</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 12 }]}>
+            {"O'yinlar Jadvali"}
+          </Text>
 
           {matchesLoading ? (
             <View style={{ gap: 14 }}>

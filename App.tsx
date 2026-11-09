@@ -77,6 +77,7 @@ const LazyScreen = ({ isActive, children }: { isActive: boolean; children: React
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, orgId, userRole, loading: orgLoading } = useOrg();
   const canCreateMatch = userRole === 'org_admin' && Boolean(orgId) && !orgLoading;
+  const matchNavTab = userRole === 'user' ? 'matches' : 'create-match';
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<
@@ -412,21 +413,23 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
           <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
 
-          {canCreateMatch && (
+          {(userRole === 'user' || canCreateMatch) && (
             <>
-              {/* Segment 3: CENTER '+' QUICK ADD MATCH BUTTON */}
               <TouchableOpacity
                 style={styles.segmentItem}
-                onPress={() => handleNavigate('create-match')}
+                onPress={() => handleNavigate(matchNavTab)}
+                accessibilityRole="tab"
+                accessibilityLabel={matchNavTab === 'matches' ? 'O‘yinlar' : 'O‘yin yaratish'}
+                accessibilityState={{ selected: activeTab === matchNavTab }}
                 activeOpacity={0.7}
               >
                 <Ionicons
-                  name="add-outline"
-                  size={28}
-                  color={activeTab === 'create-match' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-                  style={activeTab === 'create-match' && isDark && styles.glowingIcon}
+                  name={matchNavTab === 'matches' ? 'calendar-outline' : 'add-outline'}
+                  size={matchNavTab === 'matches' ? 22 : 28}
+                  color={activeTab === matchNavTab ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
+                  style={activeTab === matchNavTab && isDark && styles.glowingIcon}
                 />
-                <View style={[styles.activeDot, activeTab === 'create-match' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+                <View style={[styles.activeDot, activeTab === matchNavTab && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
               </TouchableOpacity>
 
               <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
