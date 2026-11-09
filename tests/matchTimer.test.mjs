@@ -4,7 +4,7 @@ import { getElapsedMatchSeconds, getRemainingSeconds } from '../src/utils/matchT
 import { getHalfDurationSeconds, loadMatchCompetition } from '../src/utils/matchDuration.ts';
 import { createClient } from '@supabase/supabase-js';
 import { getPauseSeconds } from '../src/utils/matchTimer.ts';
-import { writeMatchTimer } from '../src/api/matchTimer.ts';
+import { writeMatchTimer, writeMatchTimerWithRefresh } from '../src/api/matchTimer.ts';
 
 const half = 25 * 60;
 const start = Date.parse('2026-11-09T12:00:00Z');
@@ -88,4 +88,27 @@ test('writes only the same organization and timer snapshot, and returns the save
   response = { message: 'Permission denied' };
   responseStatus = 403;
   await assert.rejects(writeMatchTimer(db, 1, snapshot, pause), { message: 'Permission denied' });
+});
+
+test('retries against the latest timer once without reversing another device’s action', async () => {
+  const fresh = { ...live, timer_seconds: 1440 };
+  const paused = { ...fresh, is_timer_running: false, timer_started_at: null };
+  const writes = [];
+  const write = async snapshot => {
+    writes.push(snapshot);
+    return snapshot === fresh ? paused : null;
+  };
+  const sameIntent = snapshot => snapshot.is_timer_running === live.is_timer_running;
+
+  assert.deepEqual(await writeMatchTimerWithRefresh(live, write, async () => fresh, sameIntent), {
+    kind: 'saved', row: paused,
+  });
+  assert.deepEqual(writes.splice(0), [live, fresh]);
+
+  assert.deepEqual(await writeMatchTimerWithRefresh(live, write, async () => paused, sameIntent), { kind: 'conflict' });
+  assert.deepEqual(writes.splice(0), [live]);
+  assert.deepEqual(await writeMatchTimerWithRefresh(live, write, async () => ({ ...fresh, status: 'half_time' }), () => true), { kind: 'conflict' });
+  assert.deepEqual(writes.splice(0), [live]);
+  assert.deepEqual(await writeMatchTimerWithRefresh(live, write, async () => ({ ...live }), sameIntent), { kind: 'denied' });
+  assert.deepEqual(writes, [live]);
 });

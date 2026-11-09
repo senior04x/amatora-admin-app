@@ -34,7 +34,7 @@ import {
   canRunMatchTimer, getElapsedMatchSeconds, getRemainingSeconds, getStreamField,
   getPauseSeconds, isRunningTimerSnapshot, serverNowMs, syncServerClock, useMatchTimer,
 } from '../utils/matchTimer';
-import { TIMER_ROW_COLUMNS, writeMatchTimer } from '../api/matchTimer';
+import { TIMER_ROW_COLUMNS, writeMatchTimer, writeMatchTimerWithRefresh } from '../api/matchTimer';
 
 interface Props {
   matchId: string | number;
@@ -253,8 +253,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   }, [statusConfirmModal.isOpen, showEventModal, showObsModal, onBack]);
 
   const saveTimer = async (
-    buildUpdate: (nowMs: number) => Record<string, unknown> | null,
+    buildUpdate: (nowMs: number, snapshot: typeof match) => Record<string, unknown> | null,
     automatic = false,
+    allowRunningChange = false,
   ) => {
     if (isReadOnlyMode || timerWritePending.current || String(match?.id) !== String(matchId)) return false;
     if (!timerReady) {
@@ -266,28 +267,57 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     const snapshot = match;
     try {
       const targetOrgId = requireOrganizationId(orgId);
+      if (!automatic) {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!data.session) {
+          Alert.alert('Taymer', 'Bu akkauntning sessiyasi o‘yinni boshqarish uchun tasdiqlanmagan. Tashkilot adminiga murojaat qiling.');
+          return false;
+        }
+      }
       if (serverNowMs() == null) await syncServerClock(CLOCK_URL);
       const now = serverNowMs();
       if (now == null) throw new Error('Server clock unavailable');
-      const values = buildUpdate(now);
+      const values = buildUpdate(now, snapshot);
       if (!values) return false;
 
-      const rowAtWrite = latestMatchRow.current;
-      const saved = await writeMatchTimer(supabase, targetOrgId, snapshot, {
-        ...values, updated_at: new Date(now).toISOString(),
-      });
-      if (saved) {
-        if (latestMatchRow.current === rowAtWrite) applyMatchRow(saved);
-        return true;
-      }
+      const write = async (row: typeof match) => {
+        const writeTime = row === snapshot ? now : serverNowMs();
+        if (writeTime == null) throw new Error('Server clock unavailable');
+        const payload = row === snapshot ? values : buildUpdate(writeTime, row);
+        if (!payload) return null;
+        const rowAtWrite = latestMatchRow.current;
+        const saved = await writeMatchTimer(supabase, targetOrgId, row, {
+          ...payload, updated_at: new Date(writeTime).toISOString(),
+        });
+        if (saved && latestMatchRow.current === rowAtWrite) applyMatchRow(saved);
+        return saved;
+      };
 
-      if (!automatic) {
-        await refreshMatchRow();
-        Alert.alert('Taymer', 'O‘yin holati o‘zgargan. Ekrandagi holatni tekshirib, qayta urinib ko‘ring.');
-      }
+      if (automatic) return Boolean(await write(snapshot));
+
+      const result = await writeMatchTimerWithRefresh(
+        snapshot,
+        write,
+        refreshMatchRow,
+        fresh => {
+          if (values.status === 'finished' &&
+              (fresh.home_score !== snapshot.home_score || fresh.away_score !== snapshot.away_score)) return false;
+          return allowRunningChange || isRunningTimerSnapshot(fresh) === isRunningTimerSnapshot(snapshot);
+        },
+      );
+      if (result.kind === 'saved') return true;
+      Alert.alert('Taymer', result.kind === 'denied'
+        ? 'Bu akkauntda o‘yinni o‘zgartirish ruxsati tasdiqlanmadi.'
+        : 'O‘yin holati boshqa qurilmada o‘zgargan. Yangilangan holatdan kerakli amalni tanlang.');
     } catch (error) {
       console.warn('Match timer update failed:', error);
-      if (!automatic) Alert.alert('Taymer', 'O‘zgarish tasdiqlanmadi. Internet ulanishini va o‘yin holatini tekshiring.');
+      if (!automatic) {
+        const denied = typeof error === 'object' && error !== null && 'code' in error && error.code === '42501';
+        Alert.alert('Taymer', denied
+          ? 'Bu akkauntda o‘yinni o‘zgartirish ruxsati tasdiqlanmadi.'
+          : 'O‘zgarish tasdiqlanmadi. Internet ulanishini va o‘yin holatini tekshiring.');
+      }
     } finally {
       timerWritePending.current = false;
       if (!automatic) setIsStatusChanging(false);
@@ -358,6 +388,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     const { data, error } = await dbClient.from('matches').select(TIMER_ROW_COLUMNS).eq('id', matchId).maybeSingle();
     if (error) throw error;
     if (data && isActive() && latestMatchRow.current === rowAtRequest) applyMatchRow(data);
+    return data;
   };
 
   useEffect(() => {
@@ -519,9 +550,11 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   const toggleTimerManual = async () => {
     if (!canRunMatchTimer(match?.status)) return;
-    const saved = await saveTimer(now => {
-      const remaining = getRemainingSeconds(match, halfDurationSecs, now);
-      const seconds = isTimerRunning ? getPauseSeconds(timerSeconds, remaining) : remaining || halfDurationSecs;
+    const saved = await saveTimer((now, snapshot) => {
+      const remaining = getRemainingSeconds(snapshot, halfDurationSecs, now);
+      const seconds = isTimerRunning
+        ? (snapshot === match ? getPauseSeconds(timerSeconds, remaining) : remaining)
+        : remaining || halfDurationSecs;
       if (seconds == null) {
         Alert.alert('Taymer', 'Ekrandagi vaqt yangilanmoqda. Pauzani qayta bosing.');
         return null;
@@ -544,10 +577,10 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   const adjustTimerSeconds = async (deltaSec: number) => {
     if (!canRunMatchTimer(match?.status)) return;
-    const saved = await saveTimer(now => {
-      const remaining = getRemainingSeconds(match, halfDurationSecs, now);
+    const saved = await saveTimer((now, snapshot) => {
+      const remaining = getRemainingSeconds(snapshot, halfDurationSecs, now);
       const seconds = Math.max(0, Math.min(halfDurationSecs, remaining + deltaSec));
-      const running = isRunningTimerSnapshot(match) && remaining > 0 && seconds > 0;
+      const running = isRunningTimerSnapshot(snapshot) && remaining > 0 && seconds > 0;
       return { timer_seconds: seconds, timer_started_at: running ? new Date(now).toISOString() : null, is_timer_running: running };
     });
     if (saved) showToast(deltaSec > 0 ? '+1 daqiqa qo‘shildi ⏱️' : '-1 daqiqa kamaytirildi ⏱️');
@@ -666,9 +699,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       };
     }
 
-    const saved = await saveTimer(now => {
+    const saved = await saveTimer((now, snapshot) => {
       const running = newStatus === 'first_half' || newStatus === 'second_half';
-      const seconds = running || newStatus === 'scheduled' ? halfDurationSecs : getRemainingSeconds(match, halfDurationSecs, now);
+      const seconds = running || newStatus === 'scheduled' ? halfDurationSecs : getRemainingSeconds(snapshot, halfDurationSecs, now);
       return {
         status: newStatus,
         ...scoreOverride,
@@ -676,7 +709,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         timer_started_at: running ? new Date(now).toISOString() : null,
         is_timer_running: running,
       };
-    });
+    }, false, true);
     if (!saved) return;
     if (newStatus === 'finished') void sendRemoteObsFinishSignal();
     showToast(

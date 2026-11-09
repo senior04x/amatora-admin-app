@@ -15,3 +15,35 @@ export async function writeMatchTimer(db: SupabaseClient, orgId: number, snapsho
   if (error) throw error;
   return data;
 }
+
+type TimerWriteResult =
+  | { kind: 'saved'; row: Awaited<ReturnType<typeof writeMatchTimer>> }
+  | { kind: 'conflict' | 'denied' };
+
+export async function writeMatchTimerWithRefresh<T extends MatchTimerSnapshot>(
+  snapshot: T,
+  write: (row: T) => ReturnType<typeof writeMatchTimer>,
+  refresh: () => Promise<T | null>,
+  canRetry: (fresh: T) => boolean,
+): Promise<TimerWriteResult> {
+  const saved = await write(snapshot);
+  if (saved) return { kind: 'saved', row: saved };
+
+  const fresh = await refresh();
+  if (!fresh || String(fresh.id) !== String(snapshot.id) || fresh.status !== snapshot.status) {
+    return { kind: 'conflict' };
+  }
+  if (!canRetry(fresh)) {
+    return { kind: 'conflict' };
+  }
+  if (SNAPSHOT_FIELDS.every(field => (fresh[field] ?? null) === (snapshot[field] ?? null))) {
+    return { kind: 'denied' };
+  }
+
+  const retried = await write(fresh);
+  if (retried) return { kind: 'saved', row: retried };
+  const latest = await refresh();
+  return latest && SNAPSHOT_FIELDS.every(field => (latest[field] ?? null) === (fresh[field] ?? null))
+    ? { kind: 'denied' }
+    : { kind: 'conflict' };
+}
