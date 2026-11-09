@@ -188,6 +188,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   // Status Change Custom Confirmation Modal State & Loading State
   const [isStatusChanging, setIsStatusChanging] = useState(false);
+  const [isPhaseChanging, setIsPhaseChanging] = useState(false);
   const [statusConfirmModal, setStatusConfirmModal] = useState<{
     isOpen: boolean;
     targetStatus: string;
@@ -255,7 +256,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const saveTimer = async (
     buildUpdate: (nowMs: number, snapshot: typeof match) => Record<string, unknown> | null,
     automatic = false,
-    allowRunningChange = false,
+    phaseChange = false,
   ) => {
     if (isReadOnlyMode || timerWritePending.current || String(match?.id) !== String(matchId)) return false;
     if (!timerReady) {
@@ -264,6 +265,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     }
     timerWritePending.current = true;
     if (!automatic) setIsStatusChanging(true);
+    if (phaseChange) setIsPhaseChanging(true);
     const snapshot = match;
     try {
       const targetOrgId = requireOrganizationId(orgId);
@@ -303,7 +305,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
         fresh => {
           if (values.status === 'finished' &&
               (fresh.home_score !== snapshot.home_score || fresh.away_score !== snapshot.away_score)) return false;
-          return allowRunningChange || isRunningTimerSnapshot(fresh) === isRunningTimerSnapshot(snapshot);
+          return phaseChange || isRunningTimerSnapshot(fresh) === isRunningTimerSnapshot(snapshot);
         },
       );
       if (result.kind === 'saved') return true;
@@ -321,6 +323,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
     } finally {
       timerWritePending.current = false;
       if (!automatic) setIsStatusChanging(false);
+      if (phaseChange) setIsPhaseChanging(false);
     }
     return false;
   };
@@ -1109,13 +1112,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
 
   const matchStatus = resolveMatchStatus();
   const slideAction = matchStatus === 'scheduled'
-    ? { target: 'first_half', label: '1-taymni boshlash uchun suring' }
+    ? { target: 'first_half', label: '1-taymni boshlash', accent: '#E85002' }
     : matchStatus === 'first_half'
-    ? { target: 'half_time', label: 'Tanaffus e’lon qilish uchun suring' }
+    ? { target: 'half_time', label: 'Tanaffus', accent: '#F59E0B' }
     : matchStatus === 'half_time'
-    ? { target: 'second_half', label: '2-taymni boshlash uchun suring' }
+    ? { target: 'second_half', label: '2-taymni boshlash', accent: '#60A5FA' }
     : matchStatus === 'second_half'
-    ? { target: 'finished', label: 'O‘yinni yakunlash uchun suring' }
+    ? { target: 'finished', label: 'O‘yinni yakunlash', accent: '#F87171' }
     : null;
 
   // Bottom Sticky Pause/Play Button Pop-Up Spring Animation
@@ -1474,8 +1477,9 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
               <MatchActionSlider
                 key={JSON.stringify([matchId, match?.status, slideAction.target])}
                 label={slideAction.label}
-                disabled={!timerReady}
-                busy={isStatusChanging}
+                accent={slideAction.accent}
+                disabled={!timerReady || isStatusChanging}
+                busy={isPhaseChanging}
                 isDark={Platform.OS === 'ios' || isDark}
                 onComplete={() => executeStatusChange(slideAction.target, match?.status)}
               />

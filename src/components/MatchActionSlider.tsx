@@ -4,18 +4,19 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-const HANDLE = 48;
-const INSET = 5;
+const HANDLE = 44;
+const INSET = 4;
 
 type Props = {
   label: string;
+  accent: string;
   disabled: boolean;
   busy: boolean;
   isDark: boolean;
   onComplete: () => Promise<void>;
 };
 
-export default function MatchActionSlider({ label, disabled, busy, isDark, onComplete }: Props) {
+export default function MatchActionSlider({ label, accent, disabled, busy, isDark, onComplete }: Props) {
   const offset = useRef(new Animated.Value(0)).current;
   const travel = useRef(0);
   const submitting = useRef(false);
@@ -54,7 +55,7 @@ export default function MatchActionSlider({ label, disabled, busy, isDark, onCom
     const pan = Gesture.Pan()
       .runOnJS(true)
       .enabled(!unavailable)
-      .activeOffsetX(10)
+      .activeOffsetX(7)
       .failOffsetY([-12, 12])
       .maxPointers(1)
       .onStart(() => offset.stopAnimation())
@@ -62,7 +63,7 @@ export default function MatchActionSlider({ label, disabled, busy, isDark, onCom
         if (!submitting.current) offset.setValue(Math.max(0, Math.min(travel.current, translationX)));
       })
       .onEnd(({ translationX }, success) => {
-        if (success && translationX >= travel.current * 0.9) void submit();
+        if (success && translationX >= travel.current * 0.82) void submit();
       })
       .onFinalize(() => {
         if (mounted.current && !submitting.current) reset();
@@ -94,9 +95,8 @@ export default function MatchActionSlider({ label, disabled, busy, isDark, onCom
       style={[
         styles.track,
         {
-          backgroundColor: isDark ? '#232323' : '#F5F5F5',
-          borderColor: isDark ? '#414141' : '#D4D4D4',
-          opacity: disabled && !busy ? 0.55 : 1,
+          backgroundColor: isDark ? `${accent}21` : `${accent}16`,
+          borderColor: `${accent}7A`,
         },
       ]}
     >
@@ -108,8 +108,8 @@ export default function MatchActionSlider({ label, disabled, busy, isDark, onCom
         </Animated.View>
       )}
       <GestureDetector gesture={actions.pan}>
-        <Animated.View style={[styles.handle, { opacity: busy ? 0 : 1, transform: [{ translateX: offset }] }]}>
-          <Ionicons name="arrow-forward" size={23} color="#171717" />
+        <Animated.View style={[styles.handle, { backgroundColor: accent, opacity: busy ? 0 : 1, transform: [{ translateX: offset }] }]}>
+          <Ionicons name="arrow-forward" size={21} color="#171717" />
         </Animated.View>
       </GestureDetector>
     </View>
@@ -118,6 +118,9 @@ export default function MatchActionSlider({ label, disabled, busy, isDark, onCom
 
 const styles = StyleSheet.create({
   track: {
+    alignSelf: 'center',
+    width: '86%',
+    maxWidth: 270,
     minHeight: HANDLE + INSET * 2 + 2,
     borderRadius: 999,
     borderWidth: 1,
@@ -132,7 +135,6 @@ const styles = StyleSheet.create({
     width: HANDLE,
     height: HANDLE,
     borderRadius: HANDLE / 2,
-    backgroundColor: '#E85002',
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 2,
