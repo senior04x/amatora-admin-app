@@ -129,6 +129,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const [isEventsLoading, setIsEventsLoading] = useState(!cachedData?.events);
 
   // Penalty Shootout State
+  const [showScoreboardActions, setShowScoreboardActions] = useState(false);
   const [showPenaltyControls, setShowPenaltyControls] = useState(false);
   const [homePenalties, setHomePenalties] = useState(cachedData?.homePenalties || 0);
   const [awayPenalties, setAwayPenalties] = useState(cachedData?.awayPenalties || 0);
@@ -1468,6 +1469,107 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           <Text style={{ color: Platform.OS === 'android' ? colors.textMuted : '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
             Gol bo'lishi bilan tegishli jamoaga + bosing. Replaylar kiritilgan gollar tartibida bog'lanadi.
           </Text>
+          {!isReadOnlyMode && (
+            <View style={[styles.scoreboardActions, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={styles.scoreboardActionsToggle}
+                onPress={() => setShowScoreboardActions(open => !open)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showScoreboardActions }}
+              >
+                <Ionicons name="options-outline" size={17} color="#E85002" />
+                <Text style={[styles.scoreboardActionsLabel, { color: Platform.OS === 'ios' ? '#FFFFFF' : colors.textPrimary }]}>
+                  O‘yin amallari
+                </Text>
+                <Ionicons name={showScoreboardActions ? 'chevron-up' : 'chevron-down'} size={16} color={Platform.OS === 'ios' ? '#CBD5E1' : colors.textMuted} />
+              </TouchableOpacity>
+              {showScoreboardActions && (
+                <View style={styles.scoreboardActionsContent}>
+                  {matchStatus !== 'finished' && (
+                    <TouchableOpacity
+                      style={[styles.penaltyDropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+                      onPress={() => setShowPenaltyControls(open => !open)}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: showPenaltyControls }}
+                    >
+                      {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Ionicons name="football-outline" size={16} color="#38BDF8" />
+                      <Text style={[styles.penaltyDropdownText, Platform.OS === 'android' && { color: colors.textPrimary }]}>Penaltilar seriyasi</Text>
+                      <Ionicons name={showPenaltyControls ? 'chevron-up' : 'chevron-down'} size={14} color="#38BDF8" />
+                    </TouchableOpacity>
+                  )}
+                  {matchStatus !== 'finished' && showPenaltyControls && (
+                    <View style={[styles.penaltyControlBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                      {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                      <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Penaltilar Seriyasi Hisobi"}</Text>
+                      <View style={styles.scoreboardBodyRow}>
+                        <View style={styles.teamBoardCol}>
+                          <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{homeTeam?.name || 'Mezbon'}</Text>
+                          <View style={styles.scoreAdjustRow}>
+                            <TouchableOpacity
+                              style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                              onPress={() => adjustPenaltyScore('home', -1)}
+                            >
+                              {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                              <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
+                            </TouchableOpacity>
+                            <Text style={[styles.scoreValText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{homePenalties}</Text>
+                            <TouchableOpacity
+                              style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                              onPress={() => adjustPenaltyScore('home', 1)}
+                            >
+                              {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                              <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        <Text style={[styles.scoreColon, Platform.OS === 'android' && { color: colors.textPrimary }]}>:</Text>
+
+                        <View style={styles.teamBoardCol}>
+                          <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{awayTeam?.name || 'Mehmon'}</Text>
+                          <View style={styles.scoreAdjustRow}>
+                            <TouchableOpacity
+                              style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
+                              onPress={() => adjustPenaltyScore('away', -1)}
+                            >
+                              {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                              <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
+                            </TouchableOpacity>
+                            <Text style={[styles.scoreValText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{awayPenalties}</Text>
+                            <TouchableOpacity
+                              style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
+                              onPress={() => adjustPenaltyScore('away', 1)}
+                            >
+                              {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                              <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                  <View style={styles.quickEventsRow}>
+                    {EVENT_TYPES.map((ev) => (
+                      <TouchableOpacity
+                        key={ev.id}
+                        style={[
+                          styles.quickEventChip,
+                          { borderColor: ev.color },
+                          Platform.OS === 'android' && { backgroundColor: colors.bgCard },
+                        ]}
+                        onPress={() => openEventModal(ev.id)}
+                      >
+                        {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
+                        <Ionicons name={ev.icon as any} size={14} color={ev.color} />
+                        <Text style={[styles.quickEventText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{ev.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Match status control */}
@@ -1509,94 +1611,6 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                 </TouchableOpacity>
               </View>
             )}
-
-            {/* Penalty Shootout Dropdown Button */}
-            {matchStatus !== 'finished' && (
-              <TouchableOpacity
-                style={[styles.penaltyDropdownBtn, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-                onPress={() => setShowPenaltyControls(open => !open)}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: showPenaltyControls }}
-              >
-                {Platform.OS === 'ios' && <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                <Ionicons name="football-outline" size={16} color="#38BDF8" />
-                <Text style={[styles.penaltyDropdownText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{showPenaltyControls ? "Penaltilar seriyasi ▲" : "Penaltilar seriyasi ▼"}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Penalty Shootout Controls Box */}
-        {!isReadOnlyMode && showPenaltyControls && (
-          <View style={[styles.penaltyControlBox, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-            {Platform.OS === 'ios' && <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-            <Text style={[styles.sectionTitle, Platform.OS === 'android' && { color: colors.textPrimary }]}>{"Penaltilar Seriyasi Hisobi"}</Text>
-            <View style={styles.scoreboardBodyRow}>
-              <View style={styles.teamBoardCol}>
-                <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{homeTeam?.name || 'Mezbon'}</Text>
-                <View style={styles.scoreAdjustRow}>
-                  <TouchableOpacity
-                    style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
-                    onPress={() => adjustPenaltyScore('home', -1)}
-                  >
-                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
-                  </TouchableOpacity>
-                  <Text style={[styles.scoreValText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{homePenalties}</Text>
-                  <TouchableOpacity
-                    style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
-                    onPress={() => adjustPenaltyScore('home', 1)}
-                  >
-                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <Text style={[styles.scoreColon, Platform.OS === 'android' && { color: colors.textPrimary }]}>:</Text>
-
-              <View style={styles.teamBoardCol}>
-                <Text style={[styles.teamBoardName, Platform.OS === 'android' && { color: colors.textPrimary }]}>{awayTeam?.name || 'Mehmon'}</Text>
-                <View style={styles.scoreAdjustRow}>
-                  <TouchableOpacity
-                    style={[styles.minusScoreBtn, Platform.OS === 'android' && { backgroundColor: isDark ? '#334155' : '#E2E8F0' }]}
-                    onPress={() => adjustPenaltyScore('away', -1)}
-                  >
-                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: colors.textPrimary }]}>-</Text>
-                  </TouchableOpacity>
-                  <Text style={[styles.scoreValText, Platform.OS === 'android' && { color: colors.accentGreen }]}>{awayPenalties}</Text>
-                  <TouchableOpacity
-                    style={[styles.plusScoreBtn, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}
-                    onPress={() => adjustPenaltyScore('away', 1)}
-                  >
-                    {Platform.OS === 'ios' && <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                    <Text style={[styles.scoreBtnSymbol, Platform.OS === 'android' && { color: '#FFFFFF' }]}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* 4. Quick Action Event Buttons */}
-        {!isReadOnlyMode && (
-          <View style={styles.quickEventsRow}>
-            {EVENT_TYPES.map((ev) => (
-              <TouchableOpacity
-                key={ev.id}
-                style={[
-                  styles.quickEventChip,
-                  { borderColor: ev.color },
-                  Platform.OS === 'android' && { backgroundColor: colors.bgCard },
-                ]}
-                onPress={() => openEventModal(ev.id)}
-              >
-                {Platform.OS === 'ios' && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />}
-                <Ionicons name={ev.icon as any} size={14} color={ev.color} />
-                <Text style={[styles.quickEventText, Platform.OS === 'android' && { color: colors.textPrimary }]}>{ev.label}</Text>
-              </TouchableOpacity>
-            ))}
           </View>
         )}
 
@@ -2538,6 +2552,25 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
+  scoreboardActions: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 2,
+  },
+  scoreboardActionsToggle: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scoreboardActionsLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  scoreboardActionsContent: {
+    gap: 10,
+    paddingTop: 4,
+  },
   mainActionBar: {
     gap: 8,
   },
