@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,8 +16,12 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
+import { GalleryPermissionError, saveReplayToGallery } from '../utils/replayGallery';
+import HighlightEditor, { type HighlightClip, type HighlightSize } from '../components/HighlightEditor';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
+import ReplayPlayback from '../components/ReplayPlayback';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../supabaseClient';
 import { useOrg } from '../context/OrgContext';
@@ -53,12 +57,6 @@ interface MatchEventItem {
     player_number?: string | number | null;
     photo_url?: string | null;
   } | null;
-  assist_player?: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    player_number?: string | number | null;
-  } | null;
   team?: {
     id: string | number;
     name: string;
@@ -66,19 +64,24 @@ interface MatchEventItem {
   } | null;
 }
 
+type ReplayTeam = NonNullable<MatchEventItem['team']>;
+type ReplayMatch = MatchItem & {
+  home_team: ReplayTeam | null;
+  away_team: ReplayTeam | null;
+  replays?: { count: number }[];
+};
+
+function replayUrl(raw?: string | null) {
+  try {
+    const url = new URL(raw?.trim() ?? '');
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : null;
+  } catch { return null; }
+}
+
 export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
   const { currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
+  const orgId = parseOrganizationId(currentOrg?.id);
   const { isDark, colors } = useTheme();
-
-  // Data states
-  const [matches, setMatches] = useState<MatchItem[]>([]);
-  const [teamsMap, setTeamsMap] = useState<Map<string | number, any>>(new Map());
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [tournaments, setTournaments] = useState<any[]>([]);
-  const [matchReplaysCount, setMatchReplaysCount] = useState<Map<string, number>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
   // Filter states
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -87,90 +90,131 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
   const [selectedTournament, setSelectedTournament] = useState<string>('all');
   const [selectedRound, setSelectedRound] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [onlyWithReplays, setOnlyWithReplays] = useState(true);
+  const [onlyWithReplays, setOnlyWithReplays] = useState(false);
 
   // Detail Modal state
   const [selectedMatch, setSelectedMatch] = useState<MatchItem | null>(null);
   const [matchEvents, setMatchEvents] = useState<MatchEventItem[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [eventsError, setEventsError] = useState(false);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const detailRequest = useRef<AbortController | null>(null);
+  const saving = useRef(false);
+  const [highlightOpen, setHighlightOpen] = useState(false);
+  const [highlightSize, setHighlightSize] = useState<HighlightSize>(5);
+  const [clips, setClips] = useState<HighlightClip[]>([]);
+  const toggleClip = (event: MatchEventItem) => {
+    if (clips.some(clip => clip.id === event.id)) {
+      setClips(clips.filter(clip => clip.id !== event.id));
+    } else if (clips.length < highlightSize) {
+      setClips([...clips, { id: event.id, name: event.player ?
+        [event.player.first_name, event.player.last_name].filter(Boolean).join(' ') || 'Muallifsiz gol' : 'Muallifsiz gol',
+        team: event.team?.name || 'Jamoa', number: event.player?.player_number, photo: event.player?.photo_url }]);
+    } else {
+      Alert.alert(`Top ${highlightSize} to'ldi`, "Boshqa golni tanlash uchun avval bittasini olib tashlang yoki Top 10 ni tanlang.");
+    }
+  };
   const [downloadingEventId, setDownloadingEventId] = useState<string | null>(null);
 
   // Dropdown Picker Modal
   const [pickerModalType, setPickerModalType] = useState<'none' | 'type' | 'league' | 'tournament' | 'round'>('none');
 
+  const [search, setSearch] = useState('');
   useEffect(() => {
-    if (!orgId) return;
-    loadAllData();
-  }, [orgId]);
+    const timer = setTimeout(() => setSearch(searchQuery.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  const loadAllData = async () => {
-    try {
-      setLoading(true);
-
-      // 1. Fetch Tournaments
-      const tournamentsData = await getActiveOrgTournaments(orgId);
-      setTournaments(tournamentsData || []);
-
-      // 2. Fetch Leagues
-      const { data: leaguesData } = await supabase
-        .from('leagues')
-        .select('*')
-        .eq('organization_id', orgId);
-      setLeagues(leaguesData || []);
-
-      // 3. Fetch Teams
-      const { data: teamsData } = await supabase
-        .from('teams')
-        .select('id, name, logo_url, league, organization_id')
-        .eq('organization_id', orgId);
-
-      const tMap = new Map();
-      (teamsData || []).forEach((t: any) => tMap.set(t.id, t));
-      setTeamsMap(tMap);
-
-      // 4. Fetch Matches
-      const { data: matchesData, error: mErr } = await supabase
-        .from('matches')
-        .select('id, league, tournament_id, round, stage, home_team_id, away_team_id, home_score, away_score, match_date, match_time, status, organization_id')
-        .eq('organization_id', orgId)
-        .order('match_date', { ascending: false })
-        .order('match_time', { ascending: false });
-
-      if (mErr) throw mErr;
-      const loadedMatches = (matchesData || []) as MatchItem[];
-      setMatches(loadedMatches);
-
-      // 5. Fetch Replay count per match
-      if (loadedMatches.length > 0) {
-        const matchIds = loadedMatches.map((m) => m.id);
-        const { data: replayEvents } = await supabase
-          .from('match_events')
-          .select('match_id, id')
-          .in('match_id', matchIds)
-          .not('replay_video_url', 'is', null);
-
-        const rMap = new Map<string, number>();
-        (replayEvents || []).forEach((ev: any) => {
-          rMap.set(ev.match_id, (rMap.get(ev.match_id) || 0) + 1);
-        });
-        setMatchReplaysCount(rMap);
+  const filters = useQuery({
+    queryKey: ['replayFilters', orgId, filterType, selectedLeague, selectedTournament],
+    enabled: orgId !== null && isFilterOpen,
+    staleTime: 60_000,
+    queryFn: async ({ signal }) => {
+      const targetOrgId = requireOrganizationId(orgId);
+      let rounds = supabase.from('matches').select('round').eq('organization_id', targetOrgId)
+        .not('round', 'is', null);
+      if (filterType === 'league') rounds = rounds.filter('tournament_id', 'is', null);
+      if (filterType === 'tournament') rounds = rounds.filter('tournament_id', 'not.is', null);
+      if (selectedLeague !== 'all') rounds = rounds.eq('league', selectedLeague);
+      if (selectedTournament !== 'all') rounds = rounds.eq('tournament_id', String(selectedTournament));
+      const [tournaments, leagues, values] = await Promise.all([
+        getActiveOrgTournaments(targetOrgId),
+        supabase.from('leagues').select('id,name').eq('organization_id', targetOrgId).order('name').abortSignal(signal),
+        rounds.order('round').limit(1000).abortSignal(signal),
+      ]);
+      if (leagues.error || values.error) throw leagues.error || values.error;
+      return { tournaments, leagues: leagues.data ?? [],
+        rounds: [...new Set((values.data ?? []).map(row => String(row.round)))].sort((a, b) => Number(a) - Number(b)) };
+    },
+  });
+  const { leagues = [], tournaments = [], rounds: availableRounds = [] } = filters.data ?? {};
+  const list = useInfiniteQuery({
+    queryKey: ['adminReplays', orgId, filterType, selectedLeague, selectedTournament, selectedRound, search, onlyWithReplays],
+    enabled: orgId !== null,
+    initialPageParam: 0,
+    staleTime: 30_000,
+    retry: 1,
+    queryFn: async ({ pageParam, signal }) => {
+      const targetOrgId = requireOrganizationId(orgId);
+      const replayJoin = onlyWithReplays ? ',has_replay:match_events!inner()' : '';
+      let query = supabase.from('matches').select(`
+        id, league, tournament_id, round, stage, home_team_id, away_team_id, home_score, away_score, match_date, match_time, status,
+        home_team:home_team_id(id,name,logo_url), away_team:away_team_id(id,name,logo_url), replays:match_events(count)${replayJoin}
+      `).eq('organization_id', targetOrgId)
+        .not('replays.replay_video_url', 'is', null).neq('replays.replay_video_url', '');
+      if (onlyWithReplays) query = query.filter('has_replay.replay_video_url', 'not.is', null).filter('has_replay.replay_video_url', 'neq', '');
+      if (filterType === 'league') query = query.filter('tournament_id', 'is', null);
+      if (filterType === 'tournament') query = query.filter('tournament_id', 'not.is', null);
+      if (selectedLeague !== 'all') query = query.eq('league', selectedLeague);
+      if (selectedTournament !== 'all') query = query.eq('tournament_id', String(selectedTournament));
+      if (selectedRound !== 'all') query = query.eq('round', selectedRound);
+      if (search) {
+        const term = search.replace(/[\\%_*]/g, ch => '\\' + ch);
+        const { data, error } = await supabase.from('teams').select('id').eq('organization_id', targetOrgId)
+          .ilike('name', `%${term}%`).abortSignal(signal);
+        if (error) throw error;
+        const ids = (data ?? []).map(row => String(row.id)).filter(id => /^[a-f0-9-]+$/i.test(id)).join(',');
+        if (!ids) return { rows: [], hasMore: false };
+        query = query.or(`home_team_id.in.(${ids}),away_team_id.in.(${ids})`);
       }
-    } catch (err) {
-      console.warn('Error loading replays in mobile admin:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+      const from = pageParam * 5;
+      const { data, error } = await query.order('match_date', { ascending: false, nullsFirst: false })
+        .order('match_time', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false }).range(from, from + 5).abortSignal(signal);
+      if (error) throw error;
+      return { rows: (data ?? []).slice(0, 5) as unknown as ReplayMatch[], hasMore: (data?.length ?? 0) > 5 };
+    },
+    getNextPageParam: (page, _pages, pageParam) => page.hasMore ? pageParam + 1 : undefined,
+  });
+  const filteredMatches = useMemo(() => [...new Map((list.data?.pages.flatMap(page => page.rows) ?? [])
+    .map(match => [match.id, match])).values()], [list.data]);
+  const matchReplaysCount = useMemo(() => new Map(filteredMatches.map(match => [match.id, match.replays?.[0]?.count ?? 0])), [filteredMatches]);
+  const teamsMap = useMemo(() => new Map(filteredMatches.flatMap(match =>
+    [match.home_team, match.away_team].flatMap(team => team ? [[String(team.id), team] as const] : []))), [filteredMatches]);
+  const loading = list.isLoading;
+  const refreshing = list.isRefetching;
+  const handleRefresh = () => { triggerIosCrescendoHaptic(); void list.refetch(); };
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    triggerIosCrescendoHaptic();
-    loadAllData();
+  const closeMatch = () => {
+    detailRequest.current?.abort();
+    setPlayingId(null);
+    setSelectedMatch(null);
   };
+  useEffect(() => {
+    setSelectedMatch(null);
+    setPlayingId(null);
+    setClips([]);
+    setHighlightOpen(false);
+    return () => detailRequest.current?.abort();
+  }, [orgId]);
 
   const handleSelectMatch = async (match: MatchItem) => {
     triggerIosCrescendoHaptic();
+    detailRequest.current?.abort();
+    const request = new AbortController();
+    detailRequest.current = request;
+    setPlayingId(null);
+    setEventsError(false);
     setSelectedMatch(match);
     setLoadingEvents(true);
     setMatchEvents([]);
@@ -185,13 +229,13 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
           minute,
           replay_video_url,
           created_at,
-          assist_player_id,
           player:player_id (id, first_name, last_name, player_number, photo_url),
           team:team_id (id, name, logo_url)
         `)
         .eq('match_id', match.id)
         .order('minute', { ascending: true })
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .abortSignal(request.signal);
 
       if (evErr) throw evErr;
 
@@ -199,101 +243,42 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
         .filter((e: any) => ['goal', 'penalty_goal', 'own_goal'].includes(e.event_type) || e.replay_video_url)
         .map((e: any) => ({
           ...e,
+          replay_video_url: replayUrl(e.replay_video_url),
           player: Array.isArray(e.player) ? e.player[0] : e.player,
           team: Array.isArray(e.team) ? e.team[0] : e.team,
         })) as unknown as MatchEventItem[];
 
-      setMatchEvents(goalsAndReplays);
+      if (!request.signal.aborted) setMatchEvents(goalsAndReplays);
     } catch (err) {
-      console.warn('Error fetching match events:', err);
+      if (!request.signal.aborted) setEventsError(true);
     } finally {
-      setLoadingEvents(false);
+      if (!request.signal.aborted) setLoadingEvents(false);
     }
   };
 
-  // Available rounds
-  const availableRounds = useMemo(() => {
-    const rounds = new Set<string>();
-    matches.forEach((m) => {
-      if (m.round !== null && m.round !== undefined) {
-        rounds.add(String(m.round));
-      }
-    });
-    return Array.from(rounds).sort((a, b) => Number(a) - Number(b));
-  }, [matches]);
-
-  // Filter matches
-  const filteredMatches = useMemo(() => {
-    return matches.filter((m) => {
-      const replaysCount = matchReplaysCount.get(m.id) || 0;
-      if (onlyWithReplays && replaysCount === 0) return false;
-
-      if (filterType === 'league' && m.tournament_id) return false;
-      if (filterType === 'tournament' && !m.tournament_id) return false;
-
-      if (selectedLeague !== 'all' && m.league !== selectedLeague) return false;
-      if (selectedTournament !== 'all' && String(m.tournament_id) !== String(selectedTournament)) return false;
-      if (selectedRound !== 'all' && String(m.round) !== String(selectedRound)) return false;
-
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const homeName = teamsMap.get(m.home_team_id || '')?.name?.toLowerCase() || '';
-        const awayName = teamsMap.get(m.away_team_id || '')?.name?.toLowerCase() || '';
-        const leagueName = (m.league || '').toLowerCase();
-        if (!homeName.includes(q) && !awayName.includes(q) && !leagueName.includes(q)) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [matches, matchReplaysCount, onlyWithReplays, filterType, selectedLeague, selectedTournament, selectedRound, searchQuery, teamsMap]);
-
-  // Watch video in browser or native player
-  const handleWatchVideo = async (url?: string | null) => {
-    if (!url) return;
-    try {
-      triggerIosCrescendoHaptic();
+  const handleSaveReplay = async (event: MatchEventItem) => {
+    const url = event.replay_video_url;
+    if (!url || saving.current) return;
+    if (Platform.OS === 'web') {
       await WebBrowser.openBrowserAsync(url);
-    } catch (e) {
-      Alert.alert('Xatolik', 'Videoni ochib bo\'lmadi');
+      return;
     }
-  };
-
-  // Download and share/save video
-  const handleDownloadAndShare = async (event: MatchEventItem, match: MatchItem) => {
-    if (!event.replay_video_url) return;
+    saving.current = true;
+    setPlayingId(null);
     setDownloadingEventId(event.id);
     triggerIosCrescendoHaptic();
-
     try {
-      const homeTeam = teamsMap.get(match.home_team_id || '')?.name || 'Home';
-      const awayTeam = teamsMap.get(match.away_team_id || '')?.name || 'Away';
-      const playerName = event.player ? `${event.player.first_name}_${event.player.last_name}` : 'Goal';
-      const minute = event.minute ? `${event.minute}m` : 'Replay';
-      const safeFilename = `${minute}_${homeTeam}_vs_${awayTeam}_${playerName}.mp4`.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-
-      const fileUri = `${FileSystem.cacheDirectory}${safeFilename}`;
-
-      const downloadResult = await FileSystem.downloadAsync(event.replay_video_url, fileUri);
-
-      if (downloadResult.status !== 200) {
-        throw new Error('Yuklab olishda xatolik yuz berdi');
-      }
-
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(downloadResult.uri, {
-          mimeType: 'video/mp4',
-          dialogTitle: 'Videoni montaj uchun saqlash yoki yuborish',
-          UTI: 'public.mpeg-4',
-        });
+      const extension = new URL(url).pathname.match(/\.(mov|m4v|webm)$/i)?.[1].toLowerCase() ?? 'mp4';
+      await saveReplayToGallery(url, `AMATORA-Replay-${Date.now()}.${extension}`);
+      Alert.alert('Video saqlandi', "Replayni telefon galereyasidan topasiz.");
+    } catch (error) {
+      if (error instanceof GalleryPermissionError) {
+        Alert.alert('Galereya ruxsati', "Sozlamalarda galereyaga video qo'shish uchun ruxsat bering.");
       } else {
-        Alert.alert('Muvaffaqiyatli', `Video yuklandi: ${downloadResult.uri}`);
+        Alert.alert('Video saqlanmadi', "Internet va galereya ruxsatini tekshirib, yana urinib ko'ring.");
       }
-    } catch (err: any) {
-      Alert.alert('Xatolik', err?.message || 'Videoni yuklab olishda muammo yuz berdi');
     } finally {
+      saving.current = false;
       setDownloadingEventId(null);
     }
   };
@@ -305,7 +290,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
     setSelectedTournament('all');
     setSelectedRound('all');
     setSearchQuery('');
-    setOnlyWithReplays(true);
+    setOnlyWithReplays(false);
   };
 
   const totalReplays = useMemo(() => {
@@ -358,13 +343,25 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
       <View style={styles.statsRibbon}>
         <View style={[styles.statBox, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
           <Text style={styles.statNum}>{totalReplays}</Text>
-          <Text style={styles.statLabel}>Jami Replaylar</Text>
+          <Text style={styles.statLabel}>Yuklangan replaylar</Text>
         </View>
         <View style={[styles.statBox, styles.statBoxActive]}>
           <Text style={[styles.statNum, { color: '#10b981' }]}>{matchesWithReplays}</Text>
           <Text style={styles.statLabel}>Replayli O'yinlar</Text>
         </View>
       </View>
+
+      {Platform.OS !== 'web' && orgId !== null && (
+        <TouchableOpacity accessibilityRole="button" onPress={() => setHighlightOpen(true)}
+          style={styles.highlightEntry}>
+          <Ionicons name="film-outline" size={21} color="#9af4cf" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.highlightTitle}>Top 5 / Top 10 gollar</Text>
+            <Text style={styles.highlightSub}>{clips.length ? `${clips.length} ta gol tanlandi` : "Kliplarni tanlang va highlight yarating"}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#9af4cf" />
+        </TouchableOpacity>
+      )}
 
       {/* Collapsible Filters Card */}
       {isFilterOpen && (
@@ -474,6 +471,13 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
             O'yinlar yuklanmoqda...
           </Text>
         </View>
+      ) : list.isError && !list.data ? (
+        <View style={styles.loadingBox}>
+          <Text style={[styles.loadingText, { color: colors.textPrimary }]}>O'yinlarni yuklab bo'lmadi.</Text>
+          <TouchableOpacity style={[styles.btnDownload, { flex: 0, marginTop: 12, paddingHorizontal: 16 }]} onPress={handleRefresh}>
+            <Text style={styles.btnDownloadText}>Qayta urinish</Text>
+          </TouchableOpacity>
+        </View>
       ) : filteredMatches.length === 0 ? (
         <View style={styles.emptyBox}>
           <Ionicons name="videocam-off-outline" size={48} color="#94a3b8" />
@@ -492,11 +496,21 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#10b981" />
           }
           contentContainerStyle={styles.listContent}
-          initialNumToRender={8}
+          initialNumToRender={5}
+          onEndReachedThreshold={0.25}
+          onEndReached={() => {
+            if (list.hasNextPage && !list.isFetching && !list.isFetchNextPageError) {
+              void list.fetchNextPage({ cancelRefetch: false });
+            }
+          }}
+          ListFooterComponent={list.isFetchingNextPage ? <ActivityIndicator color="#10b981" /> :
+            list.hasNextPage ? <TouchableOpacity style={styles.btnDownload} onPress={() => void list.fetchNextPage({ cancelRefetch: false })}>
+              <Text style={styles.btnDownloadText}>{list.isFetchNextPageError ? 'Qayta urinish' : "Yana 5 ta o'yin"}</Text>
+            </TouchableOpacity> : undefined}
           renderItem={({ item }) => {
             const replaysCount = matchReplaysCount.get(item.id) || 0;
-            const homeTeam = teamsMap.get(item.home_team_id || '');
-            const awayTeam = teamsMap.get(item.away_team_id || '');
+            const homeTeam = teamsMap.get(String(item.home_team_id));
+            const awayTeam = teamsMap.get(String(item.away_team_id));
             const isLive = item.status === 'live' || item.status === 'first_half' || item.status === 'second_half';
 
             return (
@@ -523,7 +537,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                         <Text style={styles.badgeLeagueText}>{item.league || 'Liga'}</Text>
                       </View>
                     )}
-                    {item.round && (
+                    {item.round != null && item.round !== '' && (
                       <View style={styles.badgeRound}>
                         <Text style={styles.badgeRoundText}>
                           {getStageDisplayTitle(item.stage, item.round)}
@@ -610,12 +624,13 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
       )}
 
       {/* Match Replays Detail Modal */}
-      <Modal visible={Boolean(selectedMatch)} animationType="slide" transparent={false}>
-        <View style={[styles.modalContainer, { backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}>
+      <Modal visible={Boolean(selectedMatch)} animationType="slide" onRequestClose={closeMatch}>
+        <SafeAreaProvider>
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}>
           {/* Modal Header */}
           <View style={[styles.modalHeader, { borderBottomColor: isDark ? '#1e293b' : '#e2e8f0' }]}>
-            <TouchableOpacity style={styles.btnModalClose} onPress={() => setSelectedMatch(null)}>
-              <Ionicons name="close" size={24} color={isDark ? '#fff' : '#0f172a'} />
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ortga" style={styles.btnModalClose} onPress={closeMatch}>
+              <Ionicons name="arrow-back" size={24} color={isDark ? '#fff' : '#0f172a'} />
             </TouchableOpacity>
             <View style={styles.modalHeaderCenter}>
               <Text style={[styles.modalTitle, { color: isDark ? '#fff' : '#0f172a' }]}>
@@ -639,9 +654,9 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                 end={{ x: 1, y: 1 }}
               >
                 <View style={styles.scoreCardSide}>
-                  {teamsMap.get(selectedMatch.home_team_id || '')?.logo_url ? (
+                  {teamsMap.get(String(selectedMatch.home_team_id))?.logo_url ? (
                     <ExpoImage
-                      source={{ uri: teamsMap.get(selectedMatch.home_team_id || '')?.logo_url }}
+                      source={{ uri: teamsMap.get(String(selectedMatch.home_team_id))?.logo_url ?? undefined }}
                       style={styles.scoreCardLogo}
                       contentFit="contain"
                     />
@@ -649,7 +664,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                     <Text style={{ fontSize: 24 }}>⚽</Text>
                   )}
                   <Text style={styles.scoreCardTeamName}>
-                    {teamsMap.get(selectedMatch.home_team_id || '')?.name || 'Home'}
+                    {teamsMap.get(String(selectedMatch.home_team_id))?.name || 'Home'}
                   </Text>
                 </View>
 
@@ -663,9 +678,9 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                 </View>
 
                 <View style={styles.scoreCardSide}>
-                  {teamsMap.get(selectedMatch.away_team_id || '')?.logo_url ? (
+                  {teamsMap.get(String(selectedMatch.away_team_id))?.logo_url ? (
                     <ExpoImage
-                      source={{ uri: teamsMap.get(selectedMatch.away_team_id || '')?.logo_url }}
+                      source={{ uri: teamsMap.get(String(selectedMatch.away_team_id))?.logo_url ?? undefined }}
                       style={styles.scoreCardLogo}
                       contentFit="contain"
                     />
@@ -673,7 +688,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                     <Text style={{ fontSize: 24 }}>⚽</Text>
                   )}
                   <Text style={styles.scoreCardTeamName}>
-                    {teamsMap.get(selectedMatch.away_team_id || '')?.name || 'Away'}
+                    {teamsMap.get(String(selectedMatch.away_team_id))?.name || 'Away'}
                   </Text>
                 </View>
               </LinearGradient>
@@ -694,6 +709,13 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                   Replaylar yuklanmoqda...
                 </Text>
               </View>
+            ) : eventsError ? (
+              <View style={styles.emptyBox}>
+                <Text style={[styles.loadingText, { color: colors.textPrimary }]}>Replaylarni yuklab bo'lmadi.</Text>
+                <TouchableOpacity onPress={() => selectedMatch && void handleSelectMatch(selectedMatch)}>
+                  <Text style={styles.openDetailsText}>Qayta urinish</Text>
+                </TouchableOpacity>
+              </View>
             ) : matchEvents.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Ionicons name="film-outline" size={44} color="#94a3b8" />
@@ -705,7 +727,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                 </Text>
               </View>
             ) : (
-              matchEvents.map((ev, idx) => {
+              matchEvents.map((ev) => {
                 const hasVideo = Boolean(ev.replay_video_url);
                 const player = ev.player;
                 const team = ev.team;
@@ -721,11 +743,13 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                   >
                     {/* Video Preview Box (Lazy action) */}
                     <View style={styles.videoPreviewBox}>
-                      {hasVideo ? (
+                      {playingId === ev.id && ev.replay_video_url ? (
+                        <ReplayPlayback key={ev.id} uri={ev.replay_video_url} onClose={() => setPlayingId(null)} />
+                      ) : hasVideo ? (
                         <TouchableOpacity
                           style={styles.videoPlayOverlay}
                           activeOpacity={0.8}
-                          onPress={() => handleWatchVideo(ev.replay_video_url)}
+                          onPress={() => setPlayingId(ev.id)}
                         >
                           <LinearGradient
                             colors={['rgba(15,23,42,0.6)', '#0f172a']}
@@ -734,7 +758,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                             <View style={styles.playIconCircle}>
                               <Ionicons name="play" size={28} color="#fff" />
                             </View>
-                            <Text style={styles.playVideoHint}>Videoni ko'rish (Play)</Text>
+                            <Text style={styles.playVideoHint}>Videoni ko'rish</Text>
                           </LinearGradient>
                         </TouchableOpacity>
                       ) : (
@@ -762,9 +786,9 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                           <View style={styles.authorNameRow}>
                             <Text style={[styles.authorName, { color: isDark ? '#fff' : '#0f172a' }]}>
                               {player ? `${player.first_name} ${player.last_name}` : 'Muallifsiz gol'}
-                              {player?.player_number ? ` #${player.player_number}` : ''}
+                              {player?.player_number != null ? ` #${player.player_number}` : ''}
                             </Text>
-                            {ev.minute && (
+                            {ev.minute != null && (
                               <View style={styles.minuteTag}>
                                 <Text style={styles.minuteTagText}>{ev.minute}'</Text>
                               </View>
@@ -784,14 +808,16 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                         </View>
                       </View>
 
-                      {/* Assist info */}
-                      {ev.assist_player && (
-                        <View style={styles.assistRow}>
-                          <Text style={styles.assistLabel}>👟 Assist: </Text>
-                          <Text style={styles.assistName}>
-                            {ev.assist_player.first_name} {ev.assist_player.last_name}
+                      {hasVideo && Platform.OS !== 'web' && ['goal', 'penalty_goal', 'own_goal'].includes(ev.event_type) && (
+                        <TouchableOpacity accessibilityRole="checkbox"
+                          accessibilityState={{ checked: clips.some(clip => clip.id === ev.id) }}
+                          style={styles.highlightPick} onPress={() => toggleClip(ev)}>
+                          <Ionicons name={clips.some(clip => clip.id === ev.id) ? 'checkmark-circle' : 'add-circle-outline'}
+                            size={20} color={isDark ? '#89f5c8' : '#087c58'} />
+                          <Text style={{ color: isDark ? '#89f5c8' : '#087c58', fontWeight: '800' }}>
+                            {clips.some(clip => clip.id === ev.id) ? "Montaj uchun tanlandi" : `Top ${highlightSize} uchun tanlash`}
                           </Text>
-                        </View>
+                        </TouchableOpacity>
                       )}
 
                       {/* Actions: Download / Share Video */}
@@ -799,8 +825,8 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                         <View style={styles.actionButtonsRow}>
                           <TouchableOpacity
                             style={[styles.btnDownload, isDownloading && { opacity: 0.7 }]}
-                            onPress={() => handleDownloadAndShare(ev, selectedMatch)}
-                            disabled={isDownloading}
+                            onPress={() => handleSaveReplay(ev)}
+                            disabled={downloadingEventId !== null}
                           >
                             {isDownloading ? (
                               <ActivityIndicator size="small" color="#fff" />
@@ -808,16 +834,10 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                               <Ionicons name="download-outline" size={18} color="#fff" />
                             )}
                             <Text style={styles.btnDownloadText}>
-                              {isDownloading ? 'Yuklanmoqda...' : 'Yuklab olish (Montaj uchun)'}
+                              {isDownloading ? 'Yuklanmoqda...' : 'Galereyaga saqlash'}
                             </Text>
                           </TouchableOpacity>
 
-                          <TouchableOpacity
-                            style={styles.btnWatchBrowser}
-                            onPress={() => handleWatchVideo(ev.replay_video_url)}
-                          >
-                            <Ionicons name="open-outline" size={18} color="#10b981" />
-                          </TouchableOpacity>
                         </View>
                       )}
                     </View>
@@ -826,11 +846,31 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
               })
             )}
           </ScrollView>
-        </View>
+        </SafeAreaView>
+        </SafeAreaProvider>
+      </Modal>
+
+      <Modal visible={highlightOpen} animationType="slide" onRequestClose={() => setHighlightOpen(false)}>
+        <SafeAreaProvider>
+          <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}>
+            <ScrollView contentContainerStyle={styles.modalScrollContent}>
+              {highlightOpen && orgId !== null && <HighlightEditor organizationId={orgId} clips={clips} size={highlightSize}
+                dark={isDark} onSize={setHighlightSize} onClose={() => setHighlightOpen(false)}
+                onRemove={id => setClips(items => items.filter(item => item.id !== id))}
+                onMove={(index, delta) => setClips(items => {
+                  const next = index + delta;
+                  if (next < 0 || next >= items.length) return items;
+                  const ordered = [...items];
+                  [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+                  return ordered;
+                })} />}
+            </ScrollView>
+          </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
 
       {/* Select Picker Modal (Type, League, Tournament, Round) */}
-      <Modal visible={pickerModalType !== 'none'} transparent animationType="fade">
+      <Modal visible={pickerModalType !== 'none'} transparent animationType="fade" onRequestClose={() => setPickerModalType('none')}>
         <TouchableOpacity
           style={styles.modalBackdrop}
           activeOpacity={1}
@@ -873,6 +913,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                     style={styles.pickerOptionItem}
                     onPress={() => {
                       setFilterType('league');
+                      setSelectedRound('all');
                       setSelectedTournament('all');
                       setPickerModalType('none');
                     }}
@@ -885,6 +926,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                     style={styles.pickerOptionItem}
                     onPress={() => {
                       setFilterType('tournament');
+                      setSelectedRound('all');
                       setSelectedLeague('all');
                       setPickerModalType('none');
                     }}
@@ -916,6 +958,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                       style={styles.pickerOptionItem}
                       onPress={() => {
                         setSelectedLeague(l.name);
+                        setSelectedRound('all');
                         setPickerModalType('none');
                       }}
                     >
@@ -949,6 +992,7 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
                       style={styles.pickerOptionItem}
                       onPress={() => {
                         setSelectedTournament(String(t.id));
+                        setSelectedRound('all');
                         setPickerModalType('none');
                       }}
                     >
@@ -1004,6 +1048,12 @@ export function ReplaysScreen({ onBack }: { onBack?: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  highlightEntry: { marginHorizontal: 16, marginBottom: 12, padding: 13, borderRadius: 14, gap: 10,
+    backgroundColor: '#123c34', flexDirection: 'row', alignItems: 'center' },
+  highlightTitle: { color: '#f1fff7', fontSize: 14, fontWeight: '900' },
+  highlightSub: { color: '#b1ddcd', fontSize: 12, marginTop: 3 },
+  highlightPick: { minHeight: 44, borderRadius: 8, backgroundColor: '#10b98119', flexDirection: 'row',
+    alignItems: 'center', paddingHorizontal: 10, gap: 7 },
   container: {
     flex: 1,
   },
