@@ -17,7 +17,9 @@
       "bundleIdentifier": "com.amatora.admin",
       "infoPlist": {
         "NSFaceIDUsageDescription": "AMATORA Admin ilovasiga kirish uchun Face ID dan foydalaniladi."
-      }
+      },
+      "appleTeamId": "D23K2SGGHR",
+      "runtimeVersion": "1.0.0-ios-store"
     },
     "android": {
       "package": "com.amatora.admin",
