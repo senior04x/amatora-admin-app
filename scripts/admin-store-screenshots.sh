@@ -48,7 +48,7 @@ function AppContent() {
       <Image source={require('./assets/bg-img.png')} style={styles.bgImage} resizeMode="cover" />
       <CaptureBoundary>
     <OrgContext.Provider value={{
-      orgId: -1, currentOrg: { id: -1, name: 'Amatora Demo', brand_colors: ['#00FF66', '#10B981'] },
+      orgId: 999999, currentOrg: { id: 999999, name: 'Amatora Demo', brand_colors: ['#00FF66', '#10B981'] },
       currentUser: { full_name: 'Demo Administrator' }, loading: false, userRole: 'org_admin',
       setUserRole: nothing, setCurrentUser: nothing, updateCurrentUserLocally: nothing,
       refreshCurrentUser: resolved, transferWindowOpen: false, setTransferWindowOpen: nothing,
@@ -74,7 +74,12 @@ org.write_text(code.replace('const OrgContext = createContext', 'export const Or
 client = Path('src/supabaseClient.ts')
 code = client.read_text()
 assert 'https://xzzyhfyazwohdqqbjiiy.supabase.co' in code
-client.write_text(code.replace('https://xzzyhfyazwohdqqbjiiy.supabase.co', 'https://amatora-demo.invalid', 1))
+code = code.replace('https://xzzyhfyazwohdqqbjiiy.supabase.co', 'https://amatora-demo.invalid', 1)
+code = code.replace('  auth: {', """  global: { fetch: async () => new Response('[]', {
+    status: 200, headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/0' },
+  }) },
+  auth: {""", 1)
+client.write_text(code)
 PY
 
 xcrun simctl list runtimes -j > "$RUNNER_TEMP/runtimes.json"
