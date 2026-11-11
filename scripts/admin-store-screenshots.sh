@@ -48,7 +48,7 @@ function AppContent() {
       <Image source={require('./assets/bg-img.png')} style={styles.bgImage} resizeMode="cover" />
       <CaptureBoundary>
     <OrgContext.Provider value={{
-      orgId: null, currentOrg: { id: 0, name: 'Amatora Demo', brand_colors: ['#00FF66', '#10B981'] },
+      orgId: -1, currentOrg: { id: -1, name: 'Amatora Demo', brand_colors: ['#00FF66', '#10B981'] },
       currentUser: { full_name: 'Demo Administrator' }, loading: false, userRole: 'org_admin',
       setUserRole: nothing, setCurrentUser: nothing, updateCurrentUserLocally: nothing,
       refreshCurrentUser: resolved, transferWindowOpen: false, setTransferWindowOpen: nothing,
@@ -105,6 +105,7 @@ xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release \
   > "$OUT/native-build.log" 2>&1 || { tail -n 90 "$OUT/native-build.log"; exit 1; }
 app="$(find "$RUNNER_TEMP/admin-derived/Build/Products/Release-iphonesimulator" -maxdepth 1 -name '*.app' -print -quit)"
 test -n "$app"
+tar -czf "$OUT/admin-simulator-app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
 while IFS=$'\t' read -r label device runtime; do
   echo "Booting $label"
   sim="$(xcrun simctl create "Admin-$label" "$device" "$runtime")"
