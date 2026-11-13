@@ -524,7 +524,9 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
     >
       {(orgId && currentOrg) || loading ? (
         <View style={styles.startupContent} pointerEvents={orgId && currentOrg ? 'auto' : 'none'}
-          accessibilityState={{ busy: !orgId || !currentOrg }}>
+          accessibilityState={{ busy: !orgId || !currentOrg }}
+          accessibilityElementsHidden={!orgId || !currentOrg}
+          importantForAccessibility={orgId && currentOrg ? 'auto' : 'no-hide-descendants'}>
           {children}
         </View>
       ) : (

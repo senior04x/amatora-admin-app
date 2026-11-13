@@ -534,23 +534,32 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const loggedIn = !!session;
-      setIsLoggedIn(loggedIn);
-      if (loggedIn) {
-        checkPinStatus(false);
-      } else {
-        setAuthLoading(false);
+    let sessionCheckActive = true;
+    const restoreSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (!sessionCheckActive) return;
+        if (error) throw error;
+        setIsLoggedIn(Boolean(session));
+        if (session) {
+          await checkPinStatus(false);
+          return;
+        }
+      } catch {
+        if (!sessionCheckActive) return;
+        setIsLoggedIn(false);
       }
-    });
+      setAuthLoading(false);
+    };
+    void restoreSession();
 
-    // Listen for auth changes (logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(event => {
+      if (event === 'SIGNED_OUT') {
+        sessionCheckActive = false;
         appQueryClient.clear();
         setIsLoggedIn(false);
         setPinState('checking');
+        setAuthLoading(false);
       }
     });
 
@@ -563,6 +572,7 @@ function AppContent() {
     });
 
     return () => {
+      sessionCheckActive = false;
       subscription.unsubscribe();
       resetListener.remove();
       editListener.remove();
