@@ -1,3 +1,4 @@
+import { confirmDestructiveAction, showActionMessage } from '../utils/actionConfirmation';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity, DeviceEventEmitter, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -128,32 +129,26 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onGoBack }) => {
   };
 
   const handleResetPin = () => {
-    Alert.alert(
+    confirmDestructiveAction(
       'PIN kodni o\'chirish',
       'Rostdan ham joriy PIN kodni o\'chirib tashlamoqchimisiz?',
-      [
-        { text: 'Bekor qilish', style: 'cancel' },
-        {
-          text: 'O\'chirish',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Delete securely on device
-              await deleteSecurePin();
-              await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
-              setHasPin(false);
-              setBiometricsEnabled(false);
-              DeviceEventEmitter.emit('app_pin_changed');
-              DeviceEventEmitter.emit('app_pin_reset');
+      'O\'chirish',
+      async () => {
+      try {
+        // Delete securely on device
+        await deleteSecurePin();
+        await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+        setHasPin(false);
+        setBiometricsEnabled(false);
+        DeviceEventEmitter.emit('app_pin_changed');
+        DeviceEventEmitter.emit('app_pin_reset');
 
-              Alert.alert('Muvaffaqiyatli', 'PIN kod o\'chirildi');
-            } catch (e) {
-              console.error('Error deleting pin:', e);
-              Alert.alert('Xatolik', 'PIN kodni o\'chirishda xatolik yuz berdi.');
-            }
-          }
-        }
-      ]
+        showActionMessage('Muvaffaqiyatli', 'PIN kod o\'chirildi');
+      } catch (e) {
+        console.error('Error deleting pin:', e);
+        showActionMessage('Xatolik', 'PIN kodni o\'chirishda xatolik yuz berdi.');
+      }
+      },
     );
   };
 

@@ -1,3 +1,4 @@
+import { confirmDestructiveAction, showActionMessage } from '../utils/actionConfirmation';
 import { submitAdminAccountDeletion } from '../api/adminAccountDeletion';
 import { manageMatchOrganizer } from '../api/matchOrganizers';
 import { requireOrganizationId } from '../utils/organizationId';
@@ -625,30 +626,24 @@ export const AccountScreen: React.FC<{
   const deletionInFlight = React.useRef(false);
 
   const requestAccountDeletion = () => {
-    Alert.alert(
+    confirmDestructiveAction(
       'Hisobni o‘chirish',
       'So‘rov hisobingiz va unga bog‘liq shaxsiy ma’lumotlarni o‘chirish uchun yuboriladi. Agar tashkilotning yagona egasi bo‘lsangiz, boshqaruv boshqa vakilga topshirilishi kerak bo‘lishi mumkin.',
-      [
-        { text: 'Bekor qilish', style: 'cancel' },
-        {
-          text: 'So‘rov yuborish',
-          style: 'destructive',
-          onPress: async () => {
-            if (deletionInFlight.current) return;
-            deletionInFlight.current = true;
-            setDeletionPending(true);
-            try {
-              const requestId = await submitAdminAccountDeletion(supabase);
-              Alert.alert('So‘rov qabul qilindi', 'So‘rov raqami: ' + requestId);
-            } catch {
-              Alert.alert('So‘rov yuborilmadi', 'Keyinroq qayta urinib ko‘ring.');
-            } finally {
-              deletionInFlight.current = false;
-              setDeletionPending(false);
-            }
-          },
-        },
-      ],
+      'So‘rov yuborish',
+      async () => {
+      if (deletionInFlight.current) return;
+      deletionInFlight.current = true;
+      setDeletionPending(true);
+      try {
+        const requestId = await submitAdminAccountDeletion(supabase);
+        showActionMessage('So‘rov qabul qilindi', 'So‘rov raqami: ' + requestId);
+      } catch {
+        showActionMessage('So‘rov yuborilmadi', 'Keyinroq qayta urinib ko‘ring.');
+      } finally {
+        deletionInFlight.current = false;
+        setDeletionPending(false);
+      }
+      },
     );
   };
 

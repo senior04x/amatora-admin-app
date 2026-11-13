@@ -1,3 +1,4 @@
+import { confirmDestructiveAction } from '../utils/actionConfirmation';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -108,33 +109,27 @@ export const PinScreen: React.FC<PinScreenProps> = ({ onSuccess, onReset, action
   };
 
   const handleForgotOrResetPin = () => {
-    Alert.alert(
+    confirmDestructiveAction(
       "PIN kodni o'chirish",
       "Qurilmadagi PIN kod o'chiriladi va Login sahifasiga qaytasiz. Davom etasizmi?",
-      [
-        { text: 'Bekor qilish', style: 'cancel' },
-        {
-          text: "O'chirish va Tizimdan chiqish",
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteSecurePin();
-              await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
-              await AsyncStorage.removeItem('@amatora_pin_skipped');
-              DeviceEventEmitter.emit('app_pin_changed');
-              DeviceEventEmitter.emit('app_pin_reset');
+      "O'chirish va Tizimdan chiqish",
+      async () => {
+      try {
+        await deleteSecurePin();
+        await AsyncStorage.setItem('@amatora_biometrics_enabled', 'false');
+        await AsyncStorage.removeItem('@amatora_pin_skipped');
+        DeviceEventEmitter.emit('app_pin_changed');
+        DeviceEventEmitter.emit('app_pin_reset');
 
-              await supabase.auth.signOut().catch(() => {});
+        await supabase.auth.signOut().catch(() => {});
 
-              if (onReset) {
-                onReset();
-              }
-            } catch (e) {
-              console.log('Error deleting pin:', e);
-            }
-          },
-        },
-      ]
+        if (onReset) {
+          onReset();
+        }
+      } catch (e) {
+        console.log('Error deleting pin:', e);
+      }
+      },
     );
   };
 
