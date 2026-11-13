@@ -1005,10 +1005,42 @@ export const DashboardScreen: React.FC<Props> = ({
           </Text>
 
           {matchesLoading ? (
-            <View style={{ gap: 14 }}>
-              <SkeletonLoader width={340} height={180} />
-              <SkeletonLoader width={340} height={180} />
-            </View>
+            [0, 1].map(index => {
+              const block = { backgroundColor: colors.bgCardElevated };
+              const team = (
+                <View style={styles.teamCol}>
+                  <View style={[styles.teamLogo, block]} />
+                  <View style={[styles.teamName, block, { width: '70%', borderRadius: 6 }]} />
+                </View>
+              );
+              return (
+                <View key={index} style={[styles.matchCard, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
+                  accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <View style={styles.cardTopRow}>
+                    <View style={[block, { width: '44%', height: 14, borderRadius: 6 }]} />
+                    <View style={[styles.fieldTag, block]}>
+                      <View style={{ width: 58, height: 14 }} />
+                    </View>
+                  </View>
+                  <View style={styles.teamsSection}>
+                    {team}
+                    <View style={styles.scoreContainer}>
+                      <View style={[styles.vsBadge, block, { borderColor: colors.border }]}>
+                        <View style={{ width: 20, height: 16 }} />
+                      </View>
+                      <View style={[block, { width: 34, height: 14, borderRadius: 5 }]} />
+                    </View>
+                    {team}
+                  </View>
+                  <View style={[styles.countdownBar, block]}>
+                    <View style={{ height: 15 }} />
+                  </View>
+                  <View style={[styles.centralManageBtn, block, styles.skeletonManageButton]}>
+                    <View style={{ height: 18 }} />
+                  </View>
+                </View>
+              );
+            })
           ) : userMatches.length > 0 ? (
             userMatches.map((item: any, idx: number) => {
               const isCentral = item.importance === 'markaziy';
@@ -1335,6 +1367,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#263044',
   },
   teamName: {
+    minHeight: 32,
+    lineHeight: 16,
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
@@ -1418,6 +1452,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
+  skeletonManageButton: { shadowOpacity: 0, elevation: 0 },
   centralManageBtnText: {
     color: '#000000',
     fontSize: 13.5,
