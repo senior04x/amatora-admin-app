@@ -620,6 +620,34 @@ export const AccountScreen: React.FC<{
   };
 
   // Handle Logout
+  const [deletionPending, setDeletionPending] = useState(false);
+
+  const requestAccountDeletion = () => {
+    Alert.alert(
+      'Hisobni o‘chirish',
+      'So‘rov hisobingiz va unga bog‘liq shaxsiy ma’lumotlarni o‘chirish uchun yuboriladi. Agar tashkilotning yagona egasi bo‘lsangiz, boshqaruv boshqa vakilga topshirilishi kerak bo‘lishi mumkin.',
+      [
+        { text: 'Bekor qilish', style: 'cancel' },
+        {
+          text: 'So‘rov yuborish',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletionPending(true);
+            try {
+              const { data, error } = await supabase.rpc('request_admin_account_deletion');
+              if (error || typeof data !== 'string' || !data) throw new Error('Request failed');
+              Alert.alert('So‘rov qabul qilindi', 'So‘rov raqami: ' + data);
+            } catch {
+              Alert.alert('So‘rov yuborilmadi', 'Keyinroq qayta urinib ko‘ring.');
+            } finally {
+              setDeletionPending(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const handleLogout = () => {
     setShowLogoutModal(true);
   };
@@ -1232,6 +1260,20 @@ export const AccountScreen: React.FC<{
           </View>
           <Text style={[styles.menuLinkText, { flex: 1, color: colors.textPrimary }]}>Maxfiylik siyosati</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.menuLinkRow, { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: deletionPending, busy: deletionPending }}
+          disabled={deletionPending}
+          onPress={requestAccountDeletion}
+        >
+          <View style={[styles.menuIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+          </View>
+          <Text style={[styles.menuLinkText, { flex: 1, color: colors.textPrimary }]}>Hisobni o‘chirish</Text>
+          {deletionPending && <ActivityIndicator size="small" color={colors.textMuted} />}
         </TouchableOpacity>
 
         <TouchableOpacity
