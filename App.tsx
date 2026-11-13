@@ -8,6 +8,7 @@ if ((globalThis as any).ErrorUtils) {
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid, ScrollView } from 'react-native';
+import type { NativeScrollEvent } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import { Image as ExpoImage } from 'expo-image';
@@ -104,6 +105,8 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const dockPager = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const dockScrollX = useRef(new Animated.Value(0)).current;
+  const [dockWidth, setDockWidth] = useState(0);
   const settledPageIndex = useRef(-1);
   const settledPageWidth = useRef(0);
   const webScrollEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,8 +121,10 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     if (settledPageIndex.current === pageIndex && settledPageWidth.current === pageWidth) return;
     settledPageIndex.current = pageIndex;
     settledPageWidth.current = pageWidth;
-    dockPager.current?.scrollTo({ x: pageIndex * pageWidth, animated: false });
-  }, [pageIndex, pageWidth, matchNavTab]);
+    const offset = pageIndex * pageWidth;
+    dockScrollX.setValue(offset);
+    dockPager.current?.scrollTo({ x: offset, animated: false });
+  }, [pageIndex, pageWidth, matchNavTab, dockScrollX]);
 
   useEffect(() => () => {
     if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
@@ -339,7 +344,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       />
 
       <View style={styles.screenContainer} onLayout={event => setPageWidth(event.nativeEvent.layout.width)}>
-        <ScrollView
+        <Animated.ScrollView
           ref={dockPager}
           horizontal
           pagingEnabled
@@ -360,12 +365,15 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             const { contentOffset, velocity } = event.nativeEvent;
             if (velocity?.x === 0) finishDockScroll(contentOffset.x);
           }}
-          scrollEventThrottle={Platform.OS === 'web' ? 16 : undefined}
-          onScroll={Platform.OS === 'web' ? event => {
-            const offset = event.nativeEvent.contentOffset.x;
-            if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
-            webScrollEnd.current = setTimeout(() => finishDockScroll(offset), 110);
-          } : undefined}
+          scrollEventThrottle={16}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: dockScrollX } } }], {
+            useNativeDriver: Platform.OS !== 'web',
+            listener: Platform.OS === 'web' ? event => {
+              const offset = (event.nativeEvent as NativeScrollEvent).contentOffset.x;
+              if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
+              webScrollEnd.current = setTimeout(() => finishDockScroll(offset), 110);
+            } : undefined,
+          })}
         >
           {renderDockPage('dashboard', (
             <DashboardScreen
@@ -381,7 +389,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             : canCreateMatch ? <CreateMatchScreen onSuccess={() => handleNavigate('matches')} /> : null, matchNavTab === 'matches')}
           {renderDockPage('standings', <StandingsScreen />)}
           {renderDockPage('account', <AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} />)}
-        </ScrollView>
+        </Animated.ScrollView>
         <LazyScreen isActive={activeTab === 'export'}><ExportScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'applications'}><ApplicationsScreen initialTab={playersSubTab} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'transfers'}><TransfersScreen /></LazyScreen>
@@ -436,6 +444,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         ]}
       >
         <View
+          onLayout={event => setDockWidth(event.nativeEvent.layout.width)}
           style={[
             styles.navDock,
             Platform.OS === 'android' && {
@@ -465,6 +474,26 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             />
           )}
           
+          {pageIndex >= 0 && dockWidth > 0 && pageWidth > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.dockIndicator, {
+                backgroundColor: colors.navDockActiveDot,
+                shadowColor: colors.navDockActiveDot,
+                transform: [{
+                  translateX: dockScrollX.interpolate({
+                    inputRange: dockPages.map((_, index) => index * pageWidth),
+                    outputRange: dockPages.map((_, index) => {
+                      const itemWidth = (dockWidth - (dockPages.length - 1)) / dockPages.length;
+                      return itemWidth / 2 - 5 + index * (itemWidth + 1);
+                    }),
+                    extrapolate: 'clamp',
+                  }),
+                }],
+              }]}
+            />
+          )}
+
           {/* Segment 1: Dashboard (Home Outline) */}
           <TouchableOpacity
             style={styles.segmentItem}
@@ -477,7 +506,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               color={activeTab === 'dashboard' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
               style={activeTab === 'dashboard' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'dashboard' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+            <View style={styles.activeDot} />
           </TouchableOpacity>
 
           <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
@@ -497,7 +526,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               color={activeTab === 'players' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
               style={activeTab === 'players' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'players' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+            <View style={styles.activeDot} />
           </TouchableOpacity>
 
           <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
@@ -517,7 +546,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               color={activeTab === matchNavTab ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
               style={activeTab === matchNavTab && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === matchNavTab && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+            <View style={styles.activeDot} />
           </TouchableOpacity>
 
           <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
@@ -534,7 +563,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
               color={activeTab === 'standings' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
               style={activeTab === 'standings' && isDark && styles.glowingIcon}
             />
-            <View style={[styles.activeDot, activeTab === 'standings' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+            <View style={styles.activeDot} />
           </TouchableOpacity>
 
           <View style={[styles.segmentDivider, { backgroundColor: colors.border }]} />
@@ -561,7 +590,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
                 style={activeTab === 'account' && isDark && styles.glowingIcon}
               />
             )}
-            <View style={[styles.activeDot, activeTab === 'account' && { backgroundColor: colors.navDockActiveDot, shadowColor: colors.navDockActiveDot }]} />
+            <View style={styles.activeDot} />
           </TouchableOpacity>
         </View>
       </Animated.View>}
@@ -849,12 +878,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     marginTop: 4,
   },
-  activeDotGlow: {
-    backgroundColor: '#FF3B30',
-    shadowColor: '#FF3B30',
+  dockIndicator: {
+    position: 'absolute',
+    left: 0,
+    bottom: Platform.OS === 'android' ? 21 : 18,
+    width: 10,
+    height: 3.5,
+    borderRadius: 2,
+    zIndex: 1,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 5,
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
   },
   badgeCircle: {
     position: 'absolute',
