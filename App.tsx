@@ -7,7 +7,7 @@ if ((globalThis as any).ErrorUtils) {
 }
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid, PanResponder } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid, PanResponder, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import { Image as ExpoImage } from 'expo-image';
@@ -51,8 +51,9 @@ import { DockVisibilityContext } from './src/utils/scrollDock';
 import { hasSecurePin } from './src/utils/securePin';
 import { SafeBlurView as BlurView } from './src/components/SafeBlurView';
 
-const LazyScreen = ({ isActive, children, onDockHiddenChange }: {
+const LazyScreen = ({ isActive, preview = false, children, onDockHiddenChange }: {
   isActive: boolean;
+  preview?: boolean;
   children: React.ReactNode;
   onDockHiddenChange?: (hidden: boolean) => void;
 }) => {
@@ -62,10 +63,10 @@ const LazyScreen = ({ isActive, children, onDockHiddenChange }: {
     if (isActive) setHasRendered(true);
   }, [isActive]);
 
-  if (!isActive && (Platform.OS === 'android' || !hasRendered)) return null;
+  if (!isActive && !preview && (Platform.OS === 'android' || !hasRendered)) return null;
   return (
     <DockVisibilityContext.Provider value={isActive ? onDockHiddenChange ?? null : null}>
-      <View style={{ flex: 1, display: isActive ? 'flex' : 'none' }}>{children}</View>
+      <View style={{ flex: 1, display: isActive || preview ? 'flex' : 'none' }}>{children}</View>
     </DockVisibilityContext.Provider>
   );
 };
@@ -103,21 +104,78 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   };
 
   const slideOffset = useRef(new Animated.Value(0)).current;
+  const settling = useRef(false);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const [pageWidth, setPageWidth] = useState(0);
   const dockPages = ['dashboard', 'players', matchNavTab, 'standings', 'account'] as const;
   const pageIndex = dockPages.findIndex(page => page === activeTab);
+
+  useLayoutEffect(() => {
+    slideOffset.stopAnimation();
+    slideOffset.setValue(0);
+    settling.current = false;
+    setIsSwiping(false);
+  }, [activeTab, pageWidth, matchNavTab, slideOffset]);
+
+  const pageAt = (step: number) => {
+    const page = dockPages[pageIndex + step];
+    return page === 'create-match' && !canCreateMatch ? undefined : page;
+  };
+
+  const settleSwipe = (destination?: typeof dockPages[number], step = 0) => {
+    settling.current = true;
+    Animated.timing(slideOffset, {
+      toValue: destination ? -step * pageWidth : 0,
+      duration: destination ? 240 : 190,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== 'web',
+    }).start(({ finished }) => {
+      if (!finished) return;
+      if (destination) {
+        handleNavigate(destination);
+      } else {
+        settling.current = false;
+        setIsSwiping(false);
+      }
+    });
+  };
+
   const pageSwipe = PanResponder.create({
     onMoveShouldSetPanResponder: (_, { dx, dy }) =>
-      !dockHidden && !isEditingDashboardOrder && Boolean(orgId && currentOrg) && pageIndex >= 0 &&
-      Math.abs(dx) > 22 && Math.abs(dx) > Math.abs(dy) * 2,
-    onPanResponderRelease: (_, { dx }) => {
-      if (Math.abs(dx) < 65) return;
-      const nextPage = dockPages[pageIndex + (dx < 0 ? 1 : -1)];
-      if (!nextPage || (nextPage === 'create-match' && !canCreateMatch)) return;
-      slideOffset.setValue(dx < 0 ? 64 : -64);
-      handleNavigate(nextPage, nextPage === 'players' ? 'players' : undefined);
-      Animated.timing(slideOffset, { toValue: 0, duration: 190, useNativeDriver: Platform.OS !== 'web' }).start();
+      !settling.current && !dockHidden && !isEditingDashboardOrder && Boolean(orgId && currentOrg) &&
+      pageIndex >= 0 && pageWidth > 0 && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 2 &&
+      Boolean(pageAt(dx < 0 ? 1 : -1)),
+    onPanResponderGrant: () => setIsSwiping(true),
+    onPanResponderMove: (_, { dx }) => {
+      const step = dx < 0 ? 1 : -1;
+      slideOffset.setValue(pageAt(step) ? Math.max(-pageWidth, Math.min(pageWidth, dx)) : 0);
     },
+    onPanResponderRelease: (_, { dx, vx }) => {
+      const step = dx < 0 ? 1 : -1;
+      const passedThreshold = Math.abs(dx) >= pageWidth * 0.28 ||
+        (Math.abs(dx) >= 24 && Math.abs(vx) >= 0.55 && Math.sign(vx) === Math.sign(dx));
+      settleSwipe(passedThreshold ? pageAt(step) : undefined, step);
+    },
+    onPanResponderTerminate: () => settleSwipe(),
+    onPanResponderTerminationRequest: () => false,
   });
+
+  const renderDockPage = (page: typeof dockPages[number], children: React.ReactNode, hidesDock = false) => {
+    const isActive = activeTab === page;
+    const offset = dockPages.indexOf(page) - pageIndex;
+    const preview = isSwiping && pageIndex >= 0 && Math.abs(offset) === 1;
+    return (
+      <View key={page} pointerEvents={isActive ? 'auto' : 'none'}
+        accessibilityElementsHidden={!isActive}
+        importantForAccessibility={isActive ? 'auto' : 'no-hide-descendants'}
+        style={[StyleSheet.absoluteFill, { left: offset * pageWidth, right: -offset * pageWidth },
+          !isActive && !preview && { display: 'none' }]}>
+        <LazyScreen isActive={isActive} preview={preview} onDockHiddenChange={hidesDock ? setDockHidden : undefined}>
+          {children}
+        </LazyScreen>
+      </View>
+    );
+  };
 
   const handleGoBack = () => {
     setNavigationHistory(prev => {
@@ -297,37 +355,40 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         onNavigate={handleNavigate}
       />
 
-      <Animated.View {...pageSwipe.panHandlers} style={[styles.screenContainer, { transform: [{ translateX: slideOffset }] }]}>
-        <LazyScreen isActive={activeTab === 'dashboard'} onDockHiddenChange={setDockHidden}>
-          <DashboardScreen
-            onNavigate={handleNavigate}
-            isEditingOrder={isEditingDashboardOrder}
-            setIsEditingOrder={setIsEditingDashboardOrder}
-            onRegisterSaveOrder={(fn) => {
-              saveDashboardOrderRef.current = fn;
-            }}
-          />
-        </LazyScreen>
+      <View {...pageSwipe.panHandlers} style={[styles.screenContainer, { overflow: 'hidden' }]}
+        onLayout={event => setPageWidth(event.nativeEvent.layout.width)}>
+        <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: slideOffset }] }]}>
+          {renderDockPage('dashboard', (
+            <DashboardScreen
+              onNavigate={handleNavigate}
+              isEditingOrder={isEditingDashboardOrder}
+              setIsEditingOrder={setIsEditingDashboardOrder}
+              onRegisterSaveOrder={fn => { saveDashboardOrderRef.current = fn; }}
+            />
+          ), true)}
+          {renderDockPage('players', <PlayersScreen initialSegmentTab={playersSubTab} />)}
+          {renderDockPage('standings', <StandingsScreen />)}
+          {renderDockPage('account', <AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} />)}
+          {renderDockPage(matchNavTab, matchNavTab === 'matches'
+            ? <MatchesScreen />
+            : canCreateMatch ? <CreateMatchScreen onSuccess={() => handleNavigate('matches')} /> : null, matchNavTab === 'matches')}
+        </Animated.View>
         <LazyScreen isActive={activeTab === 'export'}><ExportScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'applications'}><ApplicationsScreen initialTab={playersSubTab} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'players'}><PlayersScreen initialSegmentTab={playersSubTab} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'transfers'}><TransfersScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'updates'}><ProfileUpdatesScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'sponsors'}><SponsorsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'news'}><NewsScreen /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'standings'}><StandingsScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'cards'}><CardsScreen onGoBack={handleGoBack} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'account'}><AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'organizers'}><OrganizersScreen onGoBack={handleGoBack} /></LazyScreen>
-        <LazyScreen isActive={activeTab === 'matches'} onDockHiddenChange={setDockHidden}><MatchesScreen onNavigateToCreate={canCreateMatch ? () => handleNavigate('create-match') : undefined} /></LazyScreen>
+        <LazyScreen isActive={matchNavTab !== 'matches' && activeTab === 'matches'} onDockHiddenChange={setDockHidden}><MatchesScreen onNavigateToCreate={canCreateMatch ? () => handleNavigate('create-match') : undefined} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'finished-matches'} onDockHiddenChange={setDockHidden}><FinishedMatchesScreen onGoBack={handleGoBack} /></LazyScreen>
-        {canCreateMatch && <LazyScreen isActive={activeTab === 'create-match'}><CreateMatchScreen onSuccess={() => handleNavigate('matches')} /></LazyScreen>}
         <LazyScreen isActive={activeTab === 'settings'}><SettingsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'leagues'}><LeaguesScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'tournaments'}><TournamentsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'replays'}><ReplaysScreen onBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={userRole === 'org_admin' && activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={handleGoBack} /></LazyScreen>
-      </Animated.View>
+      </View>
 
       {/* Tactile Navigation Dock */}
       {!dockHidden && <Animated.View
