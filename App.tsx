@@ -146,6 +146,24 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     return () => cancelIdleCallback(task);
   }, [orgId, currentOrg, pageIndex, pageWidth]);
 
+  const dockHighlightOpacity = (index: number) => {
+    if (pageIndex < 0 || pageWidth <= 0) return Number(pageIndex === index);
+    return dockScrollX.interpolate({
+      inputRange: [(index - 1) * pageWidth, index * pageWidth, (index + 1) * pageWidth],
+      outputRange: [0, 1, 0],
+      extrapolate: 'clamp',
+    });
+  };
+
+  const renderDockIcon = (index: number, name: React.ComponentProps<typeof Ionicons>['name'], size = 22) => (
+    <View pointerEvents="none">
+      <Ionicons name={name} size={size} color={colors.textMuted} />
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: dockHighlightOpacity(index) }]}>
+        <Ionicons name={name} size={size} color={isDark ? '#FFFFFF' : colors.textPrimary} />
+      </Animated.View>
+    </View>
+  );
+
   const finishDockScroll = (offset: number) => {
     if (!pageWidth || pageIndex < 0) return;
     const index = Math.round(offset / pageWidth);
@@ -510,12 +528,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             onPress={() => setActiveTab('dashboard')}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name="home-outline"
-              size={22}
-              color={activeTab === 'dashboard' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-              style={activeTab === 'dashboard' && isDark && styles.glowingIcon}
-            />
+            {renderDockIcon(0, 'home-outline')}
             <View style={styles.activeDot} />
           </TouchableOpacity>
 
@@ -530,12 +543,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             }}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name="grid-outline"
-              size={22}
-              color={activeTab === 'players' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-              style={activeTab === 'players' && isDark && styles.glowingIcon}
-            />
+            {renderDockIcon(1, 'grid-outline')}
             <View style={styles.activeDot} />
           </TouchableOpacity>
 
@@ -550,12 +558,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             accessibilityState={{ selected: activeTab === matchNavTab, disabled: !orgId || !currentOrg }}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name={matchNavTab === 'matches' ? 'calendar-outline' : 'add-outline'}
-              size={matchNavTab === 'matches' ? 22 : 28}
-              color={activeTab === matchNavTab ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-              style={activeTab === matchNavTab && isDark && styles.glowingIcon}
-            />
+            {renderDockIcon(2, matchNavTab === 'matches' ? 'calendar-outline' : 'add-outline', matchNavTab === 'matches' ? 22 : 28)}
             <View style={styles.activeDot} />
           </TouchableOpacity>
 
@@ -567,12 +570,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             onPress={() => setActiveTab('standings')}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name="stats-chart-outline"
-              size={22}
-              color={activeTab === 'standings' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-              style={activeTab === 'standings' && isDark && styles.glowingIcon}
-            />
+            {renderDockIcon(3, 'stats-chart-outline')}
             <View style={styles.activeDot} />
           </TouchableOpacity>
 
@@ -585,21 +583,11 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             activeOpacity={0.7}
           >
             {Platform.OS === 'ios' && userRole !== 'user' && currentOrg?.logo_url ? (
-              <Image
-                source={{ uri: currentOrg.logo_url }}
-                style={[
-                  styles.navOrgAvatar,
-                  activeTab === 'account' && styles.activeNavOrgAvatar,
-                ]}
-              />
-            ) : (
-              <Ionicons
-                name="person-outline"
-                size={22}
-                color={activeTab === 'account' ? (isDark ? '#FFFFFF' : colors.textPrimary) : colors.textMuted}
-                style={activeTab === 'account' && isDark && styles.glowingIcon}
-              />
-            )}
+              <View pointerEvents="none">
+                <Image source={{ uri: currentOrg.logo_url }} style={styles.navOrgAvatar} />
+                <Animated.View style={[StyleSheet.absoluteFill, styles.activeNavOrgAvatar, { opacity: dockHighlightOpacity(4) }]} />
+              </View>
+            ) : renderDockIcon(4, 'person-outline')}
             <View style={styles.activeDot} />
           </TouchableOpacity>
         </View>
@@ -875,11 +863,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   activeNavOrgAvatar: {
+    borderRadius: 12,
     borderColor: '#FFFFFF',
     borderWidth: 1.5,
-  },
-  glowingIcon: {
-    opacity: 1,
   },
   activeDot: {
     width: 10,
