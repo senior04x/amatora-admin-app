@@ -19,7 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from '../components/SafeBlurView';
 import { supabase } from '../supabaseClient';
 import { resolveAdminAppAccount } from '../api/matchOrganizers';
-import { logUserLoginWithLocation } from '../utils/locationLogger';
+import { logUserLogin } from '../utils/loginLogger';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -97,7 +97,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           ['@amatora_org_id', String(account.organizationId)],
           ['@amatora_user_email', loginEmail],
         ]);
-        void logUserLoginWithLocation({
+        void logUserLogin({
           organizationId: account.organizationId,
           userEmail: account.profile?.email ?? loginEmail,
           userName: account.name,

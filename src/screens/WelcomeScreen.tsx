@@ -19,7 +19,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
-import { logUserLoginWithLocation } from '../utils/locationLogger';
+import { logUserLogin } from '../utils/loginLogger';
 
 interface WelcomeScreenProps {
   onLoginSuccess: () => void;
@@ -105,7 +105,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onLoginSuccess }) 
           ['@amatora_org_id', String(account.organizationId)],
           ['@amatora_user_email', loginEmail],
         ]);
-        void logUserLoginWithLocation({
+        void logUserLogin({
           organizationId: account.organizationId,
           userEmail: account.profile?.email ?? loginEmail,
           userName: account.name,
