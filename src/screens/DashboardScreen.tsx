@@ -413,7 +413,7 @@ export const DashboardScreen: React.FC<Props> = ({
     data: counts = { players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0, pendingUpdates: 0 },
     isLoading: loading,
     refetch: refetchCounts,
-  } = useDashboardCountsData(orgId);
+  } = useDashboardCountsData(userRole === 'org_admin' ? orgId : null);
 
   const isContentLoading = loading || orgLoading || !orgId;
 
@@ -739,8 +739,7 @@ export const DashboardScreen: React.FC<Props> = ({
     if (!orgId) return;
     setRefreshing(true);
     await Promise.all([
-      refetchCounts(),
-      userRole === 'user' ? refetchMatches() : undefined,
+      userRole === 'user' ? refetchMatches() : refetchCounts(),
     ]);
     setRefreshing(false);
   }, [orgId, userRole, refetchCounts, refetchMatches]);
@@ -850,101 +849,103 @@ export const DashboardScreen: React.FC<Props> = ({
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />}
         {...scrollDockProps}
       >
-      {/* Main Stats Cards (Kutilayotgan Arizalar, Qabul Qilingan O'yinchilar, Jami Ligalar, Qabul Qilingan Jamoalar) */}
-      <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"Umumiy Statistika"}</Text>
-      <View style={styles.statsColumn}>
-        {/* Card 1: Kutilayotgan Arizalar */}
-        {userRole !== 'user' && (
-          <TouchableOpacity
-            style={[
-              styles.mainStatCard,
-              Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
-            ]}
-            activeOpacity={0.8}
-            onPress={() => onNavigate && onNavigate('applications', 'players')}
-          >
-            {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
-            <Ionicons name="document-text-outline" size={28} color={isDark ? "#60A5FA" : colors.accentBlue} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Kutilayotgan Arizalar"}</Text>
-              {isContentLoading ? (
-                <SkeletonLoader width={160} height={24} />
-              ) : (
-                <Text style={[styles.statValue, { color: colors.textPrimary, fontSize: 14.5, fontWeight: '900' }]}>
-                  {`${counts.applications}ta o'yinchi / ${counts.pendingTeams}ta jamoa`}
-                </Text>
-              )}
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
+      {userRole === 'org_admin' && (
+        <>
+          {/* Main Stats Cards (Kutilayotgan Arizalar, Qabul Qilingan O'yinchilar, Jami Ligalar, Qabul Qilingan Jamoalar) */}
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"Umumiy Statistika"}</Text>
+          <View style={styles.statsColumn}>
+            {/* Card 1: Kutilayotgan Arizalar */}
+              <TouchableOpacity
+                style={[
+                  styles.mainStatCard,
+                  Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+                ]}
+                activeOpacity={0.8}
+                onPress={() => onNavigate && onNavigate('applications', 'players')}
+              >
+                {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+                <Ionicons name="document-text-outline" size={28} color={isDark ? "#60A5FA" : colors.accentBlue} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Kutilayotgan Arizalar"}</Text>
+                  {isContentLoading ? (
+                    <SkeletonLoader width={160} height={24} />
+                  ) : (
+                    <Text style={[styles.statValue, { color: colors.textPrimary, fontSize: 14.5, fontWeight: '900' }]}>
+                      {`${counts.applications}ta o'yinchi / ${counts.pendingTeams}ta jamoa`}
+                    </Text>
+                  )}
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
 
-        {/* Card 2: Qabul Qilingan O'yinchilar */}
-        <TouchableOpacity
-          style={[
-            styles.mainStatCard,
-            Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
-          ]}
-          activeOpacity={0.8}
-          onPress={() => onNavigate && onNavigate('players', 'players')}
-        >
-          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
-          <Ionicons name="people-outline" size={28} color={isDark ? "#2DD4BF" : colors.accentGreen} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Qabul Qilingan O'yinchilar"}</Text>
-            {isContentLoading ? (
-              <SkeletonLoader width={70} height={24} />
-            ) : (
-              <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.players} {"ta"}</Text>
-            )}
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-        </TouchableOpacity>
+            {/* Card 2: Qabul Qilingan O'yinchilar */}
+            <TouchableOpacity
+              style={[
+                styles.mainStatCard,
+                Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+              ]}
+              activeOpacity={0.8}
+              onPress={() => onNavigate && onNavigate('players', 'players')}
+            >
+              {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+              <Ionicons name="people-outline" size={28} color={isDark ? "#2DD4BF" : colors.accentGreen} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Qabul Qilingan O'yinchilar"}</Text>
+                {isContentLoading ? (
+                  <SkeletonLoader width={70} height={24} />
+                ) : (
+                  <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.players} {"ta"}</Text>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
 
-        {/* Card 3: Jami Ligalar */}
-        <TouchableOpacity
-          style={[
-            styles.mainStatCard,
-            Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
-          ]}
-          activeOpacity={0.8}
-          onPress={() => onNavigate && onNavigate('leagues')}
-        >
-          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
-          <Ionicons name="trophy-outline" size={28} color={isDark ? "#FBBF24" : colors.accentYellow} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Jami Ligalar"}</Text>
-            {isContentLoading ? (
-              <SkeletonLoader width={70} height={24} />
-            ) : (
-              <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.leagues} {"ta"}</Text>
-            )}
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-        </TouchableOpacity>
+            {/* Card 3: Jami Ligalar */}
+            <TouchableOpacity
+              style={[
+                styles.mainStatCard,
+                Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+              ]}
+              activeOpacity={0.8}
+              onPress={() => onNavigate && onNavigate('leagues')}
+            >
+              {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+              <Ionicons name="trophy-outline" size={28} color={isDark ? "#FBBF24" : colors.accentYellow} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Jami Ligalar"}</Text>
+                {isContentLoading ? (
+                  <SkeletonLoader width={70} height={24} />
+                ) : (
+                  <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.leagues} {"ta"}</Text>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
 
-        {/* Card 4: Qabul Qilingan Jamoalar */}
-        <TouchableOpacity
-          style={[
-            styles.mainStatCard,
-            Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
-          ]}
-          activeOpacity={0.8}
-          onPress={() => onNavigate && onNavigate('players', 'teams')}
-        >
-          {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
-          <Ionicons name="shirt-outline" size={28} color={isDark ? "#4ADE80" : colors.accentGreen} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Qabul Qilingan Jamoalar"}</Text>
-            {isContentLoading ? (
-              <SkeletonLoader width={70} height={24} />
-            ) : (
-              <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.teams} {"ta"}</Text>
-            )}
+            {/* Card 4: Qabul Qilingan Jamoalar */}
+            <TouchableOpacity
+              style={[
+                styles.mainStatCard,
+                Platform.OS === 'android' ? { backgroundColor: colors.bgCard, borderColor: colors.border } : { borderColor: 'rgba(255, 255, 255, 0.18)' },
+              ]}
+              activeOpacity={0.8}
+              onPress={() => onNavigate && onNavigate('players', 'teams')}
+            >
+              {Platform.OS === 'ios' && <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />}
+              <Ionicons name="shirt-outline" size={28} color={isDark ? "#4ADE80" : colors.accentGreen} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.statLabel, { color: colors.textMuted }]}>{"Qabul Qilingan Jamoalar"}</Text>
+                {isContentLoading ? (
+                  <SkeletonLoader width={70} height={24} />
+                ) : (
+                  <Text style={[styles.statValue, { color: colors.textPrimary }]}>{counts.teams} {"ta"}</Text>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-        </TouchableOpacity>
-      </View>
+        </>
+      )}
 
       {/* Admin Menu Grid (Slot-Based Absolute Grid) */}
       <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>{"Admin Menyusi Sahifalari"}</Text>
