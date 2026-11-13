@@ -34,6 +34,7 @@ import {
   canRunMatchTimer, getElapsedMatchSeconds, getRemainingSeconds, getStreamField,
   getPauseSeconds, isRunningTimerSnapshot, serverNowMs, syncServerClock, useMatchTimer,
 } from '../utils/matchTimer';
+import { useMatchTimerNotification } from '../utils/matchTimerNotification';
 import { TIMER_ROW_COLUMNS, writeMatchTimer, writeMatchTimerWithRefresh } from '../api/matchTimer';
 
 interface Props {
@@ -227,6 +228,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const halfDurationMins = halfDurationSecs / 60;
   const matchDurationMins = halfDurationMins * 2;
   const { timerSeconds, isTimerRunning, isClockSynced } = useMatchTimer(match, halfDurationSecs, CLOCK_URL);
+  useMatchTimerNotification(match, halfDurationSecs, timerReady && !isReadOnlyMode, isClockSynced);
   // Hardware Android Back Button Handler (Closes modals first, or navigates back)
   useEffect(() => {
     if (Platform.OS !== 'android') return;
