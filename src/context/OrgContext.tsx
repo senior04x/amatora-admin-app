@@ -1,8 +1,9 @@
 import { parseOrganizationId, requireOrganizationId } from '../utils/organizationId';
 import { loadMatchOrganizerProfile, resolveAdminAppAccount } from '../api/matchOrganizers';
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { AppState, ActivityIndicator, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
+import { AppState, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DashboardStartupSkeleton } from '../components/DashboardStartupSkeleton';
 import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
@@ -151,8 +152,6 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
           email: data.admin_email || data.email || '',
           phone: data.contact_phone || data.phone || '',
         };
-
-        setCurrentOrg(mergedOrg);
 
         setCurrentOrg(mergedOrg);
         if (data.transfer_window_open !== null && data.transfer_window_open !== undefined) {
@@ -524,20 +523,16 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
         refreshNotificationsCount: fetchLiveUnreadCount,
       }}
     >
-      {orgId && currentOrg ? children : (
+      {orgId && currentOrg ? children : loading ? <DashboardStartupSkeleton /> : (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: colors.bgPrimary }}>
-          {loading ? <ActivityIndicator color={colors.textPrimary} size="large" /> : (
-            <>
-              <Text style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '700', textAlign: 'center' }}>Tashkilotingiz aniqlanmadi</Text>
-              <Text style={{ color: colors.textSecondary, textAlign: 'center', marginVertical: 16 }}>Tashkilot ma’lumotlariga kirish to‘xtatildi. Qayta urinib ko‘ring yoki hisobingizga qayta kiring.</Text>
-              <TouchableOpacity accessibilityRole="button" onPress={() => { setLoading(true); fetchOrg(); }} style={{ padding: 16 }}>
-                <Text style={{ color: colors.accentBlue }}>Qayta urinish</Text>
-              </TouchableOpacity>
-              <TouchableOpacity accessibilityRole="button" onPress={onLogout} style={{ padding: 16 }}>
-                <Text style={{ color: colors.textPrimary }}>Hisobdan chiqish</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <Text style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '700', textAlign: 'center' }}>Tashkilotingiz aniqlanmadi</Text>
+          <Text style={{ color: colors.textSecondary, textAlign: 'center', marginVertical: 16 }}>Tashkilot ma’lumotlariga kirish to‘xtatildi. Qayta urinib ko‘ring yoki hisobingizga qayta kiring.</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={() => { setLoading(true); fetchOrg(); }} style={{ padding: 16 }}>
+            <Text style={{ color: colors.accentBlue }}>Qayta urinish</Text>
+          </TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" onPress={onLogout} style={{ padding: 16 }}>
+            <Text style={{ color: colors.textPrimary }}>Hisobdan chiqish</Text>
+          </TouchableOpacity>
         </View>
       )}
 
