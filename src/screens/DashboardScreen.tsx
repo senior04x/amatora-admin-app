@@ -10,7 +10,7 @@ import { supabase } from '../supabaseClient';
 import { Image } from 'react-native';
 import { MatchControlScreen } from './MatchControlScreen';
 import { triggerHapticMedium, triggerHapticSuccess } from '../utils/haptics';
-import { useDashboardCountsData, useMatchesData } from '../api/hooks';
+import { useDashboardCountsData, useOrganizerDashboardMatches } from '../api/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { useScrollDockHandler } from '../utils/scrollDock';
 
@@ -418,36 +418,13 @@ export const DashboardScreen: React.FC<Props> = ({
   const isContentLoading = loading || orgLoading || !orgId;
 
   const {
-    data: matchesList = [],
+    data: userMatches = [],
     isLoading: matchesLoading,
     refetch: refetchMatches,
-  } = useMatchesData(orgId);
+  } = useOrganizerDashboardMatches(orgId, userRole === 'user');
 
   const [activeControlMatchId, setActiveControlMatchId] = useState<string | number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Active sorted matches for user role (computed from shared matches cache)
-  const userMatches = React.useMemo(() => {
-    const activeMatches = (matchesList || []).filter((m: any) => m.status !== 'finished');
-    return [...activeMatches].sort((a: any, b: any) => {
-      const statusOrder: Record<string, number> = {
-        'live': 1,
-        'first_half': 1,
-        'second_half': 1,
-        'half_time': 1,
-        'scheduled': 2,
-        'postponed': 3,
-      };
-      const getOrder = (st?: string) => statusOrder[st || 'scheduled'] || 5;
-      const orderA = getOrder(a.status);
-      const orderB = getOrder(b.status);
-      if (orderA !== orderB) return orderA - orderB;
-
-      const dateA = new Date(`${a.match_date || a.date || '2099-01-01'}T${a.match_time || a.time || '00:00:00'}`).getTime();
-      const dateB = new Date(`${b.match_date || b.date || '2099-01-01'}T${b.match_time || b.time || '00:00:00'}`).getTime();
-      return dateA - dateB;
-    });
-  }, [matchesList]);
 
   const { width: screenWidth } = useWindowDimensions();
   const gridGap = 10;
@@ -763,10 +740,10 @@ export const DashboardScreen: React.FC<Props> = ({
     setRefreshing(true);
     await Promise.all([
       refetchCounts(),
-      refetchMatches(),
+      userRole === 'user' ? refetchMatches() : undefined,
     ]);
     setRefreshing(false);
-  }, [orgId, refetchCounts, refetchMatches]);
+  }, [orgId, userRole, refetchCounts, refetchMatches]);
 
   const getMatchTimeRemainingText = (
     mDate?: string,
@@ -1004,43 +981,11 @@ export const DashboardScreen: React.FC<Props> = ({
             {"O'yinlar Jadvali"}
           </Text>
 
-          {matchesLoading ? (
-            [0, 1].map(index => {
-              const block = { backgroundColor: colors.bgCardElevated };
-              const team = (
-                <View style={styles.teamCol}>
-                  <View style={[styles.teamLogo, block]} />
-                  <View style={[styles.teamName, block, { width: '70%', borderRadius: 6 }]} />
-                </View>
-              );
-              return (
-                <View key={index} style={[styles.matchCard, { borderColor: colors.border, backgroundColor: colors.bgCard }]}
-                  accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                  <View style={styles.cardTopRow}>
-                    <View style={[block, { width: '44%', height: 14, borderRadius: 6 }]} />
-                    <View style={[styles.fieldTag, block]}>
-                      <View style={{ width: 58, height: 14 }} />
-                    </View>
-                  </View>
-                  <View style={styles.teamsSection}>
-                    {team}
-                    <View style={styles.scoreContainer}>
-                      <View style={[styles.vsBadge, block, { borderColor: colors.border }]}>
-                        <View style={{ width: 20, height: 16 }} />
-                      </View>
-                      <View style={[block, { width: 34, height: 14, borderRadius: 5 }]} />
-                    </View>
-                    {team}
-                  </View>
-                  <View style={[styles.countdownBar, block]}>
-                    <View style={{ height: 15 }} />
-                  </View>
-                  <View style={[styles.centralManageBtn, block, styles.skeletonManageButton]}>
-                    <View style={{ height: 18 }} />
-                  </View>
-                </View>
-              );
-            })
+          {!orgId || matchesLoading ? (
+            <View style={{ gap: 14 }}>
+              <SkeletonLoader width={340} height={180} />
+              <SkeletonLoader width={340} height={180} />
+            </View>
           ) : userMatches.length > 0 ? (
             userMatches.map((item: any, idx: number) => {
               const isCentral = item.importance === 'markaziy';
@@ -1367,8 +1312,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#263044',
   },
   teamName: {
-    minHeight: 32,
-    lineHeight: 16,
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',
@@ -1452,7 +1395,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
-  skeletonManageButton: { shadowOpacity: 0, elevation: 0 },
   centralManageBtnText: {
     color: '#000000',
     fontSize: 13.5,

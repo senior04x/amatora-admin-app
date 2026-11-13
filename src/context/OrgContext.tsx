@@ -51,13 +51,13 @@ export const useOrg = () => {
   return ctx;
 };
 
-export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => void }> = ({ children, onLogout }) => {
+export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => void; initialRole: 'org_admin' | 'user' }> = ({ children, onLogout, initialRole }) => {
   const { colors } = useTheme();
   const [orgId, setOrgId] = useState<number | null>(null);
   const [currentOrg, setCurrentOrg] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState<'org_admin' | 'user'>('org_admin');
+  const [userRole, setUserRole] = useState<'org_admin' | 'user'>(initialRole);
   const [transferWindowOpen, setTransferWindowOpen] = useState<boolean>(false);
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(true);
   const [collabLeagueIds, setCollabLeagueIds] = useState<number[]>([]);

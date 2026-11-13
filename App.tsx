@@ -28,6 +28,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { PinScreen } from './src/screens/PinScreen';
 import { supabase } from './src/supabaseClient';
+import { clearMatchControlCache } from './src/screens/MatchControlScreen';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { MatchesScreen } from './src/screens/MatchesScreen';
 import { CreateMatchScreen } from './src/screens/CreateMatchScreen';
@@ -72,7 +73,7 @@ const LazyScreen = ({ isActive, children, onDockHiddenChange }: {
 function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const { currentOrg, orgId, userRole, loading: orgLoading } = useOrg();
   const canCreateMatch = userRole === 'org_admin' && Boolean(orgId) && !orgLoading;
-  const matchNavTab = canCreateMatch ? 'create-match' : 'matches';
+  const matchNavTab = userRole === 'user' ? 'matches' : 'create-match';
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<
@@ -501,6 +502,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 function AppContent() {
   const { isDark } = useTheme();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [initialRole, setInitialRole] = useState<'org_admin' | 'user'>('user');
   const [authLoading, setAuthLoading] = useState(true);
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [pinState, setPinState] = useState<'checking' | 'locked' | 'not_set' | 'unlocked' | 'editing'>('checking');
@@ -554,6 +556,7 @@ function AppContent() {
         const { data: { session }, error } = await supabase.auth.getSession();
         if (!sessionCheckActive) return;
         if (error) throw error;
+        setInitialRole(session?.user.role === 'authenticated' ? 'org_admin' : 'user');
         setIsLoggedIn(Boolean(session));
         if (session) {
           await checkPinStatus(false);
@@ -571,6 +574,9 @@ function AppContent() {
       if (event === 'SIGNED_OUT') {
         sessionCheckActive = false;
         appQueryClient.clear();
+        clearMatchControlCache();
+        setInitialRole('user');
+        void AsyncStorage.multiRemove(['@amatora_user_role', '@amatora_org_id', '@amatora_user_email']).catch(() => {});
         setIsLoggedIn(false);
         setPinState('checking');
         setAuthLoading(false);
@@ -649,7 +655,8 @@ function AppContent() {
       )}
 
       {!isLoggedIn ? (
-        <WelcomeScreen onLoginSuccess={() => {
+        <WelcomeScreen onLoginSuccess={role => {
+          setInitialRole(role);
           appQueryClient.clear();
           setIsLoggedIn(true);
           checkPinStatus(true);
@@ -664,7 +671,7 @@ function AppContent() {
           onReset={handleLogoutApp}
         />
       ) : (
-        <OrgProvider onLogout={handleLogoutApp}>
+        <OrgProvider onLogout={handleLogoutApp} initialRole={initialRole}>
           <MainAppContent onLogout={handleLogoutApp} />
         </OrgProvider>
       )}

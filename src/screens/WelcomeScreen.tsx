@@ -22,7 +22,7 @@ import { supabase } from '../supabaseClient';
 import { logUserLogin } from '../utils/loginLogger';
 
 interface WelcomeScreenProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (role: 'org_admin' | 'user') => void;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onLoginSuccess }) => {
@@ -111,7 +111,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onLoginSuccess }) 
           userName: account.name,
           userRole: account.role,
         });
-        onLoginSuccess();
+        onLoginSuccess(account.role);
       } catch (accountError) {
         await supabase.auth.signOut({ scope: 'local' });
         throw accountError;

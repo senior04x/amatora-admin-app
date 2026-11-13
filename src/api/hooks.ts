@@ -796,6 +796,41 @@ export const useTransfersData = (
 /**
  * Hook for fetching the active matches and their saved timer state
  */
+export function useOrganizerDashboardMatches(orgId: unknown, isOrganizer: boolean) {
+  const organizationId = parseOrganizationId(orgId);
+  return useQuery({
+    queryKey: ['dashboard', organizationId, 'organizer-matches'],
+    enabled: organizationId !== null && isOrganizer,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const matches = () => supabase.from('matches')
+        .select(`
+          id, organization_id, league, round, home_team_id, away_team_id, home_score,
+          away_score, match_date, match_time, location, importance, status,
+          home_team:home_team_id(id, name, logo_url),
+          away_team:away_team_id(id, name, logo_url)
+        `)
+        .eq('organization_id', requireOrganizationId(organizationId))
+        .order('match_date', { ascending: true, nullsFirst: false })
+        .order('match_time', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: true });
+
+      const { data: live, error: liveError } = await matches()
+        .in('status', ['live', 'first_half', 'half_time', 'second_half', 'extra_time'])
+        .limit(2);
+      if (liveError) throw liveError;
+      const remaining = 2 - live.length;
+      if (remaining === 0) return live;
+
+      const { data: upcoming, error: upcomingError } = await matches()
+        .in('status', ['scheduled', 'pending', 'upcoming', 'not_started'])
+        .limit(remaining);
+      if (upcomingError) throw upcomingError;
+      return [...live, ...upcoming];
+    },
+  });
+}
+
 export const useMatchesData = (
   orgId: any,
   leagueName = 'all',

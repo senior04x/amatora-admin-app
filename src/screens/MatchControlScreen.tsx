@@ -102,6 +102,11 @@ const MATCH_CONTROL_CACHE = new LimitedCache<string, any>(50, 10 * 60 * 1000);
 // Cache unassigned replays when admin deletes a goal mistake so re-adding re-links the replay video
 const ORPHAN_REPLAYS_BY_MATCH = new Map<string, { url: string; timestamp: number }>();
 
+export function clearMatchControlCache() {
+  MATCH_CONTROL_CACHE.clear();
+  ORPHAN_REPLAYS_BY_MATCH.clear();
+}
+
 export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onBack, isReadOnly = false }) => {
   useHideNavigationDock();
   const { bottom: safeAreaBottom } = useSafeAreaInsets();
