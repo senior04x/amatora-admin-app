@@ -144,7 +144,9 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const renderDockPage = (page: typeof dockPages[number], children: React.ReactNode, hidesDock = false) => {
     const index = dockPages.indexOf(page);
     const isActive = activeTab === page;
-    const preview = pageIndex >= 0 && (Math.abs(index - pageIndex) === 1 ||
+    // Adjacent screens build organization-scoped query keys during render.
+    const preview = Boolean(orgId && currentOrg) && pageIndex >= 0 &&
+      (Math.abs(index - pageIndex) === 1 ||
       (preparedPageIndex !== null && Math.abs(index - preparedPageIndex) <= 1));
     return (
       <View key={page} pointerEvents={isActive ? 'auto' : 'none'}
