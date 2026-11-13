@@ -1,3 +1,4 @@
+import { submitAdminAccountDeletion } from '../api/adminAccountDeletion';
 import { manageMatchOrganizer } from '../api/matchOrganizers';
 import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect } from 'react';
@@ -621,6 +622,7 @@ export const AccountScreen: React.FC<{
 
   // Handle Logout
   const [deletionPending, setDeletionPending] = useState(false);
+  const deletionInFlight = React.useRef(false);
 
   const requestAccountDeletion = () => {
     Alert.alert(
@@ -632,14 +634,16 @@ export const AccountScreen: React.FC<{
           text: 'So‘rov yuborish',
           style: 'destructive',
           onPress: async () => {
+            if (deletionInFlight.current) return;
+            deletionInFlight.current = true;
             setDeletionPending(true);
             try {
-              const { data, error } = await supabase.rpc('request_admin_account_deletion');
-              if (error || typeof data !== 'string' || !data) throw new Error('Request failed');
-              Alert.alert('So‘rov qabul qilindi', 'So‘rov raqami: ' + data);
+              const requestId = await submitAdminAccountDeletion(supabase);
+              Alert.alert('So‘rov qabul qilindi', 'So‘rov raqami: ' + requestId);
             } catch {
               Alert.alert('So‘rov yuborilmadi', 'Keyinroq qayta urinib ko‘ring.');
             } finally {
+              deletionInFlight.current = false;
               setDeletionPending(false);
             }
           },
