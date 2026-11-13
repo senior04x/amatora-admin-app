@@ -39,6 +39,8 @@ export async function manageMatchOrganizer(body: OrganizerChange) {
   const context = error && 'context' in error ? error.context : null;
   const result = context instanceof Response ? await context.json().catch(() => null) : null;
   switch (result?.code) {
+    case 'PROVISIONING_DISABLED': throw new Error('Organizator akkauntlarini boshqarish hali yoqilmagan.');
+    case 'PROVISIONING_UNAVAILABLE': throw new Error('Organizator xizmati vaqtincha ishlamayapti. Keyinroq qayta urinib ko‘ring.');
     case 'OWNER_REQUIRED': throw new Error('Bu tashkilot uchun Bosh Admin vakolati tasdiqlanmagan.');
     case 'PROFILE_CONFLICT': throw new Error('Bu email boshqa profilga bog‘langan yoki organizator allaqachon faol.');
     case 'EMAIL_ALREADY_REGISTERED': throw new Error('Bu email bilan kirish akkaunti allaqachon mavjud.');
