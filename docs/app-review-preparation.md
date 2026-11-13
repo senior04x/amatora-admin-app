@@ -25,3 +25,10 @@ Use the submitted TestFlight build on a physical iPhone running the latest iOS. 
 AMATORA Admin helps football tournament organizers maintain teams, players and fixtures, record live scores and match events, and review replays and highlights. Use the credentials in the Sign-In Information section to open the Amatora Test organization. From the organization dashboard, open a fixture and choose Match Control. After reviewing the match controls, open a finished match to review its replay and available highlights.
 
 Before resubmission, add the physical-device recording link, exact menu labels confirmed on the submitted build, external providers and what they do, region differences or confirmed consistent functionality, and documentation for protected material if applicable.
+
+## Live timer device checks
+
+- On a compatible iPhone, allow Live Activities and start a test match in Match Control. Return to the Home Screen and lock the device. Confirm the countdown and play icon. Reopen Match Control, pause and verify the fixed remaining time and pause icon, then resume and finish. Check that leaving Match Control clears the activity.
+- On Android, grant notifications when prompted. Verify countdown, pause, resume and cleanup in the notification shade. On a device that supports promoted ongoing notifications, also verify the system chip. Denying notifications must leave Match Control usable.
+- The system renders the countdown locally. Cross-device updates while the app is suspended still require server push integration. Verify resynchronization when returning to the app.
+- The iOS app extension uses com.amatora.admin.matchtimer. Configure its provisioning profile before creating the signed TestFlight build. Recheck the final binary on a physical device before recording the review demo.
