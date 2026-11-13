@@ -115,17 +115,10 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const [pageWidth, setPageWidth] = useState(0);
   const dockPages = ['dashboard', 'players', matchNavTab, 'standings', 'account'] as const;
   const pageIndex = dockPages.findIndex(page => page === activeTab);
-  const previousDockPageIndex = useRef(-1);
-
-  useEffect(() => {
-    const previousIndex = previousDockPageIndex.current;
-    previousDockPageIndex.current = pageIndex;
-    if (Platform.OS === 'ios' && previousIndex >= 0 && pageIndex >= 0 && previousIndex !== pageIndex) {
-      void Haptics.selectionAsync().catch(() => {});
-    }
-  }, [pageIndex]);
+  const dragHapticPage = useRef<number | null>(null);
 
   useLayoutEffect(() => {
+    dragHapticPage.current = null;
     if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
     if (pageIndex < 0 || !pageWidth) return;
     if (settledPageIndex.current === pageIndex && settledPageWidth.current === pageWidth) return;
@@ -389,18 +382,35 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
           style={[StyleSheet.absoluteFill, pageIndex < 0 && { display: 'none' }]}
           contentContainerStyle={{ width: pageWidth * dockPages.length }}
           onMomentumScrollEnd={event => finishDockScroll(event.nativeEvent.contentOffset.x)}
+          onScrollBeginDrag={() => {
+            if (Platform.OS === 'ios' && pageIndex >= 0) dragHapticPage.current = pageIndex;
+          }}
           onScrollEndDrag={event => {
+            dragHapticPage.current = null;
             const { contentOffset, velocity } = event.nativeEvent;
             if (velocity?.x === 0) finishDockScroll(contentOffset.x);
           }}
           scrollEventThrottle={16}
           onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: dockScrollX } } }], {
             useNativeDriver: Platform.OS !== 'web',
-            listener: Platform.OS === 'web' ? event => {
+            listener: Platform.OS === 'android' ? undefined : event => {
               const offset = (event.nativeEvent as NativeScrollEvent).contentOffset.x;
-              if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
-              webScrollEnd.current = setTimeout(() => finishDockScroll(offset), 110);
-            } : undefined,
+              if (Platform.OS === 'web') {
+                if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
+                webScrollEnd.current = setTimeout(() => finishDockScroll(offset), 110);
+                return;
+              }
+
+              const lastPage = dragHapticPage.current;
+              if (lastPage === null || pageWidth <= 0) return;
+              const progress = offset / pageWidth;
+              // A small dead zone prevents repeated ticks near the halfway point.
+              if (Math.abs(progress - lastPage) < 0.55) return;
+              const nextPage = Math.max(0, Math.min(dockPages.length - 1, Math.round(progress)));
+              if (nextPage === lastPage) return;
+              dragHapticPage.current = nextPage;
+              void Haptics.selectionAsync().catch(() => {});
+            },
           })}
         >
           {renderDockPage('dashboard', (
