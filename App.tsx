@@ -105,7 +105,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
   const slideOffset = useRef(new Animated.Value(0)).current;
   const settling = useRef(false);
-  const [isSwiping, setIsSwiping] = useState(false);
+  const [preparedPageIndex, setPreparedPageIndex] = useState<number | null>(null);
   const [pageWidth, setPageWidth] = useState(0);
   const dockPages = ['dashboard', 'players', matchNavTab, 'standings', 'account'] as const;
   const pageIndex = dockPages.findIndex(page => page === activeTab);
@@ -114,8 +114,13 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     slideOffset.stopAnimation();
     slideOffset.setValue(0);
     settling.current = false;
-    setIsSwiping(false);
   }, [activeTab, pageWidth, matchNavTab, slideOffset]);
+
+  useEffect(() => {
+    if (!orgId || !currentOrg || pageIndex < 0 || pageWidth <= 0) return;
+    const task = requestIdleCallback(() => setPreparedPageIndex(pageIndex), { timeout: 500 });
+    return () => cancelIdleCallback(task);
+  }, [orgId, currentOrg, pageIndex, pageWidth]);
 
   const pageAt = (step: number) => {
     const page = dockPages[pageIndex + step];
@@ -135,7 +140,6 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         handleNavigate(destination);
       } else {
         settling.current = false;
-        setIsSwiping(false);
       }
     });
   };
@@ -145,7 +149,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
       !settling.current && !dockHidden && !isEditingDashboardOrder && Boolean(orgId && currentOrg) &&
       pageIndex >= 0 && pageWidth > 0 && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 2 &&
       Boolean(pageAt(dx < 0 ? 1 : -1)),
-    onPanResponderGrant: () => setIsSwiping(true),
+    onPanResponderGrant: () => setPreparedPageIndex(pageIndex),
     onPanResponderMove: (_, { dx }) => {
       const step = dx < 0 ? 1 : -1;
       slideOffset.setValue(pageAt(step) ? Math.max(-pageWidth, Math.min(pageWidth, dx)) : 0);
@@ -163,7 +167,9 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const renderDockPage = (page: typeof dockPages[number], children: React.ReactNode, hidesDock = false) => {
     const isActive = activeTab === page;
     const offset = dockPages.indexOf(page) - pageIndex;
-    const preview = isSwiping && pageIndex >= 0 && Math.abs(offset) === 1;
+    // Lay out nearby pages outside the clipped viewport before the gesture starts.
+    const preview = pageIndex >= 0 && Math.abs(offset) === 1 && preparedPageIndex !== null &&
+      Math.abs(dockPages.indexOf(page) - preparedPageIndex) <= 1;
     return (
       <View key={page} pointerEvents={isActive ? 'auto' : 'none'}
         accessibilityElementsHidden={!isActive}
