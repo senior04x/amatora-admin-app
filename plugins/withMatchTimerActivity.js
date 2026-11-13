@@ -65,13 +65,22 @@ module.exports = function withMatchTimerActivity(config) {
         TARGETED_DEVICE_FAMILY: appSettings.TARGETED_DEVICE_FAMILY ?? '"1,2"',
       });
     }
-    project.addSourceFile(name + '/MatchTimerAttributes.swift', { target: app.uuid });
-    project.addSourceFile(name + '/MatchTimerActivity.swift', { target: app.uuid });
-    project.addSourceFile(name + '/MatchTimerActivityBridge.m', { target: app.uuid });
-    project.addBuildPhase(
-      [name + '/MatchTimerAttributes.swift', name + '/MatchTimerWidget.swift'],
-      'PBXSourcesBuildPhase', 'Sources', widget.uuid,
+    const group = project.addPbxGroup([], name);
+    project.addToPbxGroup(group.uuid, project.getFirstProject().firstProject.mainGroup);
+    const attributes = project.addSourceFile(
+      name + '/MatchTimerAttributes.swift', { target: app.uuid }, group.uuid,
     );
+    project.addSourceFile(name + '/MatchTimerActivity.swift', { target: app.uuid }, group.uuid);
+    project.addSourceFile(name + '/MatchTimerActivityBridge.m', { target: app.uuid }, group.uuid);
+    project.addBuildPhase([], 'PBXSourcesBuildPhase', 'Sources', widget.uuid);
+    // A shared file reference needs a distinct PBXBuildFile for each target.
+    // addBuildPhase(paths) reuses the app's build-file entry across both phases.
+    const widgetAttributes = {
+      ...attributes, uuid: project.generateUuid(), target: widget.uuid,
+    };
+    project.addToPbxBuildFileSection(widgetAttributes);
+    project.addToPbxSourcesBuildPhase(widgetAttributes);
+    project.addSourceFile(name + '/MatchTimerWidget.swift', { target: widget.uuid }, group.uuid);
     return config;
   });
 };
