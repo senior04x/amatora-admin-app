@@ -1292,6 +1292,34 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     );
   };
 
+  const renderImagePreview = (overDetails: boolean) => fullImagePreview && (
+    <View
+      style={[styles.imagePreviewOverlay, overDetails && styles.imagePreviewOverDetails]}
+      accessibilityViewIsModal
+    >
+      <ScrollView
+        style={styles.imagePreviewScroll}
+        contentContainerStyle={styles.zoomScrollViewContent}
+        maximumZoomScale={4}
+        minimumZoomScale={1}
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+        centerContent
+      >
+        <Image source={{ uri: fullImagePreview }} style={styles.fullScreenImage} resizeMode="contain" />
+      </ScrollView>
+      <TouchableOpacity
+        style={styles.imagePreviewCloseBtn}
+        onPress={() => setFullImagePreview(null)}
+        accessibilityRole="button"
+        accessibilityLabel="Rasmni yopish"
+        activeOpacity={0.8}
+      >
+        <Ionicons name="close-circle" size={36} color="#FFFFFF" />
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: colors.bgPrimary }]}>
       {/* Toast Notification Banner */}
@@ -1695,7 +1723,10 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         visible={!!selectedItem}
         transparent
         animationType={Platform.OS === 'android' ? 'fade' : 'slide'}
-        onRequestClose={() => setSelectedItem(null)}
+        onRequestClose={() => {
+          if (fullImagePreview) setFullImagePreview(null);
+          else setSelectedItem(null);
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, Platform.OS === 'android' && { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
@@ -2072,42 +2103,17 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
 
           {/* Select Picker Overlay inside Detail Modal */}
           {renderSelectPicker()}
+          {renderImagePreview(true)}
         </View>
       </Modal>
 
-      {/* FULLSCREEN PINCH-TO-ZOOM IMAGE LIGHTBOX MODAL WITH BLUR BACKDROP (ROOT LEVEL) */}
       <Modal
-        visible={!!fullImagePreview}
+        visible={!!fullImagePreview && !selectedItem}
         transparent
         animationType="fade"
         onRequestClose={() => setFullImagePreview(null)}
       >
-        <View style={styles.imagePreviewOverlay}>
-          <TouchableOpacity
-            style={styles.imagePreviewCloseBtn}
-            onPress={() => setFullImagePreview(null)}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="close-circle" size={36} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          {fullImagePreview && (
-            <ScrollView
-              contentContainerStyle={styles.zoomScrollViewContent}
-              maximumZoomScale={4}
-              minimumZoomScale={1}
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={false}
-              centerContent
-            >
-              <Image
-                source={{ uri: fullImagePreview }}
-                style={styles.fullScreenImage}
-                resizeMode="contain"
-              />
-            </ScrollView>
-          )}
-        </View>
+        {renderImagePreview(false)}
       </Modal>
 
       {/* DEDICATED FULLSCREEN ARCHIVE MODAL PAGE */}
@@ -2487,6 +2493,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  imagePreviewOverDetails: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 1000,
+    elevation: 24,
+  },
+  imagePreviewScroll: { width: '100%' },
   imagePreviewCloseBtn: {
     position: 'absolute',
     top: 50,
