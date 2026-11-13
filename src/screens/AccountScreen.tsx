@@ -1219,6 +1219,22 @@ export const AccountScreen: React.FC<{
         )}
 
         <TouchableOpacity
+          style={[styles.menuLinkRow, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
+          accessibilityRole="link"
+          onPress={() => {
+            void Linking.openURL('https://www.amatora.uz/privacy-policy').catch(() => {
+              Alert.alert('Maxfiylik siyosati', 'Sahifani ochib bo‘lmadi. Keyinroq qayta urinib ko‘ring.');
+            });
+          }}
+        >
+          <View style={[styles.menuIconBox, { backgroundColor: 'rgba(56, 189, 248, 0.15)' }]}>
+            <Ionicons name="shield-checkmark-outline" size={18} color="#38BDF8" />
+          </View>
+          <Text style={[styles.menuLinkText, { flex: 1, color: colors.textPrimary }]}>Maxfiylik siyosati</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={[styles.logoutBtn, Platform.OS === 'android' && { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2', borderColor: '#EF4444' }]}
           activeOpacity={0.8}
           onPress={handleLogout}
