@@ -7,7 +7,7 @@ if ((globalThis as any).ErrorUtils) {
 }
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import { Image as ExpoImage } from 'expo-image';
@@ -26,7 +26,6 @@ import { PlayersScreen } from './src/screens/PlayersScreen';
 import { StandingsScreen } from './src/screens/StandingsScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
-import { SplashScreen } from './src/screens/SplashScreen';
 import { PinScreen } from './src/screens/PinScreen';
 import { supabase } from './src/supabaseClient';
 import { AccountScreen } from './src/screens/AccountScreen';
@@ -87,6 +86,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     tab: 'dashboard' | 'players' | 'standings' | 'account' | 'matches' | 'finished-matches' | 'create-match' | 'settings' | 'applications' | 'export' | 'leagues' | 'tournaments' | 'transfers' | 'updates' | 'sponsors' | 'news' | 'organizers' | 'notifications' | 'cards' | 'replays',
     subTab?: 'players' | 'teams'
   ) => {
+    if (!orgId || !currentOrg) return;
     if (tab === 'create-match' && !canCreateMatch) return;
     if (userRole === 'user' && ['export', 'applications', 'transfers', 'news', 'updates', 'sponsors', 'organizers', 'cards', 'notifications'].includes(tab)) {
       Alert.alert('Cheklangan huquq', 'Sizda ushbu bo\'limga kirish huquqi yo\'q!');
@@ -197,6 +197,8 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
+    const organizationId = currentOrg?.id;
+    if (!organizationId || userRole !== 'org_admin') return;
     const fetchPendingCount = async () => {
       try {
         let query = supabase
@@ -204,9 +206,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
           .select('id', { count: 'exact', head: true })
           .or('status.eq.pending,status.eq.kutilmoqda,status.is.null');
 
-        if (currentOrg?.id) {
-          query = query.eq('organization_id', currentOrg.id);
-        }
+        query = query.eq('organization_id', organizationId);
 
         const { count } = await query;
         setPendingCount(count || 0);
@@ -226,7 +226,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         event: 'INSERT',
         schema: 'public',
         table: 'applications',
-        filter: `organization_id=eq.${currentOrg?.id}`
+        filter: `organization_id=eq.${organizationId}`
       }, () => {
         fetchPendingCount(); // Faqat yangi ariza kelganda
       })
@@ -235,7 +235,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, userRole]);
 
   // 🔔 Push notifications vaqtincha o'chirilgan (EAS build uchun Firebase FCM V1
   // service account key sozlangach qayta qo'shiladi). Ichki NotificationsScreen
@@ -486,7 +486,6 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
 
 function AppContent() {
   const { isDark } = useTheme();
-  const [showSplash, setShowSplash] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -611,9 +610,7 @@ function AppContent() {
     }
   };
 
-  if (showSplash) {
-    return <SplashScreen onFinish={() => setShowSplash(false)} />;
-  }
+  if (authLoading || !fontsLoaded || (isLoggedIn && pinState === 'checking')) return null;
 
   return (
     <View style={[styles.container, Platform.OS === 'android' && { backgroundColor: isDark ? '#0B0F17' : '#F8FAFC' }, !isLoggedIn && { backgroundColor: '#FFFFFF' }]}>
@@ -627,11 +624,7 @@ function AppContent() {
         />
       )}
 
-      {authLoading || !fontsLoaded ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
-          <ActivityIndicator size="large" color="#0F172A" />
-        </View>
-      ) : !isLoggedIn ? (
+      {!isLoggedIn ? (
         <WelcomeScreen onLoginSuccess={() => {
           appQueryClient.clear();
           setIsLoggedIn(true);

@@ -3,7 +3,6 @@ import { loadMatchOrganizerProfile, resolveAdminAppAccount } from '../api/matchO
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { AppState, Animated, TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DashboardStartupSkeleton } from '../components/DashboardStartupSkeleton';
 import { BlurView } from '../components/SafeBlurView';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../supabaseClient';
@@ -523,7 +522,12 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
         refreshNotificationsCount: fetchLiveUnreadCount,
       }}
     >
-      {orgId && currentOrg ? children : loading ? <DashboardStartupSkeleton /> : (
+      {(orgId && currentOrg) || loading ? (
+        <View style={styles.startupContent} pointerEvents={orgId && currentOrg ? 'auto' : 'none'}
+          accessibilityState={{ busy: !orgId || !currentOrg }}>
+          {children}
+        </View>
+      ) : (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: colors.bgPrimary }}>
           <Text style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '700', textAlign: 'center' }}>Tashkilotingiz aniqlanmadi</Text>
           <Text style={{ color: colors.textSecondary, textAlign: 'center', marginVertical: 16 }}>Tashkilot ma’lumotlariga kirish to‘xtatildi. Qayta urinib ko‘ring yoki hisobingizga qayta kiring.</Text>
@@ -590,6 +594,7 @@ export const OrgProvider: React.FC<{ children: React.ReactNode; onLogout: () => 
 };
 
 const styles = StyleSheet.create({
+  startupContent: { flex: 1 },
   toastContainer: {
     position: 'absolute',
     top: 0,

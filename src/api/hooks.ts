@@ -53,7 +53,7 @@ export async function getTeamIdsForLeagueNames(leagueNames: string[]): Promise<a
  */
 export const useDashboardCountsData = (orgId: any) => {
   return useQuery({
-    queryKey: queryKeys.dashboard(orgId),
+    queryKey: parseOrganizationId(orgId) ? queryKeys.dashboard(orgId) : ['dashboard', null],
     queryFn: async () => {
       if (!orgId || Number(orgId) <= 0) {
         return { players: 0, leagues: 0, teams: 0, applications: 0, pendingTeams: 0, pendingUpdates: 0 };
@@ -802,7 +802,7 @@ export const useMatchesData = (
   collabLeagueNames: string[] = []
 ) => {
   return useQuery({
-    queryKey: queryKeys.matches(orgId, leagueName, collabLeagueNames),
+    queryKey: parseOrganizationId(orgId) ? queryKeys.matches(orgId, leagueName, collabLeagueNames) : ['matches', null],
     queryFn: async () => {
       const targetOrgId = requireOrganizationId(orgId);
 

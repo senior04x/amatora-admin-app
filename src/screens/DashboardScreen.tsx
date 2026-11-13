@@ -731,22 +731,23 @@ export const DashboardScreen: React.FC<Props> = ({
 
   // Realtime Subscription for all dashboard entities
   useEffect(() => {
+    if (!orgId) return;
     const channel = supabase
       .channel('dashboard_realtime_channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `organization_id=eq.${orgId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
         queryClient.invalidateQueries({ queryKey: ['matches', requireOrganizationId(orgId)] });
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applications', filter: `organization_id=eq.${orgId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
         queryClient.invalidateQueries({ queryKey: ['applications', requireOrganizationId(orgId)] });
         queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `organization_id=eq.${orgId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
         queryClient.invalidateQueries({ queryKey: ['teams', requireOrganizationId(orgId)] });
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leagues' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leagues', filter: `organization_id=eq.${orgId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
         queryClient.invalidateQueries({ queryKey: ['leagues', requireOrganizationId(orgId)] });
       })
@@ -758,13 +759,14 @@ export const DashboardScreen: React.FC<Props> = ({
   }, [orgId, queryClient]);
 
   const onRefresh = useCallback(async () => {
+    if (!orgId) return;
     setRefreshing(true);
     await Promise.all([
       refetchCounts(),
       refetchMatches(),
     ]);
     setRefreshing(false);
-  }, [refetchCounts, refetchMatches]);
+  }, [orgId, refetchCounts, refetchMatches]);
 
   const getMatchTimeRemainingText = (
     mDate?: string,
