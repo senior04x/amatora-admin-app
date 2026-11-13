@@ -986,12 +986,12 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
       first_name: fName,
       last_name: lName,
       father_name: fatName,
-      phone: item.phone || item.contact_phone || '',
+      phone: String(isPlayer ? (item.phone || item.contact_phone || '') : (item.captain_phone || item.phone || item.contact_phone || '')),
       passport_series: item.passport_series || (item.passport ? item.passport.substring(0, 2) : ''),
       passport_number: item.passport_number || (item.passport ? item.passport.substring(2) : ''),
       birth_date: item.birth_date || item.age || '',
       position: item.position || '',
-      player_number: item.player_number ? String(item.player_number) : (item.number ? String(item.number) : ''),
+      player_number: String(item.player_number ?? item.number ?? ''),
       league: item.league || resolvedLeague,
       team_id: currentTeamId || '',
       team_name: resolvedTeamName,
@@ -1251,7 +1251,8 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         const { error } = await dbClient
           .from('applications')
           .update(updatePayload)
-          .eq('id', selectedItem.id);
+          .eq('id', selectedItem.id)
+          .eq('organization_id', requireOrganizationId(orgId));
 
         if (error) {
           console.error('Update player error:', error);
@@ -1298,7 +1299,7 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
         const updatePayload = {
           name: editForm.name || '',
           league: editForm.league || '',
-          phone: editForm.phone || '',
+          captain_phone: editForm.phone.trim(),
           city: editForm.city || '',
         };
 

@@ -694,6 +694,8 @@ export const AccountScreen: React.FC<{
             style={styles.logoWrapper}
             activeOpacity={0.8}
             onPress={userRole === 'user' ? handlePickUserAvatar : handlePickLogo}
+            accessibilityRole="button"
+            accessibilityLabel={userRole === 'user' ? 'Profil rasmini almashtirish' : 'Tashkilot rasmini almashtirish'}
             disabled={isUploadingLogo}
           >
             {isUploadingLogo ? (
@@ -709,7 +711,7 @@ export const AccountScreen: React.FC<{
                   }}
                   style={[styles.orgLogo, Platform.OS === 'android' && { backgroundColor: colors.bgCardElevated, borderColor: colors.border }]}
                 />
-                <View style={[styles.logoEditBadge, Platform.OS === 'android' && { backgroundColor: colors.accentGreen }]}>
+                <View pointerEvents="none" style={styles.logoEditBadge}>
                   <Ionicons name="camera" size={12} color="#FFFFFF" />
                 </View>
               </>
@@ -1617,12 +1619,14 @@ const styles = StyleSheet.create({
   },
   logoEditBadge: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
+    bottom: 0,
+    right: 0,
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#B83D00',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },

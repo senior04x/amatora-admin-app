@@ -7,7 +7,7 @@ if ((globalThis as any).ErrorUtils) {
 }
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid, PanResponder } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import { Image as ExpoImage } from 'expo-image';
@@ -100,6 +100,23 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     }
     setActiveTab(tab);
   };
+
+  const slideOffset = useRef(new Animated.Value(0)).current;
+  const dockPages = ['dashboard', 'players', matchNavTab, 'standings', 'account'] as const;
+  const pageIndex = dockPages.findIndex(page => page === activeTab);
+  const pageSwipe = PanResponder.create({
+    onMoveShouldSetPanResponder: (_, { dx, dy }) =>
+      !dockHidden && !isEditingDashboardOrder && Boolean(orgId && currentOrg) && pageIndex >= 0 &&
+      Math.abs(dx) > 22 && Math.abs(dx) > Math.abs(dy) * 2,
+    onPanResponderRelease: (_, { dx }) => {
+      if (Math.abs(dx) < 65) return;
+      const nextPage = dockPages[pageIndex + (dx < 0 ? 1 : -1)];
+      if (!nextPage || (nextPage === 'create-match' && !canCreateMatch)) return;
+      slideOffset.setValue(dx < 0 ? 64 : -64);
+      handleNavigate(nextPage, nextPage === 'players' ? 'players' : undefined);
+      Animated.timing(slideOffset, { toValue: 0, duration: 190, useNativeDriver: Platform.OS !== 'web' }).start();
+    },
+  });
 
   const handleGoBack = () => {
     setNavigationHistory(prev => {
@@ -279,7 +296,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         onNavigate={handleNavigate}
       />
 
-      <View style={styles.screenContainer}>
+      <Animated.View {...pageSwipe.panHandlers} style={[styles.screenContainer, { transform: [{ translateX: slideOffset }] }]}>
         <LazyScreen isActive={activeTab === 'dashboard'} onDockHiddenChange={setDockHidden}>
           <DashboardScreen
             onNavigate={handleNavigate}
@@ -309,7 +326,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         <LazyScreen isActive={activeTab === 'tournaments'}><TournamentsScreen onGoBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'replays'}><ReplaysScreen onBack={handleGoBack} /></LazyScreen>
         <LazyScreen isActive={userRole === 'org_admin' && activeTab === 'notifications'}><NotificationsScreen onNavigate={handleNavigate} onGoBack={handleGoBack} /></LazyScreen>
-      </View>
+      </Animated.View>
 
       {/* Tactile Navigation Dock */}
       {!dockHidden && <Animated.View
@@ -351,7 +368,7 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
           style={[
             styles.navDock,
             Platform.OS === 'android' && {
-              backgroundColor: colors.bgCard,
+              backgroundColor: isDark ? '#141414' : '#FFFFFF',
               borderColor: 'transparent',
               borderTopColor: colors.border,
               borderTopWidth: 1,

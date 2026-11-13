@@ -1,5 +1,6 @@
+import { pairMatchAssists } from '../utils/matchAssistTimeline';
 import { requireOrganizationId } from '../utils/organizationId';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -126,6 +127,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
   const [homePlayers, setHomePlayers] = useState<any[]>(cachedData?.homePlayers || []);
   const [awayPlayers, setAwayPlayers] = useState<any[]>(cachedData?.awayPlayers || []);
   const [events, setEvents] = useState<any[]>(cachedData?.events || []);
+  const { timeline, assistsByGoal } = useMemo(() => pairMatchAssists(events), [events]);
   const [isPlayersLoading, setIsPlayersLoading] = useState(!cachedData?.homePlayers || cachedData.homePlayers.length === 0);
   const [isEventsLoading, setIsEventsLoading] = useState(!cachedData?.events);
 
@@ -456,6 +458,7 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
       if (!isActive()) return false;
       const resolvedMatch = latestMatchRow.current !== rowAtRequest ? { ...matchData, ...latestMatchRow.current } : matchData;
       applyMatchRow(resolvedMatch);
+      setLoading(false);
 
       const competitionLoad = loadMatchCompetition(dbClient, matchData).catch(error => {
         console.warn('Match duration could not be loaded:', error);
@@ -1885,7 +1888,8 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
           ) : events.length === 0 ? (
             <Text style={[styles.emptyEventsText, Platform.OS === 'android' && { color: colors.textMuted }]}>{"Hozircha voqealar kiritilmagan"}</Text>
           ) : (
-            events.map((ev) => {
+            timeline.map((ev) => {
+              const linkedAssist = assistsByGoal.get(ev.id);
               const evConfig = EVENT_TYPES.find((t) => t.id === ev.event_type) || EVENT_TYPES[0];
               const playerName = ev.player
                 ? `${ev.player.first_name || ''} ${ev.player.last_name || ''}`
@@ -1915,6 +1919,13 @@ export const MatchControlScreen: React.FC<Props> = ({ matchId, initialMatch, onB
                     <Text style={[styles.eventTeamText, Platform.OS === 'android' && { color: colors.textMuted }]}>
                       {isHome ? homeTeam?.name : awayTeam?.name}
                     </Text>
+                    {linkedAssist && (
+                      <Text style={[styles.eventTeamText, Platform.OS === 'android' && { color: colors.textMuted }]}>
+                        Assist: {linkedAssist.player
+                          ? [linkedAssist.player.first_name, linkedAssist.player.last_name].filter(Boolean).join(' ')
+                          : "O‘yinchi"}
+                      </Text>
+                    )}
                   </View>
 
                   {!isReadOnlyMode && (
