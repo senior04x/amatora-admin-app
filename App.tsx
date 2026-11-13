@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons, MaterialCommunityIcons, MaterialIcons, Feather, FontAwesome } from '@expo/vector-icons';
 import * as Font from 'expo-font';
+import * as Haptics from 'expo-haptics';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { appQueryClient } from './src/api/queryClient';
@@ -114,6 +115,15 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
   const [pageWidth, setPageWidth] = useState(0);
   const dockPages = ['dashboard', 'players', matchNavTab, 'standings', 'account'] as const;
   const pageIndex = dockPages.findIndex(page => page === activeTab);
+  const previousDockPageIndex = useRef(-1);
+
+  useEffect(() => {
+    const previousIndex = previousDockPageIndex.current;
+    previousDockPageIndex.current = pageIndex;
+    if (Platform.OS === 'ios' && previousIndex >= 0 && pageIndex >= 0 && previousIndex !== pageIndex) {
+      void Haptics.selectionAsync().catch(() => {});
+    }
+  }, [pageIndex]);
 
   useLayoutEffect(() => {
     if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
