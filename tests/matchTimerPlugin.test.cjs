@@ -31,6 +31,9 @@ test('timer sources have one group parent and separate build entries per target'
   const objects = parsed.hash.project.objects;
   const sources = Object.values(objects.PBXSourcesBuildPhase).filter(v => typeof v === 'object');
   const groups = Object.values(objects.PBXGroup).filter(v => typeof v === 'object');
+  const timerGroup = groups.find(group => group.name === 'MatchTimerWidget');
+  assert.ok(timerGroup);
+  assert.equal(timerGroup.path, '.', 'source paths must resolve relative to the iOS project');
   const attributes = Object.entries(objects.PBXFileReference).find(([id, file]) =>
     !id.endsWith('_comment') && file.path?.includes('MatchTimerAttributes.swift'));
   assert.ok(attributes);

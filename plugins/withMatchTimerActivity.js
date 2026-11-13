@@ -65,7 +65,7 @@ module.exports = function withMatchTimerActivity(config) {
         TARGETED_DEVICE_FAMILY: appSettings.TARGETED_DEVICE_FAMILY ?? '"1,2"',
       });
     }
-    const group = project.addPbxGroup([], name);
+    const group = project.addPbxGroup([], name, '.');
     project.addToPbxGroup(group.uuid, project.getFirstProject().firstProject.mainGroup);
     const attributes = project.addSourceFile(
       name + '/MatchTimerAttributes.swift', { target: app.uuid }, group.uuid,
