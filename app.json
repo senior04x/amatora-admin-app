@@ -39,6 +39,7 @@
       }
     },
     "plugins": [
+      "./plugins/withMatchTimerActivity",
       [
         "expo-local-authentication",
         {

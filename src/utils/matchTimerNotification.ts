@@ -4,6 +4,8 @@ import { getRemainingSeconds, isRunningTimerSnapshot, parseTimerStartMs, serverN
 import type { MatchTimerSnapshot } from './matchTimer';
 
 const androidTimer = Platform.OS === 'android' ? NativeModules.MatchTimerNotification : undefined;
+const iosTimer = Platform.OS === 'ios' ? NativeModules.MatchTimerActivity : undefined;
+const timer = androidTimer ?? iosTimer;
 let requestedNotificationPermission = false;
 const activePhases = new Set(['first_half', 'second_half', 'extra_time', 'live', 'in_progress', 'half_time', 'break']);
 
@@ -15,9 +17,9 @@ export function useMatchTimerNotification(
 ) {
   const { id, status, timer_seconds, timer_started_at, is_timer_running } = match ?? {};
   useEffect(() => {
-    if (!androidTimer) return;
+    if (!timer) return;
     if (!enabled || id == null || !status || !activePhases.has(status)) {
-      androidTimer.hide();
+      timer.hide();
       return;
     }
     const snapshot = { id, status, timer_seconds, timer_started_at, is_timer_running };
@@ -25,7 +27,7 @@ export function useMatchTimerNotification(
       const now = serverNowMs();
       const running = isRunningTimerSnapshot(snapshot);
       if (running && now == null) {
-        androidTimer.hide();
+        timer.hide();
         return;
       }
       const remaining = getRemainingSeconds(snapshot, halfSeconds, now);
@@ -33,10 +35,11 @@ export function useMatchTimerNotification(
         ? Date.now() + Math.max(0, parseTimerStartMs(timer_started_at) + getRemainingSeconds(snapshot, halfSeconds, null) * 1000 - now)
         : 0;
       if (remaining <= 0 || (running && endTime <= Date.now())) {
-        androidTimer.hide();
+        timer.hide();
         return;
       }
-      androidTimer.show(remaining, endTime);
+      if (iosTimer) iosTimer.show(String(id), remaining, endTime);
+      else androidTimer.show(remaining, endTime);
     };
     let active = true;
     publish();
@@ -56,7 +59,8 @@ export function useMatchTimerNotification(
     return () => {
       active = false;
       subscription.remove();
-      androidTimer.hide();
     };
   }, [id, status, timer_seconds, timer_started_at, is_timer_running, halfSeconds, enabled, clockSynced]);
+
+  useEffect(() => () => timer?.hide(), []);
 }
