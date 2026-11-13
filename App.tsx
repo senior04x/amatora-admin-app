@@ -7,7 +7,7 @@ if ((globalThis as any).ErrorUtils) {
 }
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid, PanResponder, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, DeviceEventEmitter, Alert, Animated, Platform, BackHandler, ToastAndroid, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
 import { Image as ExpoImage } from 'expo-image';
@@ -103,79 +103,54 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
     setActiveTab(tab);
   };
 
-  const slideOffset = useRef(new Animated.Value(0)).current;
-  const settling = useRef(false);
+  const dockPager = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const settledPageIndex = useRef(-1);
+  const settledPageWidth = useRef(0);
+  const webScrollEnd = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [preparedPageIndex, setPreparedPageIndex] = useState<number | null>(null);
   const [pageWidth, setPageWidth] = useState(0);
   const dockPages = ['dashboard', 'players', matchNavTab, 'standings', 'account'] as const;
   const pageIndex = dockPages.findIndex(page => page === activeTab);
 
   useLayoutEffect(() => {
-    slideOffset.stopAnimation();
-    slideOffset.setValue(0);
-    settling.current = false;
-  }, [activeTab, pageWidth, matchNavTab, slideOffset]);
+    if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
+    if (pageIndex < 0 || !pageWidth) return;
+    if (settledPageIndex.current === pageIndex && settledPageWidth.current === pageWidth) return;
+    settledPageIndex.current = pageIndex;
+    settledPageWidth.current = pageWidth;
+    dockPager.current?.scrollTo({ x: pageIndex * pageWidth, animated: false });
+  }, [pageIndex, pageWidth, matchNavTab]);
+
+  useEffect(() => () => {
+    if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
+  }, []);
 
   useEffect(() => {
-    if (!orgId || !currentOrg || pageIndex < 0 || pageWidth <= 0) return;
+    if (!orgId || !currentOrg || pageIndex < 0 || !pageWidth) return;
     const task = requestIdleCallback(() => setPreparedPageIndex(pageIndex), { timeout: 500 });
     return () => cancelIdleCallback(task);
   }, [orgId, currentOrg, pageIndex, pageWidth]);
 
-  const pageAt = (step: number) => {
-    const page = dockPages[pageIndex + step];
-    return page === 'create-match' && !canCreateMatch ? undefined : page;
+  const finishDockScroll = (offset: number) => {
+    if (!pageWidth || pageIndex < 0) return;
+    const index = Math.round(offset / pageWidth);
+    if (Math.abs(offset - index * pageWidth) > 2 || settledPageIndex.current === index) return;
+    const page = dockPages[index];
+    if (!page || (page === 'create-match' && !canCreateMatch)) return;
+    settledPageIndex.current = index;
+    handleNavigate(page);
   };
-
-  const settleSwipe = (destination?: typeof dockPages[number], step = 0) => {
-    settling.current = true;
-    Animated.timing(slideOffset, {
-      toValue: destination ? -step * pageWidth : 0,
-      duration: destination ? 240 : 190,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start(({ finished }) => {
-      if (!finished) return;
-      if (destination) {
-        handleNavigate(destination);
-      } else {
-        settling.current = false;
-      }
-    });
-  };
-
-  const pageSwipe = PanResponder.create({
-    onMoveShouldSetPanResponder: (_, { dx, dy }) =>
-      !settling.current && !dockHidden && !isEditingDashboardOrder && Boolean(orgId && currentOrg) &&
-      pageIndex >= 0 && pageWidth > 0 && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 2 &&
-      Boolean(pageAt(dx < 0 ? 1 : -1)),
-    onPanResponderGrant: () => setPreparedPageIndex(pageIndex),
-    onPanResponderMove: (_, { dx }) => {
-      const step = dx < 0 ? 1 : -1;
-      slideOffset.setValue(pageAt(step) ? Math.max(-pageWidth, Math.min(pageWidth, dx)) : 0);
-    },
-    onPanResponderRelease: (_, { dx, vx }) => {
-      const step = dx < 0 ? 1 : -1;
-      const passedThreshold = Math.abs(dx) >= pageWidth * 0.28 ||
-        (Math.abs(dx) >= 24 && Math.abs(vx) >= 0.55 && Math.sign(vx) === Math.sign(dx));
-      settleSwipe(passedThreshold ? pageAt(step) : undefined, step);
-    },
-    onPanResponderTerminate: () => settleSwipe(),
-    onPanResponderTerminationRequest: () => false,
-  });
 
   const renderDockPage = (page: typeof dockPages[number], children: React.ReactNode, hidesDock = false) => {
+    const index = dockPages.indexOf(page);
     const isActive = activeTab === page;
-    const offset = dockPages.indexOf(page) - pageIndex;
-    // Lay out nearby pages outside the clipped viewport before the gesture starts.
-    const preview = pageIndex >= 0 && Math.abs(offset) === 1 && preparedPageIndex !== null &&
-      Math.abs(dockPages.indexOf(page) - preparedPageIndex) <= 1;
+    const preview = pageIndex >= 0 && (Math.abs(index - pageIndex) === 1 ||
+      (preparedPageIndex !== null && Math.abs(index - preparedPageIndex) <= 1));
     return (
       <View key={page} pointerEvents={isActive ? 'auto' : 'none'}
         accessibilityElementsHidden={!isActive}
         importantForAccessibility={isActive ? 'auto' : 'no-hide-descendants'}
-        style={[StyleSheet.absoluteFill, { left: offset * pageWidth, right: -offset * pageWidth },
-          !isActive && !preview && { display: 'none' }]}>
+        style={{ width: pageWidth, height: '100%' }}>
         <LazyScreen isActive={isActive} preview={preview} onDockHiddenChange={hidesDock ? setDockHidden : undefined}>
           {children}
         </LazyScreen>
@@ -361,9 +336,35 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
         onNavigate={handleNavigate}
       />
 
-      <View {...pageSwipe.panHandlers} style={[styles.screenContainer, { overflow: 'hidden' }]}
-        onLayout={event => setPageWidth(event.nativeEvent.layout.width)}>
-        <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: slideOffset }] }]}>
+      <View style={styles.screenContainer} onLayout={event => setPageWidth(event.nativeEvent.layout.width)}>
+        <ScrollView
+          ref={dockPager}
+          horizontal
+          pagingEnabled
+          nestedScrollEnabled
+          directionalLockEnabled
+          alwaysBounceVertical={false}
+          bounces={false}
+          overScrollMode="never"
+          decelerationRate="fast"
+          snapToInterval={pageWidth || undefined}
+          disableIntervalMomentum
+          showsHorizontalScrollIndicator={false}
+          scrollEnabled={!dockHidden && !isEditingDashboardOrder && Boolean(orgId && currentOrg) && pageWidth > 0}
+          style={[StyleSheet.absoluteFill, pageIndex < 0 && { display: 'none' }]}
+          contentContainerStyle={{ width: pageWidth * dockPages.length }}
+          onMomentumScrollEnd={event => finishDockScroll(event.nativeEvent.contentOffset.x)}
+          onScrollEndDrag={event => {
+            const { contentOffset, velocity } = event.nativeEvent;
+            if (velocity?.x === 0) finishDockScroll(contentOffset.x);
+          }}
+          scrollEventThrottle={Platform.OS === 'web' ? 16 : undefined}
+          onScroll={Platform.OS === 'web' ? event => {
+            const offset = event.nativeEvent.contentOffset.x;
+            if (webScrollEnd.current) clearTimeout(webScrollEnd.current);
+            webScrollEnd.current = setTimeout(() => finishDockScroll(offset), 110);
+          } : undefined}
+        >
           {renderDockPage('dashboard', (
             <DashboardScreen
               onNavigate={handleNavigate}
@@ -373,12 +374,12 @@ function MainAppContent({ onLogout }: { onLogout: () => void }) {
             />
           ), true)}
           {renderDockPage('players', <PlayersScreen initialSegmentTab={playersSubTab} />)}
-          {renderDockPage('standings', <StandingsScreen />)}
-          {renderDockPage('account', <AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} />)}
           {renderDockPage(matchNavTab, matchNavTab === 'matches'
             ? <MatchesScreen />
             : canCreateMatch ? <CreateMatchScreen onSuccess={() => handleNavigate('matches')} /> : null, matchNavTab === 'matches')}
-        </Animated.View>
+          {renderDockPage('standings', <StandingsScreen />)}
+          {renderDockPage('account', <AccountScreen onNavigateToSettings={() => handleNavigate('settings')} onNavigateToOrganizers={() => handleNavigate('organizers')} onLogout={onLogout} />)}
+        </ScrollView>
         <LazyScreen isActive={activeTab === 'export'}><ExportScreen /></LazyScreen>
         <LazyScreen isActive={activeTab === 'applications'}><ApplicationsScreen initialTab={playersSubTab} /></LazyScreen>
         <LazyScreen isActive={activeTab === 'transfers'}><TransfersScreen /></LazyScreen>

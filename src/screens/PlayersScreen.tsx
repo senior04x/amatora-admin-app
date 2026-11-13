@@ -1,3 +1,4 @@
+import { confirmDestructiveAction, showActionMessage } from '../utils/actionConfirmation';
 import { requireOrganizationId } from '../utils/organizationId';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -14,8 +15,6 @@ import {
   ScrollView,
   TextInput,
   Vibration,
-  Animated,
-  PanResponder,
   Platform,
   Alert,
 } from 'react-native';
@@ -51,15 +50,10 @@ const SkeletonCard = () => {
   );
 };
 
-// Telegram-Style Swipeable Player Card Component with Pan Lock & Haptic Feedback
-const SwipeablePlayerCard = ({
+const PlayerListCard = ({
   item,
   isPlayer,
   allTeamsList,
-  isOpen,
-  setIsSwiping,
-  onSwipeOpen,
-  onSwipeClose,
   onOpen,
   onDelete,
   onRestore,
@@ -68,95 +62,6 @@ const SwipeablePlayerCard = ({
   isReadOnlyUser,
 }: any) => {
   const { isDark, colors } = useTheme();
-  const panX = useRef(new Animated.Value(0)).current;
-  const hapticTriggeredRef = useRef(false);
-
-  // Auto-close when another card is opened
-  useEffect(() => {
-    if (!isOpen) {
-      Animated.spring(panX, {
-        toValue: 0,
-        useNativeDriver: true,
-        bounciness: 4,
-      }).start();
-    }
-  }, [isOpen]);
-
-  const triggerHaptic = () => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch (e) {
-      Vibration.vibrate(25);
-    }
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        if (isReadOnlyUser) return false;
-        // Only capture gesture if horizontal swipe is clearly dominant
-        return Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dy) < 8;
-      },
-      onPanResponderGrant: () => {
-        if (setIsSwiping) setIsSwiping(true);
-        hapticTriggeredRef.current = false;
-        onSwipeOpen();
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dx < 0) {
-          if (gestureState.dx <= -85 && !hapticTriggeredRef.current) {
-            triggerHaptic();
-            hapticTriggeredRef.current = true;
-          }
-          panX.setValue(Math.max(gestureState.dx, -120));
-        } else {
-          panX.setValue(0);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        setIsSwiping(false);
-        if (gestureState.dx < -55) {
-          Animated.spring(panX, {
-            toValue: -85,
-            useNativeDriver: true,
-            bounciness: 4,
-          }).start(() => {
-            onSwipeOpen();
-          });
-        } else {
-          Animated.spring(panX, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 4,
-          }).start(() => {
-            onSwipeClose();
-          });
-        }
-      },
-      onPanResponderTerminate: () => {
-        setIsSwiping(false);
-        Animated.spring(panX, {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start(() => {
-          onSwipeClose();
-        });
-      },
-    })
-  ).current;
-
-  const resetSwipe = () => {
-    Animated.spring(panX, {
-      toValue: 0,
-      useNativeDriver: true,
-    }).start(() => {
-      onSwipeClose();
-    });
-  };
-
   const name = isPlayer
     ? item.full_name || `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.name
     : item.name;
@@ -196,125 +101,90 @@ const SwipeablePlayerCard = ({
     displayLeague = item.team?.league || item.league || item.league_name || commentLeague || '';
   }
 
-  const deleteOpacity = panX.interpolate({
-    inputRange: [-85, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  const animScale = useRef(new Animated.Value(1)).current;
-  const animTranslateY = useRef(new Animated.Value(0)).current;
-  const animOpacity = useRef(new Animated.Value(1)).current;
-
-  const handleArchiveWithAnim = () => {
-    resetSwipe();
-    Animated.parallel([
-      Animated.timing(animScale, { toValue: 0.05, duration: 320, useNativeDriver: true }),
-      Animated.timing(animTranslateY, { toValue: -60, duration: 320, useNativeDriver: true }),
-      Animated.timing(animOpacity, { toValue: 0, duration: 320, useNativeDriver: true }),
-    ]).start(() => {
-      onDelete(item);
-    });
+  const requestArchive = isReadOnlyUser || isArchived ? undefined : () => {
+    if (Platform.OS !== 'web') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => Vibration.vibrate(25));
+    }
+    confirmDestructiveAction(
+      'Arxivlansinmi?',
+      isPlayer ? 'O‘yinchi arxivga o‘tkaziladi.' : 'Jamoa arxivga o‘tkaziladi.',
+      'Arxivlash',
+      () => onDelete(item, isPlayer),
+    );
   };
 
   return (
-    <View style={styles.swipeContainer}>
-      {/* Hidden Red Delete Action Button behind Card (Fades in ONLY when swiped) */}
-      <Animated.View style={[styles.deleteActionBack, { opacity: deleteOpacity }]}>
+    <View style={[styles.cardItem, Platform.OS === 'android' && {
+      borderColor: colors.border,
+      backgroundColor: colors.bgCard,
+    }]}>
+      {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
+      <View style={styles.cardInnerRow}>
+        {/* Left Photo Touch */}
         <TouchableOpacity
-          style={{ flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-          onPress={handleArchiveWithAnim}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
+          delayPressIn={0}
+          onPress={() => {
+            if (onImagePress) onImagePress(avatar);
+          }}
+          onLongPress={requestArchive}
         >
-          <Ionicons name="archive" size={22} color="#FFFFFF" />
-          <Text style={styles.deleteActionText}>{"Arxivlash"}</Text>
+          <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={[styles.avatarImage, { backgroundColor: isDark ? '#1E293B' : colors.bgCardElevated }]} />
         </TouchableOpacity>
-      </Animated.View>
 
-      {/* Foreground Card Item */}
-      <Animated.View
-        style={[
-          styles.cardItem,
-          Platform.OS === 'android' && {
-            borderColor: colors.border,
-            backgroundColor: colors.bgCard,
-          },
-          {
-            transform: [
-              { translateX: panX },
-              { translateY: animTranslateY },
-              { scale: animScale },
-            ],
-            opacity: animOpacity,
-          }
-        ]}
-        {...panResponder.panHandlers}
-      >
-        {Platform.OS === 'ios' && <BlurView intensity={80} tint="dark" experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />}
-        <View style={styles.cardInnerRow}>
-          {/* Left Photo Touch */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            delayPressIn={0}
-            onPress={() => {
-              if (onImagePress) onImagePress(avatar);
-            }}
-          >
-            <ExpoImage cachePolicy='memory-disk' source={{ uri: avatar }} style={[styles.avatarImage, { backgroundColor: isDark ? '#1E293B' : colors.bgCardElevated }]} />
-          </TouchableOpacity>
+        {/* Right Details Touch */}
+        <TouchableOpacity
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+          onPress={() => onOpen(item, isPlayer)}
+          onLongPress={requestArchive}
+          accessibilityActions={requestArchive ? [{ name: 'archive', label: 'Arxivlash' }] : undefined}
+          onAccessibilityAction={event => {
+            if (event.nativeEvent.actionName === 'archive') requestArchive?.();
+          }}
+          activeOpacity={0.7}
+          delayPressIn={0}
+        >
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={[styles.titleText, { color: colors.textPrimary }]} numberOfLines={1}>
+              {name}
+            </Text>
 
-          {/* Right Details Touch */}
-          <TouchableOpacity
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-            onPress={() => {
-              resetSwipe();
-              onOpen(item, isPlayer);
-            }}
-            activeOpacity={0.7}
-            delayPressIn={0}
-          >
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={[styles.titleText, { color: colors.textPrimary }]} numberOfLines={1}>
-                {name}
+            {isPlayer ? (
+              <Text style={[styles.subText, { color: colors.textSecondary, fontWeight: '800' }]} numberOfLines={1}>
+                {`Jamoa: ${displayTeam}`}
               </Text>
+            ) : null}
 
-              {isPlayer ? (
-                <Text style={[styles.subText, { color: colors.textSecondary, fontWeight: '800' }]} numberOfLines={1}>
-                  {`Jamoa: ${displayTeam}`}
-                </Text>
-              ) : null}
+            {displayLeague ? (
+              <Text style={[styles.subText, { color: colors.textMuted }]} numberOfLines={1}>
+                {`Liga: ${displayLeague}`}
+              </Text>
+            ) : null}
+          </View>
 
-              {displayLeague ? (
-                <Text style={[styles.subText, { color: colors.textMuted }]} numberOfLines={1}>
-                  {`Liga: ${displayLeague}`}
-                </Text>
-              ) : null}
-            </View>
-
-            {isArchived ? (
-              <TouchableOpacity
-                style={{
-                  backgroundColor: isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5',
-                  borderColor: colors.accentGreen,
-                  borderWidth: 1,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  borderRadius: 10,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-                onPress={() => onRestore && onRestore(item)}
-              >
-                <Ionicons name="refresh-outline" size={14} color={colors.accentGreen} />
-                <Text style={{ color: colors.accentGreen, fontSize: 11, fontWeight: '800' }}>{"Qaytarish"}</Text>
-              </TouchableOpacity>
-            ) : (
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            )}
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
+          {isArchived ? (
+            <TouchableOpacity
+              style={{
+                backgroundColor: isDark ? 'rgba(74, 222, 128, 0.18)' : '#ECFDF5',
+                borderColor: colors.accentGreen,
+                borderWidth: 1,
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 10,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              onPress={() => onRestore && onRestore(item)}
+            >
+              <Ionicons name="refresh-outline" size={14} color={colors.accentGreen} />
+              <Text style={{ color: colors.accentGreen, fontSize: 11, fontWeight: '800' }}>{"Qaytarish"}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          )}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -454,8 +324,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
   const [showArchiveFilterModal, setShowArchiveFilterModal] = useState(false);
 
   // Single Open Card & Swipe Scroll Lock State
-  const [openSwipeableId, setOpenSwipeableId] = useState<string | null>(null);
-  const [isSwiping, setIsSwiping] = useState<boolean>(false);
 
   // Selection Detail Modal State & Editable Form State
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
@@ -1077,36 +945,35 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
     });
   };
 
-  // Execute Direct Archiving without warning dialogs
-  const executeDirectArchive = async (itemToArchive: any) => {
-    if (!itemToArchive) return;
-    const isPlayer = activeTab === 'players';
-    const dbClient = supabase;
+  const executeDirectArchive = async (item: any, isPlayer: boolean) => {
+    if (!item || isReadOnlyUser || !orgId) return;
+    try {
+      const organizationId = requireOrganizationId(orgId);
+      const { data, error } = await supabase.from(isPlayer ? 'applications' : 'teams')
+        .update({ is_archived: true, status: 'archived' })
+        .eq('id', item.id)
+        .eq('organization_id', organizationId)
+        .select('id')
+        .single();
+      if (error || !data) throw error ?? new Error('Archive update not saved');
 
-    if (isPlayer) {
-      // 1. Add to archived list in RAM
-      setArchivedPlayers((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
-
-      // 2. Update DB in background
-      try {
-        await dbClient.from('applications').update({ is_archived: true, status: 'archived' }).eq('id', itemToArchive.id);
-      } catch (e) {
-        await dbClient.from('applications').update({ status: 'archived' }).eq('id', itemToArchive.id);
+      const archivedItem = { ...item, is_archived: true, status: 'archived' };
+      if (isPlayer) {
+        setAccumulatedPlayers(prev => prev.filter(player => String(player.id) !== String(item.id)));
+        setArchivedPlayers(prev => [archivedItem, ...prev.filter(player => String(player.id) !== String(item.id))]);
+      } else {
+        setAccumulatedTeams(prev => prev.filter(team => String(team.id) !== String(item.id)));
+        setArchivedTeams(prev => [archivedItem, ...prev.filter(team => String(team.id) !== String(item.id))]);
       }
-    } else {
-      setAccumulatedTeams((prev) => prev.filter((t) => String(t.id) !== String(itemToArchive.id)));
-      setArchivedTeams((prev) => [{ ...itemToArchive, is_archived: true, status: 'archived' }, ...prev]);
 
-      try {
-        await dbClient.from('teams').update({ is_archived: true, status: 'archived' }).eq('id', itemToArchive.id);
-      } catch (e) {}
+      setToastMsg('Muvaffaqiyatli arxivlandi!');
+      setTimeout(() => setToastMsg(null), 2500);
+      void queryClient.invalidateQueries({ queryKey: [isPlayer ? 'players' : 'teams', organizationId] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard', organizationId] });
+      void fetchTotalCounts();
+    } catch {
+      showActionMessage('Xatolik', 'Arxivlab bo‘lmadi. Qayta urinib ko‘ring.');
     }
-
-    setToastMsg("Muvaffaqiyatli arxivlandi! 📦");
-    setTimeout(() => setToastMsg(null), 2500);
-    queryClient.invalidateQueries({ queryKey: ['players', requireOrganizationId(orgId)] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard', requireOrganizationId(orgId)] });
-    fetchTotalCounts();
   };
 
   // Delete Handlers for Countdown Modal
@@ -1714,11 +1581,6 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
           maxToRenderPerBatch={15}
           windowSize={7}
           removeClippedSubviews={Platform.OS === 'android'}
-          onScrollBeginDrag={() => {
-            if (openSwipeableId) {
-              setOpenSwipeableId(null);
-            }
-          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accentGreen} />
           }
@@ -1766,16 +1628,10 @@ export const PlayersScreen: React.FC<Props> = ({ onNavigate, initialSegmentTab }
             ) : undefined
           }
           renderItem={({ item }) => (
-            <SwipeablePlayerCard
+            <PlayerListCard
               item={item}
               isPlayer={activeTab === 'players'}
               allTeamsList={allTeamsList}
-              isOpen={openSwipeableId === item.id}
-              setIsSwiping={setIsSwiping}
-              onSwipeOpen={() => setOpenSwipeableId(item.id)}
-              onSwipeClose={() => {
-                if (openSwipeableId === item.id) setOpenSwipeableId(null);
-              }}
               onOpen={handleOpenItem}
               onDelete={executeDirectArchive}
               onRestore={(player: any) => handleRestorePlayer(player)}
@@ -2622,32 +2478,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.4)',
     fontSize: 13.5,
     fontWeight: '600',
-  },
-
-  // Swipeable Container & Actions
-  swipeContainer: {
-    position: 'relative',
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: 'transparent',
-  },
-  deleteActionBack: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 85,
-    backgroundColor: '#FF3B30',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    borderRadius: 16,
-    zIndex: 1,
-  },
-  deleteActionText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800',
   },
 
   // Image Preview Modal Styles (Pinch-to-zoom matching ApplicationsScreen)
